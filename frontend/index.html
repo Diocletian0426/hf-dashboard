@@ -52,8 +52,8 @@
       if (p.critical_open_issues > 0) chips.push('<span class="badge badge-critical">' + p.critical_open_issues + " critical!</span>");
       chips.push('<span class="badge ' + (p.open_issues > 0 ? "badge-medium" : "badge-gray") + '">' + (p.open_issues || 0) + " issues</span>");
       if (p.tests_overdue > 0) chips.push('<span class="badge badge-rejected">' + p.tests_overdue + " tests overdue</span>");
-      chips.push('<span class="badge badge-gray">' + (p.machines_on_site || 0) + " machines</span>');
-      chips.push('<span class="badge badge-gray">' + (p.workers_assigned || 0) + " workers</span>');
+      chips.push('<span class="badge badge-gray">' + (p.machines_on_site || 0) + " machines</span>");
+      chips.push('<span class="badge badge-gray">' + (p.workers_assigned || 0) + " workers</span>");
       if (daysLeft !== null && daysLeft !== undefined)
         chips.push('<span class="badge ' + (daysLeft < 0 ? "badge-rejected" : "badge-gray") + '">' +
                    (daysLeft < 0 ? Math.abs(daysLeft) + " days OVER" : daysLeft + " days left") + "</span>");
