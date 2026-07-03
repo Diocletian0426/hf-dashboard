@@ -98,5 +98,14 @@
     if (typeof window.onShellReady === "function") window.onShellReady(profile);
   }
 
-  boot();
+  // never fail silently — paint any startup error onto the page
+  boot().catch(function (e) {
+    var main = document.getElementById("main");
+    if (main) {
+      main.innerHTML =
+        '<div class="banner banner-red">Dashboard failed to start: ' +
+        (e && e.message ? e.message : e) +
+        "<br>Try a hard refresh (Ctrl+F5). If it persists, send this message to the office.</div>";
+    }
+  });
 })();
