@@ -25,7 +25,7 @@
                                                      issues, last-report date, machines/workers
                                                      on site (the Overview page's cards)
    await Dash.getOverview()                       -> ONE row of company-wide "today" stats
-   await Dash.getProjects()                       -> per-project progress rows
+   await Dash.getProjects()                       -> per-project progress rows (BP line, all statuses)
    await Dash.getPileRegister(projectId, status?) -> per-pile design-vs-actual rows
    await Dash.getIssues(status?)                  -> issue board ('open' default = open+in_progress,
                                                      'all', or an exact status)
@@ -107,7 +107,9 @@
   }
 
   function getProjects() {
-    return q(sb.from("v_project_progress").select("*")
+    // v_project_pulse = bored-piling projects only (all statuses) — the whole
+    // dashboard is scoped to the HF Bored Piles line for now.
+    return q(sb.from("v_project_pulse").select("*")
       .order("project_status").order("project_code"));
   }
 
