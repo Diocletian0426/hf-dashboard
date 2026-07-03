@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HF Dashboard — Sign in</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <div class="login-wrap">
+    <div class="login-card">
+      <h1>HF Dashboard</h1>
+      <p class="sub">Office sign in. Accounts are created by the office — there is no self-registration.</p>
+
+      <form id="login-form">
+        <label for="email">Email</label>
+        <input id="email" type="email" autocomplete="username" required />
+
+        <label for="password">Password</label>
+        <input id="password" type="password" autocomplete="current-password" required />
+
+        <button id="login-btn" type="submit">Sign in</button>
+        <div id="login-error" class="login-error"></div>
+      </form>
+    </div>
+  </div>
+
+  <!-- libraries: supabase (local copy), connection details, then the engine -->
+  <script src="vendor/supabase.js"></script>
+  <script src="config.js"></script>
+  <script src="dashboard-client.js"></script>
+
+  <script>
+    // already signed in? go straight to the dashboard
+    Dash.getUser().then(function (user) {
+      if (user) window.location.replace("index.html");
+    });
+
+    document.getElementById("login-form").addEventListener("submit", async function (e) {
+      e.preventDefault();
+      var btn = document.getElementById("login-btn");
+      var err = document.getElementById("login-error");
+      err.textContent = "";
+      btn.disabled = true; btn.textContent = "Signing in…";
+
+      var res = await Dash.signIn(
+        document.getElementById("email").value.trim(),
+        document.getElementById("password").value
+      );
+
+      if (res.ok) {
+        window.location.replace("index.html");
+      } else {
+        // Supabase says "Invalid login credentials" for wrong email OR password
+        err.textContent = res.message || "Could not sign in. Try again.";
+        btn.disabled = false; btn.textContent = "Sign in";
+      }
+    });
+  </script>
+</body>
+</html>

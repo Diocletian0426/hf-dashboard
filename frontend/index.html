@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HF Dashboard — Overview</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <header id="nav"></header>
+
+  <main id="main">
+    <h1>Overview</h1>
+    <p class="page-caption">Today (Malaysia time) — live from the operations database.</p>
+    <div id="cards" class="cards"><div class="empty">Loading…</div></div>
+    <div id="error"></div>
+  </main>
+
+  <script src="vendor/supabase.js"></script>
+  <script src="config.js"></script>
+  <script src="dashboard-client.js"></script>
+  <script src="shell.js"></script>
+
+  <script>
+    // shell.js calls this once login + page access are confirmed
+    window.onShellReady = async function () {
+      var cards = document.getElementById("cards");
+      try {
+        var o = await Dash.getOverview();
+
+        // [label, value, alert-when-positive]
+        var stats = [
+          ["Active projects",        o.active_projects,          false],
+          ["Piles cast today",       o.piles_cast_today,         false],
+          ["Piles bored today",      o.piles_bored_today,        false],
+          ["Meters drilled today",   o.meters_drilled_today,     false],
+          ["Diesel today (L)",       o.diesel_litres_today,      false],
+          ["Active machines",        o.active_machines,          false],
+          ["In maintenance",         o.machines_in_maintenance,  false],
+          ["Breakdowns today",       o.machines_breakdown_today, true ],
+          ["Open issues",            o.open_issues,              false],
+          ["Critical issues",        o.critical_issues,          true ],
+          ["Tests ready to schedule",o.tests_ready_to_schedule,  false],
+          ["Tests overdue",          o.tests_overdue,            true ]
+        ];
+
+        cards.innerHTML = stats.map(function (s) {
+          var v = (s[1] === null || s[1] === undefined) ? 0 : s[1];
+          var alert = s[2] && Number(v) > 0;
+          return '<div class="card' + (alert ? " alert" : "") + '">' +
+                   '<div class="label">' + s[0] + "</div>" +
+                   '<div class="value">' + v + "</div>" +
+                 "</div>";
+        }).join("");
+      } catch (e) {
+        cards.innerHTML = "";
+        document.getElementById("error").innerHTML =
+          '<div class="banner banner-red">Could not load: ' + (e.message || e) + "</div>";
+      }
+    };
+  </script>
+</body>
+</html>
