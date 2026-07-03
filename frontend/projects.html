@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HF Dashboard — Projects</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <header id="nav"></header>
+
+  <main id="main">
+    <h1>Projects</h1>
+    <p class="page-caption">All registered projects. Click a row to open its pile register (design vs actual).</p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Code</th><th>Project</th><th>Client</th><th>Status</th>
+            <th>Progress</th><th class="num">Done</th><th class="num">In&nbsp;progress</th>
+            <th class="num">Registered</th><th class="num">Tests overdue</th>
+            <th class="num">Open issues</th><th class="num">Days left</th>
+          </tr>
+        </thead>
+        <tbody id="rows"><tr><td colspan="11" class="empty">Loading…</td></tr></tbody>
+      </table>
+    </div>
+    <div id="error"></div>
+  </main>
+
+  <script src="vendor/supabase.js"></script>
+  <script src="config.js"></script>
+  <script src="dashboard-client.js"></script>
+  <script src="shell.js"></script>
+
+  <script>
+    window.onShellReady = async function () {
+      var tbody = document.getElementById("rows");
+      try {
+        var rows = await Dash.getProjects();
+        if (!rows.length) { tbody.innerHTML = '<tr><td colspan="11" class="empty">No projects.</td></tr>'; return; }
+
+        tbody.innerHTML = rows.map(function (p) {
+          var pct = Math.max(0, Math.min(100, Number(p.progress_pct) || 0));
+          var total = p.total_piles_planned || p.total_piles_registered || 0;
+          var daysLeft = p.days_remaining;
+          return "<tr onclick=\"location.href='piles.html?project=" + p.project_id + "'\" style=\"cursor:pointer\">" +
+            "<td><strong>" + p.project_code + "</strong></td>" +
+            '<td class="wrap">' + (p.project_name || "") + "</td>" +
+            '<td class="wrap">' + (p.client_name || "") + "</td>" +
+            '<td><span class="badge badge-' + (p.project_status === "active" ? "approved" : "gray") + '">' + p.project_status + "</span></td>" +
+            '<td><span class="bar"><span style="width:' + pct + '%"></span></span> ' + pct + "%</td>" +
+            '<td class="num">' + (p.piles_completed || 0) + "</td>" +
+            '<td class="num">' + (p.piles_in_progress || 0) + "</td>" +
+            '<td class="num">' + total + "</td>" +
+            '<td class="num' + (p.tests_overdue > 0 ? " neg" : "") + '">' + (p.tests_overdue || 0) + "</td>" +
+            '<td class="num' + (p.open_issues > 0 ? " bold" : "") + '">' + (p.open_issues || 0) + "</td>" +
+            '<td class="num' + (daysLeft !== null && daysLeft < 0 ? " neg" : "") + '">' +
+              (daysLeft === null || daysLeft === undefined ? "—" : daysLeft) + "</td>" +
+          "</tr>";
+        }).join("");
+      } catch (e) {
+        tbody.innerHTML = "";
+        document.getElementById("error").innerHTML =
+          '<div class="banner banner-red">Could not load: ' + (e.message || e) + "</div>";
+      }
+    };
+  </script>
+</body>
+</html>

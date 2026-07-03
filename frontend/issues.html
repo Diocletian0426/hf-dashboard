@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HF Dashboard — Issues</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <header id="nav"></header>
+
+  <main id="main">
+    <h1>Site issues</h1>
+    <p class="page-caption">Reported from the sites via the WhatsApp bot. Most urgent first.</p>
+
+    <div class="filters" id="filters"></div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th class="num">#</th><th>Project</th><th>Title</th><th>Category</th>
+            <th>Priority</th><th>Status</th><th>Assigned to</th>
+            <th class="num">Days open</th><th>Latest action</th><th>Machine</th>
+          </tr>
+        </thead>
+        <tbody id="rows"><tr><td colspan="10" class="empty">Loading…</td></tr></tbody>
+      </table>
+    </div>
+    <div id="error"></div>
+  </main>
+
+  <script src="vendor/supabase.js"></script>
+  <script src="config.js"></script>
+  <script src="dashboard-client.js"></script>
+  <script src="shell.js"></script>
+
+  <script>
+    var FILTERS = [
+      ["open",     "Open + in progress"],
+      ["resolved", "Resolved"],
+      ["closed",   "Closed"],
+      ["all",      "All"]
+    ];
+
+    window.onShellReady = async function () {
+      var status = new URLSearchParams(location.search).get("status") || "open";
+
+      document.getElementById("filters").innerHTML = FILTERS.map(function (f) {
+        var current = f[0] === status;
+        return current
+          ? '<span class="badge badge-in_progress">' + f[1] + "</span>"
+          : '<a href="issues.html?status=' + f[0] + '">' + f[1] + "</a>";
+      }).join(" · ");
+
+      var tbody = document.getElementById("rows");
+      try {
+        var rows = await Dash.getIssues(status);
+        if (!rows.length) { tbody.innerHTML = '<tr><td colspan="10" class="empty">No issues for this filter.</td></tr>'; return; }
+
+        tbody.innerHTML = rows.map(function (i) {
+          return "<tr>" +
+            '<td class="num">' + (i.issue_number || "") + "</td>" +
+            "<td>" + (i.project_code || "") + "</td>" +
+            '<td class="wrap" title="' + String(i.description || "").replace(/"/g, "&quot;") + '">' + (i.title || "") + "</td>" +
+            "<td>" + (i.category || "") + "</td>" +
+            '<td><span class="badge badge-' + (i.priority || "low") + '">' + (i.priority || "") + "</span></td>" +
+            '<td><span class="badge badge-' + (i.status || "gray") + '">' + (i.status || "") + "</span></td>" +
+            "<td>" + (i.assigned_to_name_resolved || "—") + "</td>" +
+            '<td class="num' + (i.days_open > 14 ? " neg" : "") + '">' + (i.days_open === null || i.days_open === undefined ? "" : i.days_open) + "</td>" +
+            '<td class="wrap">' + (i.latest_action || "—") + "</td>" +
+            "<td>" + (i.machine_code || "") + "</td>" +
+          "</tr>";
+        }).join("");
+      } catch (e) {
+        tbody.innerHTML = "";
+        document.getElementById("error").innerHTML =
+          '<div class="banner banner-red">Could not load: ' + (e.message || e) + "</div>";
+      }
+    };
+  </script>
+</body>
+</html>

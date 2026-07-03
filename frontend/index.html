@@ -12,8 +12,13 @@
 
   <main id="main">
     <h1>Overview</h1>
-    <p class="page-caption">Today (Malaysia time) — live from the operations database.</p>
-    <div id="cards" class="cards"><div class="empty">Loading…</div></div>
+    <p id="freshness" class="page-caption">Loading…</p>
+
+    <div id="cards" class="pcards"></div>
+
+    <h2 class="section-title">Needs attention</h2>
+    <div id="attention" class="cards"></div>
+
     <div id="error"></div>
   </main>
 
@@ -23,38 +28,92 @@
   <script src="shell.js"></script>
 
   <script>
-    // shell.js calls this once login + page access are confirmed
+    // ---- how stale is a site's last report? ----
+    function reportHealth(lastDate) {
+      if (!lastDate) return { cls: "status-bad", text: "never reported" };
+      var days = Math.round((new Date(Dash.todayKL()) - new Date(lastDate)) / 86400000);
+      if (days <= 1) return { cls: "status-ok",   text: lastDate + " ✓" };
+      if (days <= 3) return { cls: "status-warn", text: lastDate + " (" + days + " days ago)" };
+      return { cls: "status-bad", text: lastDate + " (" + days + " days ago!)" };
+    }
+
+    function projectCard(p) {
+      var health = reportHealth(p.last_report_date);
+      var total  = p.total_piles_planned || p.total_piles_registered || 0;
+      var pct    = Math.max(0, Math.min(100, Number(p.progress_pct) || 0));
+      var daysLeft = p.days_remaining;
+
+      var activity = p.last_report_date
+        ? '<div class="pcard-line muted-line">On ' + p.last_report_date + ": bored " +
+          (p.piles_bored_on_last_report || 0) + " · cast " + (p.piles_cast_on_last_report || 0) + "</div>"
+        : "";
+
+      var chips = [];
+      if (p.critical_open_issues > 0) chips.push('<span class="badge badge-critical">' + p.critical_open_issues + " critical!</span>");
+      chips.push('<span class="badge ' + (p.open_issues > 0 ? "badge-medium" : "badge-gray") + '">' + (p.open_issues || 0) + " issues</span>");
+      if (p.tests_overdue > 0) chips.push('<span class="badge badge-rejected">' + p.tests_overdue + " tests overdue</span>");
+      chips.push('<span class="badge badge-gray">' + (p.machines_on_site || 0) + " machines</span>');
+      chips.push('<span class="badge badge-gray">' + (p.workers_assigned || 0) + " workers</span>');
+      if (daysLeft !== null && daysLeft !== undefined)
+        chips.push('<span class="badge ' + (daysLeft < 0 ? "badge-rejected" : "badge-gray") + '">' +
+                   (daysLeft < 0 ? Math.abs(daysLeft) + " days OVER" : daysLeft + " days left") + "</span>");
+
+      return (
+        '<a class="pcard" href="piles.html?project=' + p.project_id + '">' +
+          '<div class="pcard-head">' +
+            "<strong>" + p.project_code + "</strong> " + (p.project_name || "") +
+          "</div>" +
+          '<div class="pcard-line"><span class="dot ' + health.cls + '"></span>Last report: ' + health.text + "</div>" +
+          '<div class="pcard-line">' +
+            '<span class="bar"><span style="width:' + pct + '%"></span></span> ' +
+            "<span>" + pct + "% (" + (p.piles_completed || 0) + "/" + total + " piles)</span>" +
+          "</div>" +
+          activity +
+          '<div class="pcard-chips">' + chips.join(" ") + "</div>" +
+        "</a>"
+      );
+    }
+
     window.onShellReady = async function () {
-      var cards = document.getElementById("cards");
+      var cardsEl = document.getElementById("cards");
       try {
-        var o = await Dash.getOverview();
+        var pulseP = Dash.getProjectPulse();
+        var leaveP = Dash.getLeaveRequests(Dash.currentYearKL(), "pending").catch(function () { return null; });
+        var pulse  = await pulseP;
 
-        // [label, value, alert-when-positive]
-        var stats = [
-          ["Active projects",        o.active_projects,          false],
-          ["Piles cast today",       o.piles_cast_today,         false],
-          ["Piles bored today",      o.piles_bored_today,        false],
-          ["Meters drilled today",   o.meters_drilled_today,     false],
-          ["Diesel today (L)",       o.diesel_litres_today,      false],
-          ["Active machines",        o.active_machines,          false],
-          ["In maintenance",         o.machines_in_maintenance,  false],
-          ["Breakdowns today",       o.machines_breakdown_today, true ],
-          ["Open issues",            o.open_issues,              false],
-          ["Critical issues",        o.critical_issues,          true ],
-          ["Tests ready to schedule",o.tests_ready_to_schedule,  false],
-          ["Tests overdue",          o.tests_overdue,            true ]
+        // freshness line: latest report anywhere + how many sites reported that day
+        var dates = pulse.map(function (p) { return p.last_report_date; }).filter(Boolean).sort();
+        var latest = dates.length ? dates[dates.length - 1] : null;
+        var reportedOnLatest = pulse.filter(function (p) { return p.last_report_date === latest; }).length;
+        document.getElementById("freshness").textContent = latest
+          ? "Latest site report: " + latest + " — " + reportedOnLatest + " of " + pulse.length +
+            " active sites reported that day. Site reports arrive nightly (~10:30pm)."
+          : "No site reports found yet.";
+
+        cardsEl.innerHTML = pulse.length
+          ? pulse.map(projectCard).join("")
+          : '<div class="empty">No active projects.</div>';
+
+        // ---- needs-attention totals ----
+        var silent   = pulse.filter(function (p) { return reportHealth(p.last_report_date).cls !== "status-ok"; }).length;
+        var critical = pulse.reduce(function (s, p) { return s + (p.critical_open_issues || 0); }, 0);
+        var overdue  = pulse.reduce(function (s, p) { return s + (p.tests_overdue || 0); }, 0);
+        var pending  = await leaveP;   // null if this account can't read leave
+
+        var att = [
+          ["Sites silent > 1 day", silent],
+          ["Critical issues", critical],
+          ["Tests overdue", overdue]
         ];
+        if (pending !== null) att.push(["Leave requests pending", pending.length]);
 
-        cards.innerHTML = stats.map(function (s) {
-          var v = (s[1] === null || s[1] === undefined) ? 0 : s[1];
-          var alert = s[2] && Number(v) > 0;
-          return '<div class="card' + (alert ? " alert" : "") + '">' +
-                   '<div class="label">' + s[0] + "</div>" +
-                   '<div class="value">' + v + "</div>" +
+        document.getElementById("attention").innerHTML = att.map(function (a) {
+          return '<div class="card' + (a[1] > 0 ? " alert" : "") + '">' +
+                   '<div class="label">' + a[0] + "</div>" +
+                   '<div class="value">' + a[1] + "</div>" +
                  "</div>";
         }).join("");
       } catch (e) {
-        cards.innerHTML = "";
         document.getElementById("error").innerHTML =
           '<div class="banner banner-red">Could not load: ' + (e.message || e) + "</div>";
       }

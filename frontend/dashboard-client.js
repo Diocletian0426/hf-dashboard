@@ -21,6 +21,9 @@
 
    DATA COMMANDS (each returns an array of rows — or throws with .message)
    -----------------------------------------------------------------------------
+   await Dash.getProjectPulse()                   -> one row per ACTIVE project: progress,
+                                                     issues, last-report date, machines/workers
+                                                     on site (the Overview page's cards)
    await Dash.getOverview()                       -> ONE row of company-wide "today" stats
    await Dash.getProjects()                       -> per-project progress rows
    await Dash.getPileRegister(projectId, status?) -> per-pile design-vs-actual rows
@@ -95,6 +98,12 @@
   // ---- data ------------------------------------------------------------------
   function getOverview() {
     return q(sb.from("v_company_overview").select("*").single());
+  }
+
+  function getProjectPulse() {
+    return q(sb.from("v_project_pulse").select("*")
+      .eq("project_status", "active")
+      .order("project_code"));
   }
 
   function getProjects() {
@@ -199,6 +208,7 @@
     getMyProfile: getMyProfile,
 
     getOverview: getOverview,
+    getProjectPulse: getProjectPulse,
     getProjects: getProjects,
     getPileRegister: getPileRegister,
     getIssues: getIssues,
