@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HF Dashboard — Machines</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <header id="nav"></header>
+
+  <main id="main">
+    <h1>Machine fleet</h1>
+    <p class="page-caption">
+      Status and diesel from the nightly machine reports. Hour-based "service due" tracking
+      stays blank until daily hour-meter readings start flowing from the sites.
+    </p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Code</th><th>Type</th><th>Brand / model</th><th>Status</th>
+            <th>Site</th><th>Today</th>
+            <th class="num" title="Latest hour-meter reading">Hours</th>
+            <th class="num" title="Hours until next routine service">To service</th>
+            <th class="num" title="Diesel consumed, last 7 days (L)">Diesel 7d</th>
+            <th class="num">Open issues</th>
+            <th title="Latest service of any kind">Last service</th>
+          </tr>
+        </thead>
+        <tbody id="rows"><tr><td colspan="11" class="empty">Loading…</td></tr></tbody>
+      </table>
+    </div>
+    <div id="error"></div>
+  </main>
+
+  <script src="vendor/supabase.js"></script>
+  <script src="config.js"></script>
+  <script src="dashboard-client.js"></script>
+  <script src="shell.js"></script>
+
+  <script>
+    window.onShellReady = async function () {
+      var tbody = document.getElementById("rows");
+      try {
+        var rows = await Dash.getMachines();
+        if (!rows.length) { tbody.innerHTML = '<tr><td colspan="11" class="empty">No machines.</td></tr>'; return; }
+
+        tbody.innerHTML = rows.map(function (m) {
+          var toService = (m.hours_to_service === null || m.hours_to_service === undefined)
+            ? "—"
+            : Math.round(m.hours_to_service);
+          var overdue = m.hour_service_overdue === true;
+          var statusCls = m.machine_status === "active" ? "approved"
+                        : m.machine_status === "maintenance" ? "in_progress"
+                        : m.machine_status === "decommissioned" ? "gray" : "medium";
+          return "<tr>" +
+            "<td><strong>" + (m.machine_code || "") + "</strong></td>" +
+            "<td>" + (m.machine_type || "") + "</td>" +
+            '<td class="wrap">' + [m.brand, m.model].filter(Boolean).join(" ") + "</td>" +
+            '<td><span class="badge badge-' + statusCls + '">' + (m.machine_status || "") + "</span></td>" +
+            "<td>" + (m.current_site || "—") + "</td>" +
+            "<td>" + (m.today_status
+                ? '<span class="badge badge-' + (m.today_status === "breakdown" ? "breakdown" : "gray") + '">' + m.today_status + "</span>"
+                : "—") + "</td>" +
+            '<td class="num">' + (m.current_hour_meter === null || m.current_hour_meter === undefined ? "—" : Math.round(m.current_hour_meter)) + "</td>" +
+            '<td class="num' + (overdue ? " neg" : "") + '">' + (overdue ? "OVERDUE" : toService) + "</td>" +
+            '<td class="num">' + (m.diesel_last_7_days === null || m.diesel_last_7_days === undefined ? "—" : Math.round(m.diesel_last_7_days)) + "</td>" +
+            '<td class="num' + (m.open_issues > 0 ? " bold" : "") + '">' + (m.open_issues || 0) + "</td>" +
+            "<td>" + (m.last_touched_date || "—") + "</td>" +
+          "</tr>";
+        }).join("");
+      } catch (e) {
+        tbody.innerHTML = "";
+        document.getElementById("error").innerHTML =
+          '<div class="banner banner-red">Could not load: ' + (e.message || e) + "</div>";
+      }
+    };
+  </script>
+</body>
+</html>

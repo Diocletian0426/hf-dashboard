@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HF Dashboard — Attendance</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <header id="nav"></header>
+
+  <main id="main">
+    <h1>Attendance</h1>
+    <p class="page-caption">GPS-verified punches from the worker punch app. Times are Malaysia time.</p>
+
+    <div id="geofence-banner"></div>
+
+    <div class="filters">
+      <label>Date <input type="date" id="f-date" /></label>
+      <label>Site
+        <select id="f-site"><option value="">All sites</option></select>
+      </label>
+      <a id="punch-toggle" href="#">Show raw punches</a>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Worker</th><th>Site</th><th>In</th><th>Out</th>
+            <th class="num">Hours</th><th>Flags</th>
+          </tr>
+        </thead>
+        <tbody id="rows"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
+      </table>
+    </div>
+
+    <div id="punches-section" style="display:none">
+      <h2 class="section-title">Raw punches</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Time</th><th>Worker</th><th>Type</th><th>Site</th>
+                <th class="num">Distance (m)</th><th>Verification</th></tr>
+          </thead>
+          <tbody id="punch-rows"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="error"></div>
+  </main>
+
+  <script src="vendor/supabase.js"></script>
+  <script src="config.js"></script>
+  <script src="dashboard-client.js"></script>
+  <script src="shell.js"></script>
+
+  <script>
+    function setParam(name, value) {
+      var p = new URLSearchParams(location.search);
+      if (value) p.set(name, value); else p.delete(name);
+      location.search = p.toString();
+    }
+
+    window.onShellReady = async function () {
+      var params  = new URLSearchParams(location.search);
+      var date    = params.get("date") || Dash.todayKL();
+      var site    = params.get("site") || "";
+      var showRaw = params.get("punches") === "1";
+
+      // wire the filters
+      var dateEl = document.getElementById("f-date");
+      var siteEl = document.getElementById("f-site");
+      dateEl.value = date;
+      dateEl.addEventListener("change", function () { setParam("date", this.value); });
+      siteEl.addEventListener("change", function () { setParam("site", this.value); });
+      document.getElementById("punch-toggle").textContent = showRaw ? "Hide raw punches" : "Show raw punches";
+      document.getElementById("punch-toggle").addEventListener("click", function (e) {
+        e.preventDefault(); setParam("punches", showRaw ? "" : "1");
+      });
+
+      var tbody = document.getElementById("rows");
+      try {
+        var results = await Promise.all([
+          Dash.getShifts(date, site || null),
+          Dash.getSitesMissingGeofence(),
+          Dash.getProjectPulse(),
+          showRaw ? Dash.getRecentPunches(date, site || null) : Promise.resolve(null)
+        ]);
+        var shifts = results[0], missing = results[1], projects = results[2], punches = results[3];
+
+        // site dropdown (active BP sites)
+        siteEl.innerHTML = '<option value="">All sites</option>' + projects.map(function (p) {
+          return '<option value="' + p.project_id + '"' + (p.project_id === site ? " selected" : "") + ">" +
+                 p.project_code + " — " + p.project_name + "</option>";
+        }).join("");
+
+        // geofence nag
+        if (missing.length) {
+          document.getElementById("geofence-banner").innerHTML =
+            '<div class="banner banner-amber"><strong>' + missing.length +
+            " site(s) have no GPS geofence set</strong> — punches there can't be location-verified: " +
+            missing.map(function (s) { return s.project_name + " (" + s.active_workers_assigned + " workers)"; }).join(", ") +
+            ". Register each site's coordinates from a WhatsApp location share.</div>";
+        }
+
+        // shifts
+        if (!shifts.length) {
+          tbody.innerHTML = '<tr><td colspan="6" class="empty">No punches on ' + date +
+            ". The punch app pilot hasn't started at the sites yet.</td></tr>";
+        } else {
+          tbody.innerHTML = shifts.map(function (s) {
+            var flags = [];
+            if (s.overlong_shift) flags.push('<span class="badge badge-anomaly">overlong</span>');
+            else if (s.has_anomaly) flags.push('<span class="badge badge-anomaly">check</span>');
+            if (s.in_count && !s.out_count) flags.push('<span class="badge badge-gray">on site</span>');
+            return "<tr>" +
+              "<td><strong>" + (s.full_name || "") + "</strong></td>" +
+              "<td>" + (s.project_name || "—") + "</td>" +
+              "<td>" + (s.first_in_at ? Dash.klTime(s.first_in_at) : "—") + "</td>" +
+              "<td>" + (s.last_out_at ? Dash.klTime(s.last_out_at) : "—") + "</td>" +
+              '<td class="num">' + (s.hours_on_site === null || s.hours_on_site === undefined ? "—" : s.hours_on_site) + "</td>" +
+              "<td>" + (flags.join(" ") || "—") + "</td>" +
+            "</tr>";
+          }).join("");
+        }
+
+        // raw punches
+        if (showRaw && punches) {
+          document.getElementById("punches-section").style.display = "";
+          document.getElementById("punch-rows").innerHTML = punches.length
+            ? punches.map(function (p) {
+                var vCls = p.verification_status === "verified" ? "verified" : "anomaly";
+                return "<tr>" +
+                  "<td>" + Dash.klDateTime(p.punched_at) + "</td>" +
+                  "<td>" + (p.full_name || "") + "</td>" +
+                  "<td>" + (p.punch_type || "").toUpperCase() + "</td>" +
+                  "<td>" + (p.project_name || "—") + "</td>" +
+                  '<td class="num">' + (p.distance_m === null || p.distance_m === undefined ? "—" : Math.round(p.distance_m)) + "</td>" +
+                  '<td><span class="badge badge-' + vCls + '">' + (p.verification_status || "") + "</span></td>" +
+                "</tr>";
+              }).join("")
+            : '<tr><td colspan="6" class="empty">No raw punches for this date.</td></tr>';
+        }
+      } catch (e) {
+        tbody.innerHTML = "";
+        document.getElementById("error").innerHTML =
+          '<div class="banner banner-red">Could not load: ' + (e.message || e) + "</div>";
+      }
+    };
+  </script>
+</body>
+</html>

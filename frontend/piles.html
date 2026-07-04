@@ -11,14 +11,125 @@
   <header id="nav"></header>
 
   <main id="main">
-    <h1>Pile register</h1>
-    <div class="banner banner-amber">This page (design vs actual, pile by pile) is being built next — Phase 3.</div>
-    <p class="page-caption"><a href="index.html">← Back to overview</a></p>
+    <h1 id="title">Pile register</h1>
+    <p class="page-caption" id="caption">
+      Design (from drawings) vs actual (from site reports), pile by pile.
+      A dash means not recorded yet — older projects predate the reporting bot.
+    </p>
+
+    <div class="filters" id="filters"></div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Pile</th><th>Zone</th><th>Status</th><th>Testing</th>
+            <th class="num" title="Registered diameter">Dia (mm)</th>
+            <th class="num" title="Design depth from the drawing">Design depth</th>
+            <th class="num" title="Latest confirmed bored depth">Current depth</th>
+            <th class="num" title="Current minus design, metres">Δ depth</th>
+            <th class="num" title="Design socket / as-bored socket (m)">Socket D/A</th>
+            <th title="Design concrete grade">Grade</th>
+            <th class="num" title="Design concrete volume (m³)">Conc. design</th>
+            <th class="num" title="Poured concrete volume (m³)">Poured</th>
+            <th class="num" title="Design steel tonnage">Steel (t)</th>
+            <th>Bore end</th><th>Cast</th>
+            <th title="Drawing no (rev)">Drawing</th>
+          </tr>
+        </thead>
+        <tbody id="rows"><tr><td colspan="16" class="empty">Loading…</td></tr></tbody>
+      </table>
+    </div>
+    <div id="error"></div>
   </main>
 
   <script src="vendor/supabase.js"></script>
   <script src="config.js"></script>
   <script src="dashboard-client.js"></script>
   <script src="shell.js"></script>
+
+  <script>
+    function num(v, dp) {
+      if (v === null || v === undefined) return "—";
+      return Number(v).toFixed(dp === undefined ? 1 : dp);
+    }
+
+    window.onShellReady = async function () {
+      var params    = new URLSearchParams(location.search);
+      var projectId = params.get("project");
+      var status    = params.get("status") || "all";
+      var tbody     = document.getElementById("rows");
+
+      if (!projectId) {
+        tbody.innerHTML = "";
+        document.getElementById("error").innerHTML =
+          '<div class="banner banner-amber">No project selected — open a project from the ' +
+          '<a href="index.html">Overview</a> or <a href="projects.html">Projects</a> page.</div>';
+        return;
+      }
+
+      try {
+        // fetch unfiltered once to know the project name + which statuses exist
+        var all  = await Dash.getPileRegister(projectId);
+        var rows = (status === "all") ? all
+                 : all.filter(function (r) { return r.construction_status === status; });
+
+        if (all.length) {
+          document.getElementById("title").textContent =
+            all[0].project_code + " — pile register";
+          document.getElementById("caption").textContent =
+            all[0].project_name + " · design (drawings) vs actual (site reports). Dash = not recorded yet.";
+        }
+
+        // status filter chips from the statuses actually present
+        var statuses = {};
+        all.forEach(function (r) { statuses[r.construction_status] = (statuses[r.construction_status] || 0) + 1; });
+        var chips = ['<a href="piles.html?project=' + projectId + '">' +
+                     (status === "all" ? "<strong>All (" + all.length + ")</strong>" : "All (" + all.length + ")") + "</a>"];
+        Object.keys(statuses).sort().forEach(function (s) {
+          var label = s + " (" + statuses[s] + ")";
+          chips.push(s === status
+            ? "<strong>" + label + "</strong>"
+            : '<a href="piles.html?project=' + projectId + "&status=" + encodeURIComponent(s) + '">' + label + "</a>");
+        });
+        document.getElementById("filters").innerHTML = chips.join(" · ");
+
+        if (!rows.length) {
+          tbody.innerHTML = '<tr><td colspan="16" class="empty">No piles for this filter.</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = rows.map(function (r) {
+          var v = r.depth_variance_m === null || r.depth_variance_m === undefined ? null : Number(r.depth_variance_m);
+          var varCls  = v !== null && Math.abs(v) >= 1 ? " neg" : "";
+          var varText = v === null ? "—" : (v > 0 ? "+" : "") + v.toFixed(2);
+          var socket  = num(r.design_socket_length_m) + " / " + num(r.socket_rock_length_m);
+          var drawing = r.drawing_no ? r.drawing_no + (r.drawing_rev ? " (" + r.drawing_rev + ")" : "") : "—";
+          return "<tr>" +
+            "<td><strong>" + (r.pile_mark_no || "") + "</strong></td>" +
+            "<td>" + (r.zone || "—") + "</td>" +
+            '<td><span class="badge badge-' + (r.construction_status === "cast_complete" || r.construction_status === "head_trimmed" ? "approved" : (r.construction_status === "planned" ? "gray" : "in_progress")) + '">' + (r.construction_status || "") + "</span></td>" +
+            '<td><span class="badge badge-' + (r.testing_status === "passed" ? "passed" : (r.testing_status === "failed" ? "failed" : "gray")) + '">' + (r.testing_status || "") + "</span></td>" +
+            '<td class="num">' + (r.diameter_mm || "—") + "</td>" +
+            '<td class="num">' + num(r.design_depth_m, 2) + "</td>" +
+            '<td class="num">' + num(r.current_depth_m, 2) + "</td>" +
+            '<td class="num' + varCls + '">' + varText + "</td>" +
+            '<td class="num">' + socket + "</td>" +
+            "<td>" + (r.design_concrete_grade || "—") + "</td>" +
+            '<td class="num">' + num(r.design_concrete_m3, 2) + "</td>" +
+            '<td class="num">' + num(r.concrete_volume_m3, 2) + "</td>" +
+            '<td class="num">' + num(r.design_steel_total_t, 3) + "</td>" +
+            "<td>" + (r.bore_end_date || "—") + "</td>" +
+            "<td>" + (r.cast_date || "—") + "</td>" +
+            "<td>" + drawing + "</td>" +
+          "</tr>";
+        }).join("");
+      } catch (e) {
+        tbody.innerHTML = "";
+        document.getElementById("error").innerHTML =
+          '<div class="banner banner-red">Could not load: ' + (e.message || e) + "</div>";
+      }
+    };
+  </script>
 </body>
 </html>
