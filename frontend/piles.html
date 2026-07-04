@@ -27,7 +27,7 @@
             <th>Testing</th>
             <th class="num">Dia (mm)</th>
             <th title="Design concrete grade">Grade</th>
-            <th class="num" title="Design / poured concrete (m³)">Concrete D/P</th>
+            <th class="num" title="Concrete m³ — Design (geometry × design depth) / Theoretical (geometry × as-drilled depth) / Poured (delivery orders). Over-pour % is measured against Theoretical: true concrete loss into the ground.">Concrete D/T/P</th>
             <th class="num" title="Design steel tonnage">Steel (t)</th>
             <th>Bore end</th><th>Cast</th>
             <th title="Drawing no (rev)">Drawing</th>
@@ -181,11 +181,18 @@
 
           return header + zr.map(function (r) {
             var drawing = r.drawing_no ? r.drawing_no + (r.drawing_rev ? " (" + r.drawing_rev + ")" : "") : "—";
+            // theoretical volume = hole geometry x as-drilled depth (bore-log depth,
+            // falling back to the latest site-report depth) — computed live
+            var dia = n(r.diameter_mm);
+            var drilled = n(r.actual_depth_m) !== null ? n(r.actual_depth_m) : n(r.current_depth_m);
+            var concT = (dia !== null && drilled !== null)
+              ? Math.PI / 4 * Math.pow(dia / 1000, 2) * drilled : null;
             var concD = n(r.design_concrete_m3), concP = n(r.concrete_volume_m3);
-            var conc = f(concD, 1) + " / " + f(concP, 1);
-            if (concD !== null && concP !== null && concD > 0) {
-              var over = Math.round((concP - concD) / concD * 100);
-              conc += ' <span class="' + (over >= 15 ? "neg" : "muted-line") + '" style="font-size:11px">(' +
+            var conc = f(concD, 1) + " / " + f(concT, 1) + " / " + f(concP, 1);
+            if (concT !== null && concP !== null && concT > 0) {
+              var over = Math.round((concP - concT) / concT * 100);
+              conc += ' <span class="' + (over >= 15 ? "neg" : "muted-line") + '" style="font-size:11px" ' +
+                      'title="Poured vs theoretical — concrete lost into the ground">(' +
                       (over > 0 ? "+" : "") + over + "%)</span>";
             }
             return "<tr>" +
