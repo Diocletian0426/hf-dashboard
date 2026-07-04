@@ -15,8 +15,17 @@
     <p class="page-caption" id="caption">Design (drawings) vs drilling progress (site reports) vs final depth (bore log), pile by pile.</p>
 
     <div id="pipeline" class="pipeline"></div>
+
+    <div id="pmap"></div>
+
+    <div id="depth-section" style="display:none">
+      <h2 class="section-title">Depth profile — drilled (blue) vs design (dashed outline)</h2>
+      <div id="depthchart" class="chart-scroll"></div>
+    </div>
+
     <p id="metres" class="page-caption"></p>
 
+    <h2 class="section-title">Pile details</h2>
     <div class="table-wrap">
       <table>
         <thead>
@@ -45,37 +54,42 @@
   <script src="shell.js"></script>
 
   <script>
-    // the six lifecycle stages (user-approved granularity), mapped to construction_status values
+    // ---- the six lifecycle stages + their ordinal colour ramp (one hue,
+    //      deepening with progress; validated for contrast + step separation) ----
     var STAGES = [
-      ["Planned", ["planned"]],
-      ["Boring",  ["casing_installed", "boring_in_progress"]],
-      ["Bored",   ["bored_complete"]],
-      ["Cage",    ["cage_in_progress", "cage_installed"]],
-      ["Cast",    ["casting_in_progress", "cast_complete"]],
-      ["Trimmed", ["head_trimmed"]]
+      ["Planned", ["planned"],                                null      ],
+      ["Boring",  ["casing_installed", "boring_in_progress"], "#86b6ef" ],
+      ["Bored",   ["bored_complete"],                         "#5598e7" ],
+      ["Cage",    ["cage_in_progress", "cage_installed"],     "#2a78d6" ],
+      ["Cast",    ["casting_in_progress", "cast_complete"],   "#1c5cab" ],
+      ["Trimmed", ["head_trimmed"],                           "#104281" ]
     ];
     function stageOf(status) {
       for (var i = 0; i < STAGES.length; i++)
-        if (STAGES[i][1].indexOf(status) !== -1) return STAGES[i][0];
-      return "Planned";
+        if (STAGES[i][1].indexOf(status) !== -1) return STAGES[i];
+      return STAGES[0];
     }
 
     function n(v) { return v === null || v === undefined ? null : Number(v); }
     function f(v, dp) { return v === null ? "—" : v.toFixed(dp === undefined ? 1 : dp); }
+    function esc(s) { return String(s === null || s === undefined ? "" : s).replace(/"/g, "&quot;"); }
+    function drilledOf(r) {
+      var a = n(r.actual_depth_m);
+      return a !== null ? a : n(r.current_depth_m);
+    }
 
-    // the "depth story" cell — adapts to the pile's lifecycle stage
+    // ---- the "depth story" table cell — adapts to the pile's lifecycle stage ----
     function depthStory(r) {
       var design  = n(r.design_depth_m);
       var current = n(r.current_depth_m);
       var actual  = n(r.actual_depth_m);
-      var stage   = stageOf(r.construction_status);
+      var stage   = stageOf(r.construction_status)[0];
 
       if (stage === "Planned") {
         return design !== null
           ? '<span class="muted-line">design ' + f(design, 2) + " m</span>"
           : '<span class="muted-line">no design depth yet</span>';
       }
-
       if (stage === "Boring") {
         if (current === null)
           return '<span class="muted-line">boring — no depth reading yet' +
@@ -86,24 +100,96 @@
         return '<span class="bar minibar"><span style="width:' + pct + '%"></span></span> ' +
                f(current, 2) + " / " + f(design, 2) + " m (" + pct + "%)";
       }
-
-      // Bored / Cage / Cast / Trimmed — the final figure matters now
       var finalDepth = actual !== null ? actual : current;
-      var fromReport = actual === null && current !== null;   // bore-log figure not recorded yet
+      var fromReport = actual === null && current !== null;
       if (finalDepth === null)
         return design !== null
           ? '<span class="muted-line">design ' + f(design, 2) + " m · final not recorded</span>"
           : "—";
-
       var out = "<strong>" + f(finalDepth, 2) + " m</strong>";
       if (design !== null) {
         var d = finalDepth - design;
-        var big = Math.abs(d) >= 1;
-        out += ' <span class="badge ' + (big ? "badge-critical" : "badge-gray") + '">Δ ' +
+        out += ' <span class="badge ' + (Math.abs(d) >= 1 ? "badge-critical" : "badge-gray") + '">Δ ' +
                (d > 0 ? "+" : "") + d.toFixed(2) + "</span>";
       }
       if (fromReport) out += ' <span class="badge badge-anomaly" title="From daily site reports — bore-log final figure not recorded yet">site report</span>';
       return out;
+    }
+
+    // ---- the pile map: one tile per pile, grouped by zone, colour = stage ----
+    function renderPileMap(zones) {
+      return Object.keys(zones).sort().map(function (z) {
+        var tiles = zones[z].map(function (r) {
+          var st = stageOf(r.construction_status);
+          var drilled = drilledOf(r);
+          var tip = (r.pile_mark_no || "?") + " — " + (r.construction_status || "") +
+                    (drilled !== null ? " · drilled " + f(drilled, 1) + " m" : "") +
+                    (n(r.design_depth_m) !== null ? " · design " + f(n(r.design_depth_m), 1) + " m" : "");
+          return st[2]
+            ? '<span class="ptile" style="background:' + st[2] + '" title="' + esc(tip) + '"></span>'
+            : '<span class="ptile ptile-empty" title="' + esc(tip) + '"></span>';
+        }).join("");
+        return '<div class="pmap-zone"><span class="pmap-label">' + z + "</span>" +
+               '<span class="pmap-tiles">' + tiles + "</span></div>";
+      }).join("");
+    }
+
+    // ---- the depth profile: downward bars from a ground line, per zone ----
+    function renderDepthChart(zones) {
+      var BAR = 14, GAP = 2, ZGAP = 18, TOP = 14, PLOT = 180, LABEL = 34, LEFT = 34;
+
+      // scale: deepest of design/drilled across all piles
+      var maxD = 0, any = false;
+      Object.keys(zones).forEach(function (z) {
+        zones[z].forEach(function (r) {
+          var d = n(r.design_depth_m), a = drilledOf(r);
+          if (d !== null) { maxD = Math.max(maxD, d); any = true; }
+          if (a !== null) { maxD = Math.max(maxD, a); any = true; }
+        });
+      });
+      if (!any) return null;
+      var k = PLOT / (maxD * 1.05);
+
+      var x = LEFT, parts = [], zoneNames = Object.keys(zones).sort();
+      zoneNames.forEach(function (z) {
+        var zx0 = x;
+        zones[z].forEach(function (r) {
+          var d = n(r.design_depth_m), a = drilledOf(r);
+          if (d === null && a === null) return;
+          var tip = (r.pile_mark_no || "?") +
+                    (d !== null ? " · design " + f(d, 1) + " m" : "") +
+                    (a !== null ? " · drilled " + f(a, 1) + " m" : "");
+          var g = '<g class="dbar"><title>' + esc(tip) + "</title>";
+          if (d !== null)
+            g += '<rect x="' + x + '" y="' + TOP + '" width="' + BAR + '" height="' + (d * k).toFixed(1) +
+                 '" fill="none" stroke="#c3c2b7" stroke-dasharray="3 2"/>';
+          if (a !== null)
+            g += '<rect x="' + x + '" y="' + TOP + '" width="' + BAR + '" height="' + (a * k).toFixed(1) +
+                 '" rx="2" fill="#2a78d6" fill-opacity="0.92"/>';
+          if (d !== null && a !== null && Math.abs(a - d) >= 1)
+            g += '<text x="' + (x + BAR / 2) + '" y="' + (TOP + Math.max(a, d) * k + 11).toFixed(1) +
+                 '" text-anchor="middle" font-size="9" fill="#d03b3b">' +
+                 (a - d > 0 ? "+" : "") + (a - d).toFixed(1) + "</text>";
+          g += "</g>";
+          parts.push(g);
+          x += BAR + GAP;
+        });
+        if (x > zx0)
+          parts.push('<text x="' + ((zx0 + x - GAP) / 2).toFixed(1) + '" y="' + (TOP + PLOT + 26) +
+                     '" text-anchor="middle" font-size="10" fill="#898781">' + esc(z) + "</text>");
+        x += ZGAP;
+      });
+
+      // ground line + depth ticks every 10 m
+      var W = x, H = TOP + PLOT + LABEL;
+      var axis = ['<line x1="' + LEFT + '" y1="' + TOP + '" x2="' + (W - ZGAP + 4) + '" y2="' + TOP + '" stroke="#c3c2b7"/>'];
+      for (var m = 10; m <= maxD; m += 10) {
+        var y = (TOP + m * k).toFixed(1);
+        axis.push('<line x1="' + LEFT + '" y1="' + y + '" x2="' + (W - ZGAP + 4) + '" y2="' + y + '" stroke="#e1e0d9"/>');
+        axis.push('<text x="' + (LEFT - 4) + '" y="' + y + '" text-anchor="end" font-size="9" fill="#898781" dy="3">' + m + " m</text>");
+      }
+      return '<svg width="' + W + '" height="' + H + '" role="img" aria-label="Drilled vs design depth per pile">' +
+             axis.join("") + parts.join("") + "</svg>";
     }
 
     window.onShellReady = async function () {
@@ -126,65 +212,76 @@
         if (all.length) {
           document.getElementById("title").textContent = all[0].project_code + " — pile register";
           document.getElementById("caption").textContent =
-            all[0].project_name + " · design (drawings) vs drilling (site reports) vs final (bore log). Dash = not recorded yet.";
+            all[0].project_name + " · design (drawings) vs drilling (site reports) vs final (bore log). Hover any tile or bar for details.";
         }
 
-        // ---- pipeline strip ----
+        // ---- pipeline strip (doubles as the colour legend for the pile map) ----
         var counts = {};
-        all.forEach(function (r) { var s = stageOf(r.construction_status); counts[s] = (counts[s] || 0) + 1; });
+        all.forEach(function (r) { var s = stageOf(r.construction_status)[0]; counts[s] = (counts[s] || 0) + 1; });
         var base = "piles.html?project=" + projectId;
         document.getElementById("pipeline").innerHTML =
           STAGES.map(function (s) {
             var c = counts[s[0]] || 0;
             var active = stageSel === s[0];
+            var swatch = s[2]
+              ? '<span class="swatch" style="background:' + s[2] + '"></span>'
+              : '<span class="swatch swatch-empty"></span>';
             return '<a class="stage' + (active ? " active" : "") + (c === 0 ? " zero" : "") + '"' +
-                   ' href="' + (active ? base : base + "&stage=" + s[0]) + '">' +
+                   ' href="' + (active ? base : base + "&stage=" + s[0]) + '">' + swatch +
                    '<span class="stage-count">' + c + "</span>" + s[0] + "</a>";
           }).join('<span class="stage-arrow">→</span>') +
           (stageSel ? ' &nbsp; <a href="' + base + '">clear filter</a>' : "");
 
-        // ---- metres line (recorded figures only — honest about coverage) ----
+        // ---- zone grouping (used by map, chart and table) ----
+        var rows = stageSel
+          ? all.filter(function (r) { return stageOf(r.construction_status)[0] === stageSel; })
+          : all;
+        function groupZones(list) {
+          var zones = {};
+          list.forEach(function (r) { var z = r.zone || "Unzoned"; (zones[z] = zones[z] || []).push(r); });
+          return zones;
+        }
+        var zonesAll = groupZones(all), zonesSel = groupZones(rows);
+
+        // ---- pile map (always the full project — the filter applies to the table) ----
+        document.getElementById("pmap").innerHTML = renderPileMap(zonesAll);
+
+        // ---- depth profile ----
+        var svg = renderDepthChart(zonesAll);
+        if (svg) {
+          document.getElementById("depth-section").style.display = "";
+          document.getElementById("depthchart").innerHTML = svg;
+        }
+
+        // ---- metres line ----
         var designSum = 0, drilledSum = 0, drilledCount = 0;
         all.forEach(function (r) {
-          var d = n(r.design_depth_m), a = n(r.actual_depth_m), c = n(r.current_depth_m);
-          if (d !== null) designSum += d;
-          var best = a !== null ? a : c;
-          if (best !== null) { drilledSum += best; drilledCount++; }
+          var d = n(r.design_depth_m); if (d !== null) designSum += d;
+          var a = drilledOf(r); if (a !== null) { drilledSum += a; drilledCount++; }
         });
         document.getElementById("metres").textContent =
           "Metres: " + Math.round(drilledSum) + " m drilled (recorded on " + drilledCount + " of " + all.length +
           " piles) · " + Math.round(designSum) + " m designed in total.";
 
-        // ---- rows, grouped by zone ----
-        var rows = stageSel ? all.filter(function (r) { return stageOf(r.construction_status) === stageSel; }) : all;
+        // ---- detail table ----
         if (!rows.length) {
           tbody.innerHTML = '<tr><td colspan="11" class="empty">No piles in this stage.</td></tr>';
           return;
         }
-
-        var zones = {};
-        rows.forEach(function (r) {
-          var z = r.zone || "Unzoned";
-          (zones[z] = zones[z] || []).push(r);
-        });
-
-        tbody.innerHTML = Object.keys(zones).sort().map(function (z) {
-          var zr = zones[z];
+        tbody.innerHTML = Object.keys(zonesSel).sort().map(function (z) {
+          var zr = zonesSel[z];
           var zDesign = 0, zDrilled = 0;
           zr.forEach(function (r) {
             var d = n(r.design_depth_m); if (d !== null) zDesign += d;
-            var best = n(r.actual_depth_m) !== null ? n(r.actual_depth_m) : n(r.current_depth_m);
-            if (best !== null) zDrilled += best;
+            var a = drilledOf(r); if (a !== null) zDrilled += a;
           });
           var header = '<tr class="zone-row"><td colspan="11">' + z + " — " + zr.length + " pile(s)" +
             " · drilled " + Math.round(zDrilled) + " m of " + Math.round(zDesign) + " m designed</td></tr>";
 
           return header + zr.map(function (r) {
             var drawing = r.drawing_no ? r.drawing_no + (r.drawing_rev ? " (" + r.drawing_rev + ")" : "") : "—";
-            // theoretical volume = hole geometry x as-drilled depth (bore-log depth,
-            // falling back to the latest site-report depth) — computed live
             var dia = n(r.diameter_mm);
-            var drilled = n(r.actual_depth_m) !== null ? n(r.actual_depth_m) : n(r.current_depth_m);
+            var drilled = drilledOf(r);
             var concT = (dia !== null && drilled !== null)
               ? Math.PI / 4 * Math.pow(dia / 1000, 2) * drilled : null;
             var concD = n(r.design_concrete_m3), concP = n(r.concrete_volume_m3);
