@@ -19,7 +19,7 @@
 
   var NAV_LINKS = [
     { href: "index.html",      label: "Overview"   },
-    { href: "projects.html",   label: "Projects"   },
+    { href: "projects.html",   label: "Progress"   },
     { href: "issues.html",     label: "Issues"     },
     { href: "machines.html",   label: "Machines"   },
     { href: "attendance.html", label: "Attendance" },

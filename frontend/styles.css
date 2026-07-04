@@ -82,6 +82,33 @@ h1 { font-size: 20px; margin: 6px 0 4px; }
 .status-warn { background: #d97706; }
 .status-bad  { background: #dc2626; }
 
+/* ---- pile lifecycle pipeline strip ---- */
+.pipeline {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  margin: 0 0 8px; font-size: 13px;
+}
+.stage {
+  display: inline-flex; align-items: center; gap: 7px;
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 8px;
+  padding: 6px 10px; color: inherit; text-decoration: none;
+}
+.stage:hover { border-color: #94a3b8; }
+.stage.active { border-color: #1f2937; box-shadow: 0 0 0 1px #1f2937 inset; font-weight: 600; }
+.stage.zero { color: #9ca3af; }
+.stage-count {
+  background: #f3f4f6; border-radius: 999px; padding: 1px 8px;
+  font-weight: 700; font-size: 12px;
+}
+.stage.zero .stage-count { background: #f9fafb; color: #c0c5cc; }
+.stage-arrow { color: #9ca3af; }
+
+.minibar { display: inline-block; vertical-align: middle; width: 70px; }
+
+tr.zone-row td {
+  background: #eef2f7; font-weight: 600; font-size: 12.5px;
+  color: #374151; border-top: 2px solid #dbe2ea;
+}
+
 /* ---- tables ---- */
 .table-wrap { overflow-x: auto; background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; }
 table { border-collapse: collapse; width: 100%; font-size: 13.5px; }

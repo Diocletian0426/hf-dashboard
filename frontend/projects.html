@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>HF Dashboard — Projects</title>
+  <title>HF Dashboard — Project progress</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -11,19 +11,26 @@
   <header id="nav"></header>
 
   <main id="main">
-    <h1>Projects</h1>
-    <p class="page-caption">All registered projects. Click a row to open its pile register (design vs actual).</p>
+    <h1>Project progress</h1>
+    <p class="page-caption">
+      How far along each job is, and whether it will finish on time.
+      <strong>Work vs time</strong> compares % of piles completed against % of contract time used —
+      "behind" means time is running out faster than piles are going in.
+      (Today's site situation lives on the <a href="index.html">Overview</a>.)
+    </p>
+
     <div class="table-wrap">
       <table>
         <thead>
           <tr>
-            <th>Code</th><th>Project</th><th>Client</th><th>Status</th>
-            <th>Progress</th><th class="num">Done</th><th class="num">In&nbsp;progress</th>
-            <th class="num">Registered</th><th class="num">Tests overdue</th>
-            <th class="num">Open issues</th><th class="num">Days left</th>
+            <th>Code</th><th>Project</th><th>Status</th>
+            <th>Progress (piles)</th>
+            <th>Work vs time</th>
+            <th class="num" title="Tests completed / required">Tests</th>
+            <th>Started</th><th>Target end</th><th class="num">Days left</th>
           </tr>
         </thead>
-        <tbody id="rows"><tr><td colspan="11" class="empty">Loading…</td></tr></tbody>
+        <tbody id="rows"><tr><td colspan="9" class="empty">Loading…</td></tr></tbody>
       </table>
     </div>
     <div id="error"></div>
@@ -35,11 +42,37 @@
   <script src="shell.js"></script>
 
   <script>
+    // compare % work done vs % contract time used
+    function workVsTime(p) {
+      if (p.project_status === "completed") return '<span class="badge badge-approved">completed</span>';
+      if (p.project_status === "cancelled") return '<span class="badge badge-gray">cancelled</span>';
+      var elapsed = p.days_elapsed, remaining = p.days_remaining;
+      if (elapsed === null || elapsed === undefined || remaining === null || remaining === undefined)
+        return '<span class="badge badge-gray">no dates</span>';
+
+      var totalDays = elapsed + Math.max(remaining, 0);
+      if (totalDays <= 0) return '<span class="badge badge-gray">no dates</span>';
+      var timePct = Math.min(100, Math.round(elapsed / totalDays * 100));
+      if (remaining < 0) timePct = 100;
+      var workPct = Number(p.progress_pct) || 0;
+      var diff = workPct - timePct;
+
+      var label, cls;
+      if (remaining < 0)      { label = "OVERDUE";  cls = "badge-critical"; }
+      else if (diff >= 10)    { label = "ahead";    cls = "badge-approved"; }
+      else if (diff >= -10)   { label = "on track"; cls = "badge-gray"; }
+      else if (diff >= -25)   { label = "behind";   cls = "badge-medium"; }
+      else                    { label = "far behind"; cls = "badge-critical"; }
+
+      return '<span class="badge ' + cls + '">' + label + "</span>" +
+             '<div class="muted-line" style="font-size:11px">work ' + Math.round(workPct) + "% · time " + timePct + "%</div>";
+    }
+
     window.onShellReady = async function () {
       var tbody = document.getElementById("rows");
       try {
         var rows = await Dash.getProjects();
-        if (!rows.length) { tbody.innerHTML = '<tr><td colspan="11" class="empty">No projects.</td></tr>'; return; }
+        if (!rows.length) { tbody.innerHTML = '<tr><td colspan="9" class="empty">No projects.</td></tr>'; return; }
 
         tbody.innerHTML = rows.map(function (p) {
           var pct = Math.max(0, Math.min(100, Number(p.progress_pct) || 0));
@@ -47,15 +80,15 @@
           var daysLeft = p.days_remaining;
           return "<tr onclick=\"location.href='piles.html?project=" + p.project_id + "'\" style=\"cursor:pointer\">" +
             "<td><strong>" + p.project_code + "</strong></td>" +
-            '<td class="wrap">' + (p.project_name || "") + "</td>" +
-            '<td class="wrap">' + (p.client_name || "") + "</td>" +
+            '<td class="wrap">' + (p.project_name || "") +
+              (p.client_name ? '<div class="muted-line" style="font-size:11px">' + p.client_name + "</div>" : "") + "</td>" +
             '<td><span class="badge badge-' + (p.project_status === "active" ? "approved" : "gray") + '">' + p.project_status + "</span></td>" +
-            '<td><span class="bar"><span style="width:' + pct + '%"></span></span> ' + pct + "%</td>" +
-            '<td class="num">' + (p.piles_completed || 0) + "</td>" +
-            '<td class="num">' + (p.piles_in_progress || 0) + "</td>" +
-            '<td class="num">' + total + "</td>" +
-            '<td class="num' + (p.tests_overdue > 0 ? " neg" : "") + '">' + (p.tests_overdue || 0) + "</td>" +
-            '<td class="num' + (p.open_issues > 0 ? " bold" : "") + '">' + (p.open_issues || 0) + "</td>" +
+            '<td><span class="bar"><span style="width:' + pct + '%"></span></span> ' +
+              pct + "% (" + (p.piles_completed || 0) + "/" + total + ")</td>" +
+            "<td>" + workVsTime(p) + "</td>" +
+            '<td class="num">' + (p.tests_completed || 0) + " / " + (p.total_tests_required || 0) + "</td>" +
+            "<td>" + (p.start_date || "—") + "</td>" +
+            "<td>" + (p.target_end_date || "—") + "</td>" +
             '<td class="num' + (daysLeft !== null && daysLeft < 0 ? " neg" : "") + '">' +
               (daysLeft === null || daysLeft === undefined ? "—" : daysLeft) + "</td>" +
           "</tr>";
