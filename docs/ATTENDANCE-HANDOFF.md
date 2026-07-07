@@ -149,6 +149,9 @@ date picker to **2026-06-28**.
    people number files in parallel, so the owner assigns the final number at apply time;
    don't be surprised if it shifts.
 4. Anything that touches the "not yours" list in §1: open an issue / message first, code later.
+5. **This flow is symmetric** (agreed 2026-07-06): the owner side also works branch → PR —
+   nobody commits to `main` directly, on any of the three repos. It's a convention, not
+   GitHub-enforced (private repos on a free plan), so it relies on everyone honouring it.
 
 ## 8. Reading list (in order)
 
@@ -164,4 +167,3 @@ date picker to **2026-06-28**.
 - [ ] A Supabase Auth login for the dashboard (created by owner, Auto Confirm; optionally
       linked to a staff row — unlinked accounts see everything except Leave)
 - [ ] This doc + the reading list
-- [ ] NOT provided, by policy: service_role key, Supabase dashboard admin access
