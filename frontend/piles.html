@@ -12,37 +12,29 @@
 
   <main id="main">
     <h1 id="title">Pile register</h1>
-    <p class="page-caption" id="caption">Design (drawings) vs drilling progress (site reports) vs final depth (bore log), pile by pile.</p>
+    <p class="page-caption" id="caption">Loading…</p>
+
+    <div class="filters" id="mode-toggle"></div>
+    <div id="banner"></div>
+
+    <div id="kpis" class="cards" style="display:none"></div>
 
     <div id="pipeline" class="pipeline"></div>
-
     <div id="pmap"></div>
 
     <div id="depth-section" style="display:none">
-      <h2 class="section-title">Depth profile — drilled (blue) vs design (dashed outline)</h2>
+      <h2 class="section-title" id="chart-title"></h2>
       <div id="depthchart" class="chart-scroll"></div>
     </div>
 
     <p id="metres" class="page-caption"></p>
+    <div id="datacheck"></div>
 
-    <h2 class="section-title">Pile details</h2>
+    <h2 class="section-title" id="table-title">Pile details</h2>
     <div class="table-wrap">
       <table>
-        <thead>
-          <tr>
-            <th>Pile</th>
-            <th>Status</th>
-            <th style="min-width:230px" title="Design depth → drilling progress → final depth">Depth story</th>
-            <th>Testing</th>
-            <th class="num">Dia (mm)</th>
-            <th title="Design concrete grade">Grade</th>
-            <th class="num" title="Concrete m³ — Design (geometry × design depth) / Theoretical (geometry × as-drilled depth) / Poured (delivery orders). Over-pour % is measured against Theoretical: true concrete loss into the ground.">Concrete D/T/P</th>
-            <th class="num" title="Design steel tonnage">Steel (t)</th>
-            <th>Bore end</th><th>Cast</th>
-            <th title="Drawing no (rev)">Drawing</th>
-          </tr>
-        </thead>
-        <tbody id="rows"><tr><td colspan="11" class="empty">Loading…</td></tr></tbody>
+        <thead id="thead"></thead>
+        <tbody id="rows"><tr><td colspan="16" class="empty">Loading…</td></tr></tbody>
       </table>
     </div>
     <div id="error"></div>
@@ -54,8 +46,13 @@
   <script src="shell.js"></script>
 
   <script>
-    // ---- the six lifecycle stages + their ordinal colour ramp (one hue,
-    //      deepening with progress; validated for contrast + step separation) ----
+    // =========================================================================
+    // Pile register — two modes on one page:
+    //   LIVE     (default) — daily site reports; provisional working picture
+    //   VERIFIED           — bore logs only; the final technical record
+    // =========================================================================
+
+    // ---- lifecycle stages + ordinal colour ramp (LIVE mode) ----
     var STAGES = [
       ["Planned", ["planned"],                                null      ],
       ["Boring",  ["casing_installed", "boring_in_progress"], "#86b6ef" ],
@@ -70,6 +67,16 @@
       return STAGES[0];
     }
 
+    // ---- bore-log record states + status colours (VERIFIED mode) ----
+    // status colours (good/warning/serious) — never reused as series colours
+    function boreState(r) {
+      if (r.bore_review_status === "confirmed") return ["verified", "#0ca30c"];
+      if (r.bore_log_ref !== null || r.bore_review_status !== null) return ["received — pending review", "#fab219"];
+      var st = stageOf(r.construction_status)[0];
+      if (st === "Cast" || st === "Trimmed") return ["casted — no bore log", "#ec835a"];
+      return ["not casted yet", null];
+    }
+
     function n(v) { return v === null || v === undefined ? null : Number(v); }
     function f(v, dp) { return v === null ? "—" : v.toFixed(dp === undefined ? 1 : dp); }
     function esc(s) { return String(s === null || s === undefined ? "" : s).replace(/"/g, "&quot;"); }
@@ -77,8 +84,13 @@
       var a = n(r.actual_depth_m);
       return a !== null ? a : n(r.current_depth_m);
     }
+    function groupZones(list) {
+      var zones = {};
+      list.forEach(function (r) { var z = r.zone || "Unzoned"; (zones[z] = zones[z] || []).push(r); });
+      return zones;
+    }
 
-    // ---- the "depth story" table cell — adapts to the pile's lifecycle stage ----
+    // ---- LIVE depth story cell ----
     function depthStory(r) {
       var design  = n(r.design_depth_m);
       var current = n(r.current_depth_m);
@@ -101,7 +113,6 @@
                f(current, 2) + " / " + f(design, 2) + " m (" + pct + "%)";
       }
       var finalDepth = actual !== null ? actual : current;
-      var fromReport = actual === null && current !== null;
       if (finalDepth === null)
         return design !== null
           ? '<span class="muted-line">design ' + f(design, 2) + " m · final not recorded</span>"
@@ -109,24 +120,31 @@
       var out = "<strong>" + f(finalDepth, 2) + " m</strong>";
       if (design !== null) {
         var d = finalDepth - design;
-        out += ' <span class="badge ' + (Math.abs(d) >= 1 ? "badge-critical" : "badge-gray") + '">Δ ' +
-               (d > 0 ? "+" : "") + d.toFixed(2) + "</span>";
+        out += ' <span class="badge badge-gray">Δ ' + (d > 0 ? "+" : "") + d.toFixed(2) + "</span>";
       }
-      if (fromReport) out += ' <span class="badge badge-anomaly" title="From daily site reports — bore-log final figure not recorded yet">site report</span>';
+      if (n(r.verified_pile_length_m) === null)
+        out += ' <span class="badge badge-anomaly" title="Figure from daily site reports (provisional). The verified bore-log record has not been captured yet.">reported · bore log pending</span>';
       return out;
     }
 
-    // ---- the pile map: one tile per pile, grouped by zone, colour = stage ----
-    function renderPileMap(zones) {
+    // ---- pile map (both modes; colouring differs) ----
+    function renderPileMap(zones, mode) {
       return Object.keys(zones).sort().map(function (z) {
         var tiles = zones[z].map(function (r) {
-          var st = stageOf(r.construction_status);
-          var drilled = drilledOf(r);
-          var tip = (r.pile_mark_no || "?") + " — " + (r.construction_status || "") +
-                    (drilled !== null ? " · drilled " + f(drilled, 1) + " m" : "") +
-                    (n(r.design_depth_m) !== null ? " · design " + f(n(r.design_depth_m), 1) + " m" : "");
-          return st[2]
-            ? '<span class="ptile" style="background:' + st[2] + '" title="' + esc(tip) + '"></span>'
+          var colour, tipExtra;
+          if (mode === "verified") {
+            var bs = boreState(r);
+            colour = bs[1];
+            tipExtra = " · " + bs[0];
+          } else {
+            colour = stageOf(r.construction_status)[2];
+            tipExtra = " · " + (r.construction_status || "");
+            var drilled = drilledOf(r);
+            if (drilled !== null) tipExtra += " · drilled " + f(drilled, 1) + " m";
+          }
+          var tip = (r.pile_mark_no || "?") + tipExtra;
+          return colour
+            ? '<span class="ptile" style="background:' + colour + '" title="' + esc(tip) + '"></span>'
             : '<span class="ptile ptile-empty" title="' + esc(tip) + '"></span>';
         }).join("");
         return '<div class="pmap-zone"><span class="pmap-label">' + z + "</span>" +
@@ -134,11 +152,9 @@
       }).join("");
     }
 
-    // ---- the depth profile: downward bars from a ground line, per zone ----
+    // ---- LIVE depth profile: drilled fill vs design dashed outline ----
     function renderDepthChart(zones) {
       var BAR = 14, GAP = 2, ZGAP = 18, TOP = 14, PLOT = 180, LABEL = 34, LEFT = 34;
-
-      // scale: deepest of design/drilled across all piles
       var maxD = 0, any = false;
       Object.keys(zones).forEach(function (z) {
         zones[z].forEach(function (r) {
@@ -150,8 +166,8 @@
       if (!any) return null;
       var k = PLOT / (maxD * 1.05);
 
-      var x = LEFT, parts = [], zoneNames = Object.keys(zones).sort();
-      zoneNames.forEach(function (z) {
+      var x = LEFT, parts = [];
+      Object.keys(zones).sort().forEach(function (z) {
         var zx0 = x;
         zones[z].forEach(function (r) {
           var d = n(r.design_depth_m), a = drilledOf(r);
@@ -166,10 +182,6 @@
           if (a !== null)
             g += '<rect x="' + x + '" y="' + TOP + '" width="' + BAR + '" height="' + (a * k).toFixed(1) +
                  '" rx="2" fill="#2a78d6" fill-opacity="0.92"/>';
-          if (d !== null && a !== null && Math.abs(a - d) >= 1)
-            g += '<text x="' + (x + BAR / 2) + '" y="' + (TOP + Math.max(a, d) * k + 11).toFixed(1) +
-                 '" text-anchor="middle" font-size="9" fill="#d03b3b">' +
-                 (a - d > 0 ? "+" : "") + (a - d).toFixed(1) + "</text>";
           g += "</g>";
           parts.push(g);
           x += BAR + GAP;
@@ -180,7 +192,6 @@
         x += ZGAP;
       });
 
-      // ground line + depth ticks every 10 m
       var W = x, H = TOP + PLOT + LABEL;
       var axis = ['<line x1="' + LEFT + '" y1="' + TOP + '" x2="' + (W - ZGAP + 4) + '" y2="' + TOP + '" stroke="#c3c2b7"/>'];
       for (var m = 10; m <= maxD; m += 10) {
@@ -192,10 +203,78 @@
              axis.join("") + parts.join("") + "</svg>";
     }
 
+    // ---- VERIFIED variance chart: bars from a zero line, downward = deeper ----
+    // Neutral single hue — direction carries the sign, no good/bad colouring.
+    function renderVarianceChart(zones) {
+      var BAR = 18, GAP = 4, ZGAP = 18, MID = 110, HALF = 84, LABEL = 34, LEFT = 40;
+      var rows = [];
+      Object.keys(zones).sort().forEach(function (z) {
+        zones[z].forEach(function (r) {
+          var d = n(r.design_depth_m), v = n(r.verified_pile_length_m);
+          if (d !== null && v !== null) rows.push([z, r.pile_mark_no, v - d]);
+        });
+      });
+      if (!rows.length) return null;
+
+      var maxAbs = Math.max(0.5, Math.max.apply(null, rows.map(function (r) { return Math.abs(r[2]); })));
+      var k = HALF / (maxAbs * 1.15);
+
+      var x = LEFT, parts = [], lastZone = null, zx0 = LEFT;
+      function zoneLabel(endX) {
+        if (lastZone !== null && endX > zx0)
+          parts.push('<text x="' + ((zx0 + endX - GAP) / 2).toFixed(1) + '" y="' + (MID + HALF + 26) +
+                     '" text-anchor="middle" font-size="10" fill="#898781">' + esc(lastZone) + "</text>");
+      }
+      rows.forEach(function (row) {
+        if (row[0] !== lastZone) { zoneLabel(x); if (lastZone !== null) x += ZGAP; lastZone = row[0]; zx0 = x; }
+        var dv = row[2];
+        var h = Math.abs(dv) * k;
+        var y = dv > 0 ? MID : MID - h;      // deeper (+) grows downward
+        parts.push('<g class="dbar"><title>' + esc(row[1]) + " · Δ " + (dv > 0 ? "+" : "") + dv.toFixed(2) + " m vs design</title>" +
+          '<rect x="' + x + '" y="' + y.toFixed(1) + '" width="' + BAR + '" height="' + Math.max(h, 1).toFixed(1) +
+          '" rx="2" fill="#2a78d6" fill-opacity="0.92"/>' +
+          '<text x="' + (x + BAR / 2) + '" y="' + (dv > 0 ? MID + h + 11 : MID - h - 4).toFixed(1) +
+          '" text-anchor="middle" font-size="9" fill="#52514e">' + (dv > 0 ? "+" : "") + dv.toFixed(2) + "</text></g>");
+        x += BAR + GAP;
+      });
+      zoneLabel(x);
+
+      var W = x + ZGAP, H = MID + HALF + LABEL;
+      var axis =
+        '<line x1="' + LEFT + '" y1="' + MID + '" x2="' + (W - ZGAP + 4) + '" y2="' + MID + '" stroke="#c3c2b7"/>' +
+        '<text x="' + (LEFT - 4) + '" y="' + (MID - HALF / 2) + '" text-anchor="end" font-size="9" fill="#898781">shallower</text>' +
+        '<text x="' + (LEFT - 4) + '" y="' + (MID + HALF / 2) + '" text-anchor="end" font-size="9" fill="#898781">deeper</text>';
+      return '<svg width="' + W + '" height="' + H + '" role="img" aria-label="Verified depth variance vs design per pile">' +
+             axis + parts.join("") + "</svg>";
+    }
+
+    // ---- shared data-check strip ----
+    function renderDataChecks(all) {
+      var castedNoLog = 0, receivedUnverified = 0, conflicts = 0;
+      all.forEach(function (r) {
+        var st = stageOf(r.construction_status)[0];
+        var hasLog = r.bore_log_ref !== null || r.bore_review_status !== null;
+        if ((st === "Cast" || st === "Trimmed") && !hasLog) castedNoLog++;
+        if (hasLog && r.bore_review_status !== "confirmed") receivedUnverified++;
+        var v = n(r.verified_pile_length_m), c = n(r.current_depth_m);
+        if (v !== null && c !== null && Math.abs(v - c) >= 1) conflicts++;
+      });
+      var checks = [];
+      if (castedNoLog)        checks.push(castedNoLog + " casted pile(s) without a bore log");
+      if (receivedUnverified) checks.push(receivedUnverified + " bore log(s) received but not verified");
+      if (conflicts)          checks.push(conflicts + " pile(s) where reported and verified depths differ ≥ 1 m");
+      return checks.length
+        ? '<div class="banner banner-amber"><strong>Data check</strong> — records to chase (paperwork, not construction problems): ' +
+          checks.join(" · ") + "</div>"
+        : "";
+    }
+
+    // =========================================================================
     window.onShellReady = async function () {
       var params    = new URLSearchParams(location.search);
       var projectId = params.get("project");
       var stageSel  = params.get("stage") || "";
+      var mode      = params.get("mode") === "verified" ? "verified" : "live";
       var tbody     = document.getElementById("rows");
 
       if (!projectId) {
@@ -206,118 +285,252 @@
         return;
       }
 
+      // mode toggle (keeps the project param; drops the stage filter on switch)
+      var base = "piles.html?project=" + projectId;
+      document.getElementById("mode-toggle").innerHTML =
+        (mode === "live"
+          ? '<span class="badge badge-in_progress">Live — site reports</span>'
+          : '<a href="' + base + '">Live — site reports</a>') + " · " +
+        (mode === "verified"
+          ? '<span class="badge badge-approved">Verified — bore logs</span>'
+          : '<a href="' + base + '&mode=verified">Verified — bore logs</a>');
+
       try {
         var all = await Dash.getPileRegister(projectId);
 
         if (all.length) {
-          document.getElementById("title").textContent = all[0].project_code + " — pile register";
-          document.getElementById("caption").textContent =
-            all[0].project_name + " · design (drawings) vs drilling (site reports) vs final (bore log). Hover any tile or bar for details.";
+          document.getElementById("title").textContent =
+            all[0].project_code + " — pile register" + (mode === "verified" ? " (verified)" : "");
         }
+        var zonesAll = groupZones(all);
+        document.getElementById("datacheck").innerHTML = renderDataChecks(all);
+        document.getElementById("pmap").innerHTML = renderPileMap(zonesAll, mode);
 
-        // ---- pipeline strip (doubles as the colour legend for the pile map) ----
-        var counts = {};
-        all.forEach(function (r) { var s = stageOf(r.construction_status)[0]; counts[s] = (counts[s] || 0) + 1; });
-        var base = "piles.html?project=" + projectId;
-        document.getElementById("pipeline").innerHTML =
-          STAGES.map(function (s) {
-            var c = counts[s[0]] || 0;
-            var active = stageSel === s[0];
-            var swatch = s[2]
-              ? '<span class="swatch" style="background:' + s[2] + '"></span>'
-              : '<span class="swatch swatch-empty"></span>';
-            return '<a class="stage' + (active ? " active" : "") + (c === 0 ? " zero" : "") + '"' +
-                   ' href="' + (active ? base : base + "&stage=" + s[0]) + '">' + swatch +
-                   '<span class="stage-count">' + c + "</span>" + s[0] + "</a>";
-          }).join('<span class="stage-arrow">→</span>') +
-          (stageSel ? ' &nbsp; <a href="' + base + '">clear filter</a>' : "");
-
-        // ---- zone grouping (used by map, chart and table) ----
-        var rows = stageSel
-          ? all.filter(function (r) { return stageOf(r.construction_status)[0] === stageSel; })
-          : all;
-        function groupZones(list) {
-          var zones = {};
-          list.forEach(function (r) { var z = r.zone || "Unzoned"; (zones[z] = zones[z] || []).push(r); });
-          return zones;
-        }
-        var zonesAll = groupZones(all), zonesSel = groupZones(rows);
-
-        // ---- pile map (always the full project — the filter applies to the table) ----
-        document.getElementById("pmap").innerHTML = renderPileMap(zonesAll);
-
-        // ---- depth profile ----
-        var svg = renderDepthChart(zonesAll);
-        if (svg) {
-          document.getElementById("depth-section").style.display = "";
-          document.getElementById("depthchart").innerHTML = svg;
-        }
-
-        // ---- metres line ----
-        var designSum = 0, drilledSum = 0, drilledCount = 0;
-        all.forEach(function (r) {
-          var d = n(r.design_depth_m); if (d !== null) designSum += d;
-          var a = drilledOf(r); if (a !== null) { drilledSum += a; drilledCount++; }
-        });
-        document.getElementById("metres").textContent =
-          "Metres: " + Math.round(drilledSum) + " m drilled (recorded on " + drilledCount + " of " + all.length +
-          " piles) · " + Math.round(designSum) + " m designed in total.";
-
-        // ---- detail table ----
-        if (!rows.length) {
-          tbody.innerHTML = '<tr><td colspan="11" class="empty">No piles in this stage.</td></tr>';
-          return;
-        }
-        tbody.innerHTML = Object.keys(zonesSel).sort().map(function (z) {
-          var zr = zonesSel[z];
-          var zDesign = 0, zDrilled = 0;
-          zr.forEach(function (r) {
-            var d = n(r.design_depth_m); if (d !== null) zDesign += d;
-            var a = drilledOf(r); if (a !== null) zDrilled += a;
-          });
-          var header = '<tr class="zone-row"><td colspan="11">' + z + " — " + zr.length + " pile(s)" +
-            " · drilled " + Math.round(zDrilled) + " m of " + Math.round(zDesign) + " m designed</td></tr>";
-
-          return header + zr.map(function (r) {
-            var drawing = r.drawing_no ? r.drawing_no + (r.drawing_rev ? " (" + r.drawing_rev + ")" : "") : "—";
-            var dia = n(r.diameter_mm);
-            var drilled = drilledOf(r);
-            var concT = (dia !== null && drilled !== null)
-              ? Math.PI / 4 * Math.pow(dia / 1000, 2) * drilled : null;
-            var concD = n(r.design_concrete_m3), concP = n(r.concrete_volume_m3);
-            var conc = f(concD, 1) + " / " + f(concT, 1) + " / " + f(concP, 1);
-            if (concT !== null && concP !== null && concT > 0) {
-              var over = Math.round((concP - concT) / concT * 100);
-              conc += ' <span class="' + (over >= 15 ? "neg" : "muted-line") + '" style="font-size:11px" ' +
-                      'title="Poured vs theoretical — concrete lost into the ground">(' +
-                      (over > 0 ? "+" : "") + over + "%)</span>";
-            }
-            return "<tr>" +
-              "<td><strong>" + (r.pile_mark_no || "") + "</strong></td>" +
-              '<td><span class="badge badge-' +
-                (r.construction_status === "cast_complete" || r.construction_status === "head_trimmed" ? "approved"
-                 : r.construction_status === "planned" ? "gray" : "in_progress") + '">' +
-                (r.construction_status || "") + "</span></td>" +
-              "<td>" + depthStory(r) + "</td>" +
-              '<td><span class="badge badge-' +
-                (r.testing_status === "passed" ? "passed" : r.testing_status === "failed" ? "failed" : "gray") + '">' +
-                (r.testing_status || "") + "</span></td>" +
-              '<td class="num">' + (r.diameter_mm || "—") + "</td>" +
-              "<td>" + (r.design_concrete_grade || "—") + "</td>" +
-              '<td class="num">' + conc + "</td>" +
-              '<td class="num">' + f(n(r.design_steel_total_t), 3) + "</td>" +
-              "<td>" + (r.bore_end_date || "—") + "</td>" +
-              "<td>" + (r.cast_date || "—") + "</td>" +
-              "<td>" + drawing + "</td>" +
-            "</tr>";
-          }).join("");
-        }).join("");
+        if (mode === "verified") renderVerified(all, zonesAll);
+        else renderLive(all, zonesAll, stageSel, projectId);
       } catch (e) {
         tbody.innerHTML = "";
         document.getElementById("error").innerHTML =
           '<div class="banner banner-red">Could not load: ' + (e.message || e) + "</div>";
       }
     };
+
+    // ---------------------------------------------------------------- LIVE --
+    function renderLive(all, zonesAll, stageSel, projectId) {
+      document.getElementById("caption").textContent =
+        (all.length ? all[0].project_name + " · " : "") +
+        "working picture from daily site reports — figures are provisional until the bore log is verified.";
+
+      // pipeline strip = stage legend + filter
+      var counts = {};
+      all.forEach(function (r) { var s = stageOf(r.construction_status)[0]; counts[s] = (counts[s] || 0) + 1; });
+      var base = "piles.html?project=" + projectId;
+      document.getElementById("pipeline").innerHTML =
+        STAGES.map(function (s) {
+          var c = counts[s[0]] || 0;
+          var active = stageSel === s[0];
+          var swatch = s[2]
+            ? '<span class="swatch" style="background:' + s[2] + '"></span>'
+            : '<span class="swatch swatch-empty"></span>';
+          return '<a class="stage' + (active ? " active" : "") + (c === 0 ? " zero" : "") + '"' +
+                 ' href="' + (active ? base : base + "&stage=" + s[0]) + '">' + swatch +
+                 '<span class="stage-count">' + c + "</span>" + s[0] + "</a>";
+        }).join('<span class="stage-arrow">→</span>') +
+        (stageSel ? ' &nbsp; <a href="' + base + '">clear filter</a>' : "");
+
+      var svg = renderDepthChart(zonesAll);
+      if (svg) {
+        document.getElementById("depth-section").style.display = "";
+        document.getElementById("chart-title").textContent = "Depth profile — drilled (blue) vs design (dashed outline)";
+        document.getElementById("depthchart").innerHTML = svg;
+      }
+
+      var designSum = 0, drilledSum = 0, drilledCount = 0;
+      all.forEach(function (r) {
+        var d = n(r.design_depth_m); if (d !== null) designSum += d;
+        var a = drilledOf(r); if (a !== null) { drilledSum += a; drilledCount++; }
+      });
+      document.getElementById("metres").textContent =
+        "Metres: " + Math.round(drilledSum) + " m drilled (recorded on " + drilledCount + " of " + all.length +
+        " piles) · " + Math.round(designSum) + " m designed in total.";
+
+      document.getElementById("thead").innerHTML =
+        "<tr><th>Pile</th><th>Status</th>" +
+        '<th style="min-width:230px" title="Design depth → drilling progress → latest reported">Depth story</th>' +
+        "<th>Testing</th><th class='num'>Dia (mm)</th><th>Grade</th>" +
+        '<th class="num" title="Concrete m³ — Design / Theoretical (geometry × drilled depth) / Poured">Concrete D/T/P</th>' +
+        '<th class="num" title="Design steel tonnage">Steel (t)</th>' +
+        "<th>Bore end</th><th>Cast</th><th title='Drawing no (rev)'>Drawing</th></tr>";
+
+      var rows = stageSel ? all.filter(function (r) { return stageOf(r.construction_status)[0] === stageSel; }) : all;
+      var tbody = document.getElementById("rows");
+      if (!rows.length) { tbody.innerHTML = '<tr><td colspan="11" class="empty">No piles in this stage.</td></tr>'; return; }
+
+      var zonesSel = groupZones(rows);
+      tbody.innerHTML = Object.keys(zonesSel).sort().map(function (z) {
+        var zr = zonesSel[z];
+        var zDesign = 0, zDrilled = 0;
+        zr.forEach(function (r) {
+          var d = n(r.design_depth_m); if (d !== null) zDesign += d;
+          var a = drilledOf(r); if (a !== null) zDrilled += a;
+        });
+        var header = '<tr class="zone-row"><td colspan="11">' + z + " — " + zr.length + " pile(s)" +
+          " · drilled " + Math.round(zDrilled) + " m of " + Math.round(zDesign) + " m designed</td></tr>";
+
+        return header + zr.map(function (r) {
+          var drawing = r.drawing_no ? r.drawing_no + (r.drawing_rev ? " (" + r.drawing_rev + ")" : "") : "—";
+          var dia = n(r.diameter_mm);
+          var drilled = drilledOf(r);
+          var concT = (dia !== null && drilled !== null)
+            ? Math.PI / 4 * Math.pow(dia / 1000, 2) * drilled : null;
+          var concD = n(r.design_concrete_m3), concP = n(r.concrete_volume_m3);
+          var conc = f(concD, 1) + " / " + f(concT, 1) + " / " + f(concP, 1);
+          if (concT !== null && concP !== null && concT > 0) {
+            var over = Math.round((concP - concT) / concT * 100);
+            conc += ' <span class="muted-line" style="font-size:11px" title="Poured vs theoretical">(' +
+                    (over > 0 ? "+" : "") + over + "%)</span>";
+          }
+          return "<tr>" +
+            "<td><strong>" + (r.pile_mark_no || "") + "</strong></td>" +
+            '<td><span class="badge badge-' +
+              (r.construction_status === "cast_complete" || r.construction_status === "head_trimmed" ? "approved"
+               : r.construction_status === "planned" ? "gray" : "in_progress") + '">' +
+              (r.construction_status || "") + "</span></td>" +
+            "<td>" + depthStory(r) + "</td>" +
+            '<td><span class="badge badge-' +
+              (r.testing_status === "passed" ? "passed" : r.testing_status === "failed" ? "failed" : "gray") + '">' +
+              (r.testing_status || "") + "</span></td>" +
+            '<td class="num">' + (r.diameter_mm || "—") + "</td>" +
+            "<td>" + (r.design_concrete_grade || "—") + "</td>" +
+            '<td class="num">' + conc + "</td>" +
+            '<td class="num">' + f(n(r.design_steel_total_t), 3) + "</td>" +
+            "<td>" + (r.bore_end_date || "—") + "</td>" +
+            "<td>" + (r.cast_date || "—") + "</td>" +
+            "<td>" + drawing + "</td>" +
+          "</tr>";
+        }).join("");
+      }).join("");
+    }
+
+    // ------------------------------------------------------------ VERIFIED --
+    function renderVerified(all, zonesAll) {
+      document.getElementById("caption").textContent =
+        (all.length ? all[0].project_name + " · " : "") +
+        "verified bore-log records only — the final technical picture. Daily site reports are not used here.";
+
+      // legend (status colours) instead of the lifecycle pipeline
+      var states = {};
+      all.forEach(function (r) { var s = boreState(r); states[s[0]] = (states[s[0]] || 0) + 1; });
+      var LEGEND = [
+        ["verified", "#0ca30c"],
+        ["received — pending review", "#fab219"],
+        ["casted — no bore log", "#ec835a"],
+        ["not casted yet", null]
+      ];
+      document.getElementById("pipeline").innerHTML = LEGEND.map(function (l) {
+        var c = states[l[0]] || 0;
+        var swatch = l[1]
+          ? '<span class="swatch" style="background:' + l[1] + '"></span>'
+          : '<span class="swatch swatch-empty"></span>';
+        return '<span class="stage' + (c === 0 ? " zero" : "") + '">' + swatch +
+               '<span class="stage-count">' + c + "</span>" + l[0] + "</span>";
+      }).join(" ");
+
+      // KPIs (percentages only with meaningful denominators)
+      var casted = 0, received = 0, verified = 0;
+      var dSum = 0, dCnt = 0, sSum = 0, sCnt = 0, obSum = 0, obCnt = 0;
+      all.forEach(function (r) {
+        var st = stageOf(r.construction_status)[0];
+        if (st === "Cast" || st === "Trimmed") casted++;
+        var hasLog = r.bore_log_ref !== null || r.bore_review_status !== null;
+        if (hasLog) received++;
+        if (r.bore_review_status === "confirmed") verified++;
+        var d = n(r.design_depth_m), v = n(r.verified_pile_length_m);
+        if (d !== null && v !== null) { dSum += v - d; dCnt++; }
+        var ds = n(r.design_socket_length_m), vs = n(r.verified_cored_socket_m);
+        if (ds !== null && vs !== null) { sSum += vs - ds; sCnt++; }
+        var t = n(r.theoretical_concrete_m3), a = n(r.actual_concrete_m3);
+        if (t !== null && a !== null) { obSum += a - t; obCnt++; }
+      });
+      var kpis = [
+        ["Casted piles", casted, ""],
+        ["Bore logs received", received, casted > 0 ? Math.round(received / casted * 100) + "% of casted" : ""],
+        ["Verified", verified, received > 0 ? Math.round(verified / received * 100) + "% of received" : ""],
+        ["Avg depth Δ (m)", dCnt ? (dSum / dCnt >= 0 ? "+" : "") + (dSum / dCnt).toFixed(2) : "—", dCnt + " pile(s)"],
+        ["Avg socket Δ (m)", sCnt ? (sSum / sCnt >= 0 ? "+" : "") + (sSum / sCnt).toFixed(2) : "—", sCnt + " pile(s)"],
+        ["Concrete overbreak (m³)", obCnt ? (obSum >= 0 ? "+" : "") + obSum.toFixed(1) : "—", obCnt + " pile(s)"]
+      ];
+      var kpiEl = document.getElementById("kpis");
+      kpiEl.style.display = "";
+      kpiEl.innerHTML = kpis.map(function (k) {
+        return '<div class="card"><div class="label">' + k[0] + '</div><div class="value">' + k[1] + "</div>" +
+               (k[2] ? '<div class="muted-line" style="font-size:11px">' + k[2] + "</div>" : "") + "</div>";
+      }).join("");
+
+      if (received === 0) {
+        document.getElementById("banner").innerHTML =
+          '<div class="banner banner-amber">0 bore logs captured yet — this view fills up as verified logs are entered. ' +
+          "The Live view carries the provisional picture meanwhile.</div>";
+      }
+
+      var svg = renderVarianceChart(zonesAll);
+      if (svg) {
+        document.getElementById("depth-section").style.display = "";
+        document.getElementById("chart-title").textContent =
+          "Depth variance — verified length vs design (down = deeper than design)";
+        document.getElementById("depthchart").innerHTML = svg;
+      }
+      document.getElementById("metres").textContent = "";
+
+      // verified comparison table
+      document.getElementById("table-title").textContent = "Verified records";
+      document.getElementById("thead").innerHTML =
+        "<tr><th>Pile</th><th>Record</th>" +
+        '<th class="num" title="Design / as-built (mm)">Dia D/AB</th>' +
+        '<th class="num" title="Design depth vs verified pile length (m)">Depth D/V</th>' +
+        '<th class="num">Δ depth</th>' +
+        '<th class="num" title="Design socket vs verified cored socket (m)">Socket D/V</th>' +
+        '<th class="num">Δ socket</th>' +
+        '<th class="num" title="Theoretical vs actual concrete (m³), from the verified record">Concrete T/A</th>' +
+        "<th>Cast (verified)</th><th>Bore log</th><th>Verified by</th></tr>";
+
+      var tbody = document.getElementById("rows");
+      tbody.innerHTML = Object.keys(zonesAll).sort().map(function (z) {
+        var zr = zonesAll[z];
+        var header = '<tr class="zone-row"><td colspan="11">' + z + " — " + zr.length + " pile(s)</td></tr>";
+        return header + zr.map(function (r) {
+          var bs = boreState(r);
+          var d = n(r.design_depth_m), v = n(r.verified_pile_length_m);
+          var dd = (d !== null && v !== null) ? v - d : null;
+          var ds = n(r.design_socket_length_m), vs = n(r.verified_cored_socket_m);
+          var dsv = (ds !== null && vs !== null) ? vs - ds : null;
+          var ref = r.bore_log_ref
+            ? (/^https?:/i.test(r.bore_log_ref)
+                ? '<a href="' + esc(r.bore_log_ref) + '" target="_blank" rel="noopener">view log</a>'
+                : esc(r.bore_log_ref))
+            : "—";
+          var verifier = r.bore_verified_by_name
+            ? esc(r.bore_verified_by_name) +
+              (r.bore_verified_at ? ' <span class="muted-line" style="font-size:11px">' + Dash.klDateTime(r.bore_verified_at) + "</span>" : "")
+            : "—";
+          return "<tr>" +
+            "<td><strong>" + (r.pile_mark_no || "") + "</strong></td>" +
+            "<td>" + (bs[1]
+              ? '<span class="swatch" style="background:' + bs[1] + ';margin-right:5px"></span>' + bs[0]
+              : '<span class="muted-line">' + bs[0] + "</span>") + "</td>" +
+            '<td class="num">' + (r.diameter_mm || "—") + " / " + (r.as_built_diameter_mm || "—") + "</td>" +
+            '<td class="num">' + f(d, 2) + " / " + f(v, 2) + "</td>" +
+            '<td class="num">' + (dd === null ? "—" : (dd > 0 ? "+" : "") + dd.toFixed(2)) + "</td>" +
+            '<td class="num">' + f(ds, 2) + " / " + f(vs, 2) + "</td>" +
+            '<td class="num">' + (dsv === null ? "—" : (dsv > 0 ? "+" : "") + dsv.toFixed(2)) + "</td>" +
+            '<td class="num">' + f(n(r.theoretical_concrete_m3), 2) + " / " + f(n(r.actual_concrete_m3), 2) + "</td>" +
+            "<td>" + (r.verified_cast_date || "—") + "</td>" +
+            "<td>" + ref + "</td>" +
+            "<td>" + verifier + "</td>" +
+          "</tr>";
+        }).join("");
+      }).join("");
+    }
   </script>
 </body>
 </html>
