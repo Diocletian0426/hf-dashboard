@@ -11,29 +11,27 @@
   <header id="nav"></header>
 
   <main id="main">
-    <h1>Machine fleet</h1>
-    <p class="page-caption">
-      Status and diesel from the nightly machine reports. Hour-based "service due" tracking
-      stays blank until daily hour-meter readings start flowing from the sites.
-    </p>
 
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Code</th><th>Type</th><th>Brand / model</th><th>Status</th>
-            <th>Site</th><th>Today</th>
-            <th class="num" title="Latest hour-meter reading">Hours</th>
-            <th class="num" title="Hours until next routine service">To service</th>
-            <th class="num" title="Diesel consumed, last 7 days (L)">Diesel 7d</th>
-            <th class="num">Open issues</th>
-            <th title="Latest service of any kind">Last service</th>
-          </tr>
-        </thead>
-        <tbody id="rows"><tr><td colspan="11" class="empty">Loading…</td></tr></tbody>
-      </table>
-    </div>
+    <!-- ================= PAGE HEADER + FLEET STRIP (element 1) =================
+         v2 co-build, one element per round (same method as the pile page).
+         Strip = LAST-KNOWN state per machine (each machine's most recent
+         daily report, any date — view column last_status since 0030), not
+         machines.status (which is 'active' for all 33 and carries no
+         information):
+           Operating (green) | Standby (blue, incl. legacy 'idle' wording) |
+           Breakdown (red)   | Never reported (grey)
+         Breakdown stays in the legend even at 0 — "no breakdowns" is the
+         morning answer the office looks for. Colours CVD-validated.
+         A muted staleness note under the legend says how fresh the picture
+         is (machines silent 3+ days / never reported).
+         Next elements: needs-attention panel, by-site tables, record card. -->
+    <div class="page-eyebrow">Machines</div>
+    <h1>Machine fleet</h1>
+
+    <div id="fleet-strip"></div>
+
     <div id="error"></div>
+
   </main>
 
   <script src="vendor/supabase.js"></script>
@@ -42,38 +40,74 @@
   <script src="shell.js"></script>
 
   <script>
-    window.onShellReady = async function () {
-      var tbody = document.getElementById("rows");
-      try {
-        var rows = await Dash.getMachines();
-        if (!rows.length) { tbody.innerHTML = '<tr><td colspan="11" class="empty">No machines.</td></tr>'; return; }
+    // last-known state per machine -> one strip category each
+    var FLEET_STATES = [
+      ["Operating",      "#0ca30c"],
+      ["Standby",        "#2a78d6"],
+      ["Breakdown",      "#d03b3b"],
+      ["Never reported", "#e5e7eb"]
+    ];
 
-        tbody.innerHTML = rows.map(function (m) {
-          var toService = (m.hours_to_service === null || m.hours_to_service === undefined)
-            ? "—"
-            : Math.round(m.hours_to_service);
-          var overdue = m.hour_service_overdue === true;
-          var statusCls = m.machine_status === "active" ? "approved"
-                        : m.machine_status === "maintenance" ? "in_progress"
-                        : m.machine_status === "decommissioned" ? "gray" : "medium";
-          return "<tr>" +
-            "<td><strong>" + (m.machine_code || "") + "</strong></td>" +
-            "<td>" + (m.machine_type || "") + "</td>" +
-            '<td class="wrap">' + [m.brand, m.model].filter(Boolean).join(" ") + "</td>" +
-            '<td><span class="badge badge-' + statusCls + '">' + (m.machine_status || "") + "</span></td>" +
-            "<td>" + (m.current_site || "—") + "</td>" +
-            "<td>" + (m.today_status
-                ? '<span class="badge badge-' + (m.today_status === "breakdown" ? "breakdown" : "gray") + '">' + m.today_status + "</span>"
-                : "—") + "</td>" +
-            '<td class="num">' + (m.current_hour_meter === null || m.current_hour_meter === undefined ? "—" : Math.round(m.current_hour_meter)) + "</td>" +
-            '<td class="num' + (overdue ? " neg" : "") + '">' + (overdue ? "OVERDUE" : toService) + "</td>" +
-            '<td class="num">' + (m.diesel_last_7_days === null || m.diesel_last_7_days === undefined ? "—" : Math.round(m.diesel_last_7_days)) + "</td>" +
-            '<td class="num' + (m.open_issues > 0 ? " bold" : "") + '">' + (m.open_issues || 0) + "</td>" +
-            "<td>" + (m.last_touched_date || "—") + "</td>" +
-          "</tr>";
-        }).join("");
+    function fleetStateOf(m) {
+      var t = m.last_status || "";
+      if (t === "operating") return "Operating";
+      if (t === "standby" || t === "idle") return "Standby";
+      if (t === "breakdown") return "Breakdown";
+      return "Never reported";
+    }
+
+    // how fresh is the picture? days between the last report and today (KL)
+    function daysSince(dateStr) {
+      if (!dateStr) return null;
+      return Math.round((new Date(Dash.todayKL()) - new Date(dateStr)) / 86400000);
+    }
+
+    function staleNote(machines) {
+      var silent3 = 0, never = 0, newest = "";
+      machines.forEach(function (m) {
+        if (!m.last_status_date) { never++; return; }
+        if (m.last_status_date > newest) newest = m.last_status_date;
+        if (daysSince(m.last_status_date) >= 3) silent3++;
+      });
+      var bits = ["state = each machine’s latest daily report" +
+                  (newest ? " (freshest " + newest + ")" : "")];
+      if (silent3) bits.push('<span class="stale-warn">' + silent3 + " silent 3+ days</span>");
+      if (never) bits.push(never + " never reported");
+      return '<div class="pipe-note">' + bits.join(" · ") + "</div>";
+    }
+
+    function fleetStrip(machines) {
+      var counts = {};
+      FLEET_STATES.forEach(function (s) { counts[s[0]] = 0; });
+      machines.forEach(function (m) { counts[fleetStateOf(m)]++; });
+      var total = machines.length;
+      if (!total) return "";
+
+      var segs = FLEET_STATES.map(function (s) {
+        var name = s[0], c = counts[name];
+        if (!c) return "";
+        var pct = Math.round(c * 100 / total);
+        return '<span class="pipe-seg" style="flex-grow:' + c + ";background:" + s[1] +
+               '" title="' + name + " — " + c + " machine" + (c === 1 ? "" : "s") + " (" + pct + '%)"></span>';
+      }).join("");
+
+      var keys = FLEET_STATES.map(function (s) {
+        var name = s[0], c = counts[name];
+        return '<span class="pipe-key' + (c ? "" : " zero") + '">' +
+               '<i style="background:' + s[1] + '"></i>' +
+               name + " <b>" + c + "</b></span>";
+      }).join("");
+
+      return '<div class="pipe-card"><div class="pipe-bar">' + segs + "</div>" +
+             '<div class="pipe-legend"><span class="pipe-total">' + total + " machines</span>" +
+             keys + "</div>" + staleNote(machines) + "</div>";
+    }
+
+    window.onShellReady = async function () {
+      try {
+        var machines = await Dash.getMachines();
+        document.getElementById("fleet-strip").innerHTML = fleetStrip(machines);
       } catch (e) {
-        tbody.innerHTML = "";
         document.getElementById("error").innerHTML =
           '<div class="banner banner-red">Could not load: ' + (e.message || e) + "</div>";
       }

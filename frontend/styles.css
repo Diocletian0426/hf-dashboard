@@ -197,6 +197,8 @@ details.zone > .table-wrap { margin-top: 6px; }
 .pipe-key b { color: #111827; }
 .pipe-key.zero, .pipe-key.zero b { color: #9ca3af; }
 .pipe-key.zero i { opacity: .35; }
+.pipe-note { margin-top: 6px; font-size: 12px; color: #9ca3af; }
+.pipe-note .stale-warn { color: #b45309; }
 
 /* ---- records-to-chase panel (pile records step 4) ---- */
 .chase-panel {
