@@ -30,6 +30,20 @@
 
     <div id="fleet-strip"></div>
 
+    <!-- ================= NEEDS ATTENTION (element 2) =================
+         Same component as the pile page's records-to-chase panel.
+         Four rules, each line only shows when it has machines:
+           1) Breakdown       — last reported state is breakdown
+           2) Open issues     — machine-linked site issues still open
+                                (chip tooltip lists them)
+           3) Service overdue — hour meter past next_service_due_hours
+                                (dormant until the bot feeds hour meters)
+           4) Move date passed— next_move_date is today or earlier
+                                (dormant until the bot maintains move dates)
+         Chips will jump to the machine's row once the by-site tables
+         (element 3) exist — until then clicking is a harmless no-op. -->
+    <div id="attention"></div>
+
     <div id="error"></div>
 
   </main>
@@ -103,10 +117,109 @@
              keys + "</div>" + staleNote(machines) + "</div>";
     }
 
+    // ================= NEEDS ATTENTION (element 2) =================
+    function esc(s) { return String(s === null || s === undefined ? "" : s).replace(/"/g, "&quot;"); }
+    function escHtml(s) {
+      return String(s === null || s === undefined ? "" : s)
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    function attnChip(machineCode, label, tip) {
+      return '<button type="button" class="chase-pile" data-machine="' + esc(machineCode) + '"' +
+             (tip ? ' title="' + esc(tip) + '"' : "") + ">" + escHtml(label) + "</button>";
+    }
+    function attnRow(title, chips) {
+      return '<div class="chase-row"><span class="chase-label">' + title +
+             ' <span class="chase-count">' + chips.length + "</span></span>" +
+             '<span class="chase-chips">' + chips.join("") + "</span></div>";
+    }
+
+    function needsAttention(machines, issuesByMachine) {
+      // 1) breakdown (last reported state)
+      var broken = machines.filter(function (m) { return fleetStateOf(m) === "Breakdown"; })
+        .map(function (m) {
+          return attnChip(m.machine_code, m.machine_code + (m.current_site ? " · " + m.current_site : ""));
+        });
+
+      // 2) open machine-linked issues; tooltip lists them
+      var withIssues = machines.filter(function (m) { return (m.open_issues || 0) > 0; })
+        .map(function (m) {
+          var list = issuesByMachine[m.machine_code] || [];
+          var tip = list.map(function (i) {
+            return "#" + i.issue_number + " " + (i.title || "") + " (" + i.status + ")";
+          }).join("\n");
+          return attnChip(m.machine_code,
+                          m.machine_code + " · " + m.open_issues + " issue" + (m.open_issues === 1 ? "" : "s"),
+                          tip);
+        });
+
+      // 3) routine service overdue (dormant until hour meters flow)
+      var serviceDue = machines.filter(function (m) { return m.hour_service_overdue === true; })
+        .map(function (m) {
+          var over = (m.hours_to_service === null || m.hours_to_service === undefined)
+            ? "" : " · " + Math.abs(Math.round(m.hours_to_service)) + "h over";
+          return attnChip(m.machine_code, m.machine_code + over);
+        });
+
+      // 4) planned move date reached (dormant until the bot maintains it)
+      var today = Dash.todayKL();
+      var moveDue = machines.filter(function (m) {
+        return m.next_move_date && m.next_move_date <= today;
+      }).map(function (m) {
+        return attnChip(m.machine_code, m.machine_code + " · move due " + m.next_move_date);
+      });
+
+      var sections = [];
+      if (broken.length)     sections.push(attnRow("Breakdown", broken));
+      if (withIssues.length) sections.push(attnRow("Open issues", withIssues));
+      if (serviceDue.length) sections.push(attnRow("Service overdue", serviceDue));
+      if (moveDue.length)    sections.push(attnRow("Move date passed", moveDue));
+
+      var total = broken.length + withIssues.length + serviceDue.length + moveDue.length;
+      var body = total === 0
+        ? '<div class="muted-line">&#10003; Nothing needs attention.</div>'
+        : sections.join("");
+      return '<details class="zone chase-panel" open>' +
+             '<summary><span class="zone-name">Needs attention</span>' +
+             '<span class="zone-count">' + total + " item" + (total === 1 ? "" : "s") + "</span></summary>" +
+             '<div class="chase-body">' + body + "</div></details>";
+    }
+
+    // chip click -> jump to the machine's row (no-op until element 3 tables exist)
+    function wireAttentionJumps() {
+      document.getElementById("attention").addEventListener("click", function (ev) {
+        var btn = ev.target.closest("button.chase-pile");
+        if (!btn) return;
+        var code = btn.getAttribute("data-machine").replace(/"/g, '\\"');
+        var row = document.querySelector('tr.machine-row[data-machine="' + code + '"]');
+        if (!row) return;
+        var det = row.closest("details");
+        if (det) det.open = true;
+        row.scrollIntoView({ behavior: "smooth", block: "center" });
+        row.classList.add("flash");
+        setTimeout(function () { row.classList.remove("flash"); }, 1700);
+      });
+    }
+
     window.onShellReady = async function () {
       try {
-        var machines = await Dash.getMachines();
+        var results = await Promise.all([
+          Dash.getMachines(),
+          Dash.getIssues("open")     // open + in_progress, for the attention panel
+        ]);
+        var machines = results[0];
+
+        // open issues keyed by machine code (v_issue_board carries machine_code)
+        var issuesByMachine = {};
+        results[1].forEach(function (i) {
+          if (i.machine_code) {
+            (issuesByMachine[i.machine_code] = issuesByMachine[i.machine_code] || []).push(i);
+          }
+        });
+
         document.getElementById("fleet-strip").innerHTML = fleetStrip(machines);
+        document.getElementById("attention").innerHTML = needsAttention(machines, issuesByMachine);
+        wireAttentionJumps();
       } catch (e) {
         document.getElementById("error").innerHTML =
           '<div class="banner banner-red">Could not load: ' + (e.message || e) + "</div>";
