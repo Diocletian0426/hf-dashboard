@@ -180,6 +180,38 @@ details.zone > .table-wrap { margin-top: 6px; }
 }
 .zone-tools button:hover { text-decoration: underline; }
 
+/* ---- pile record card (pile records step 3) ---- */
+tr.pile-row { cursor: pointer; }
+tr.pile-row .row-caret {
+  display: inline-block; font-size: 10px; color: #9ca3af;
+  margin-right: 6px; transition: transform .15s;
+}
+tr.pile-row.open .row-caret { transform: rotate(90deg); }
+tr[hidden] { display: none; }
+tr.pile-card-row > td {
+  background: #fbfcfe; white-space: normal;
+  padding: 14px 16px 18px; border-bottom: 2px solid #e5e7eb;
+}
+.pile-card { display: grid; gap: 14px; max-width: 980px; }
+.pile-card h3 {
+  margin: 0 0 6px; font-size: 11.5px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .5px; color: #6b7280;
+}
+.pc-head { font-size: 15px; }
+.pc-chips { color: #6b7280; font-size: 12.5px; margin-left: 6px; }
+.pc-grid { display: grid; grid-template-columns: minmax(340px, 1.4fr) minmax(220px, 1fr); gap: 16px; }
+@media (max-width: 760px) { .pc-grid { grid-template-columns: 1fr; } }
+.pc-side { display: grid; gap: 12px; align-content: start; }
+table.pc-table { width: 100%; font-size: 12.5px; background: #fff; border: 1px solid #e5e7eb; }
+table.pc-table th, table.pc-table td { padding: 6px 10px; white-space: normal; }
+table.pc-table tbody th { text-align: left; color: #4b5563; font-weight: 600; background: #f9fafb; font-size: 12px; text-transform: none; letter-spacing: 0; }
+.pc-line { font-size: 13px; padding: 2px 0; }
+.pc-meta-inline { color: #6b7280; font-size: 12.5px; }
+.pc-issue { padding: 7px 0; border-bottom: 1px dashed #e5e7eb; font-size: 13px; }
+.pc-issue:last-child { border-bottom: none; }
+.pc-meta { color: #6b7280; font-size: 12px; margin-top: 2px; }
+.pc-latest { color: #4b5563; font-size: 12.5px; margin-top: 2px; font-style: italic; }
+
 /* progress bar (projects page) */
 .bar { background: #e5e7eb; border-radius: 6px; height: 10px; min-width: 90px; overflow: hidden; }
 .bar > span { display: block; height: 100%; background: #16a34a; }

@@ -22,7 +22,11 @@
          Columns: Pile | Stage | Depth (reported / design) | Bore log | Testing | Comment
          "Comment" = Yes/No: has any problem ever been recorded against this
          pile (site issues linked to it)? Tooltip lists the issues.
-         Expand-card comes in step 3. -->
+
+         RECORD CARD (step 3, draft): click a pile row and a full-width card
+         opens under it — design vs site-reported vs verified numbers, key
+         dates, bore-log state, tests, and the pile's full problem track
+         record. Click the row again to close. -->
     <div class="zone-tools" id="zone-tools" hidden>
       <button type="button" onclick="setAllZones(true)">Expand all</button>
       <button type="button" onclick="setAllZones(false)">Collapse all</button>
@@ -102,6 +106,149 @@
              (pileIssues.length > 1 ? " (" + pileIssues.length + ")" : "") + "</span>";
     }
 
+    // ================= RECORD CARD (step 3) helpers =================
+
+    // like esc() but for HTML text (esc() only handles the quote inside title="")
+    function escHtml(s) {
+      return String(s === null || s === undefined ? "" : s)
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+    // '2026-07-03' -> '03 Jul 2026'
+    function dstr(d) {
+      if (!d) return "—";
+      return new Intl.DateTimeFormat("en-MY", { day: "2-digit", month: "short", year: "numeric" })
+        .format(new Date(d + "T00:00:00"));
+    }
+    // number + unit, or em-dash when the database has nothing
+    function numCell(v, dp, unit) {
+      var x = n(v);
+      return x === null ? "—" : f(x, dp) + (unit ? " " + unit : "");
+    }
+    // as_built_steel is JSON from the bore log (cage sections); summarise it
+    function steelCell(js) {
+      if (js === null || js === undefined) return "—";
+      if (typeof js === "string") { try { js = JSON.parse(js); } catch (e) { return "recorded"; } }
+      if (Array.isArray(js)) return js.length + " cage section" + (js.length === 1 ? "" : "s");
+      return "recorded";
+    }
+    // reported depth + variance vs design (red when short of design)
+    function depthReportedCell(r) {
+      var actual = n(r.actual_depth_m), current = n(r.current_depth_m);
+      var v = actual !== null ? actual : current;
+      if (v === null) return "—";
+      var txt = f(v, 2) + " m" + (actual === null ? ' <span class="muted">(in progress)</span>' : "");
+      var dv = n(r.depth_variance_m);
+      if (dv !== null && actual !== null)
+        txt += ' <span class="' + (dv < 0 ? "neg" : "muted") + '">(' + (dv > 0 ? "+" : "") + f(dv, 2) + ")</span>";
+      return txt;
+    }
+    // verified concrete: actual poured, with the theoretical volume alongside
+    function concreteVerifiedCell(r) {
+      var a = n(r.actual_concrete_m3), t = n(r.theoretical_concrete_m3);
+      if (a === null && t === null) return "—";
+      var s = a === null ? "—" : f(a, 1) + " m³";
+      if (t !== null) s += ' <span class="muted">(theo ' + f(t, 1) + ")</span>";
+      return s;
+    }
+    function cmpRow(label, design, reported, verified) {
+      return "<tr><th>" + label + "</th><td>" + design + "</td><td>" + reported + "</td><td>" + verified + "</td></tr>";
+    }
+    // badge for a test status; unknown statuses fall back to grey
+    function testStatusBadge(s) {
+      s = s || "";
+      var known = ["scheduled", "completed", "passed", "failed", "pending", "rejected"];
+      var cls = known.indexOf(s) !== -1 ? s : "gray";
+      return '<span class="badge badge-' + cls + '">' + escHtml(s || "—") + "</span>";
+    }
+
+    // tests assigned to this pile (from the test tracker)
+    function testListHtml(tests) {
+      if (!tests || !tests.length) return '<div class="muted-line">No tests assigned to this pile.</div>';
+      return tests.map(function (t) {
+        var when = t.actual_test_date ? "done " + dstr(t.actual_test_date)
+                 : t.scheduled_test_date ? "scheduled " + dstr(t.scheduled_test_date)
+                 : "not scheduled";
+        var bits = [when];
+        if (t.test_result) bits.push("result: " + escHtml(t.test_result));
+        if (t.report_reference) bits.push("report: " + escHtml(t.report_reference));
+        var over = t.is_overdue ? ' <span class="badge badge-critical">overdue ' + (t.overdue_days || 0) + "d</span>" : "";
+        return '<div class="pc-line"><strong>' + escHtml(t.test_code || "") + "</strong> " +
+               escHtml(t.test_name || "") + " " + testStatusBadge(t.status) + over +
+               ' <span class="pc-meta-inline">· ' + bits.join(" · ") + "</span></div>";
+      }).join("");
+    }
+
+    // the pile's problem track record — every issue ever linked to it,
+    // newest first, resolved ones kept (that is the point: memory)
+    function issueListHtml(list) {
+      if (!list || !list.length)
+        return '<div class="muted-line">No problems recorded against this pile.</div>';
+      var sorted = list.slice().sort(function (a, b) {
+        return String(b.raised_date || "").localeCompare(String(a.raised_date || ""));
+      });
+      return sorted.map(function (i) {
+        var st = i.status || "";
+        var cls = (st === "open") ? "open" : (st === "in_progress") ? "in_progress" : "resolved";
+        var meta = [dstr(i.raised_date) + (i.resolved_date ? " → resolved " + dstr(i.resolved_date) : "")];
+        if (i.priority) meta.push(escHtml(i.priority));
+        if (i.category) meta.push(escHtml(i.category));
+        if (i.raised_by_name_resolved) meta.push("raised by " + escHtml(i.raised_by_name_resolved));
+        var latest = i.latest_action
+          ? '<div class="pc-latest">latest action: ' + escHtml(i.latest_action) +
+            (i.latest_action_date ? " (" + Dash.klDateTime(i.latest_action_date) + ")" : "") + "</div>"
+          : "";
+        return '<div class="pc-issue"><strong>#' + i.issue_number + "</strong> " + escHtml(i.title || "") +
+               ' <span class="badge badge-' + cls + '">' + escHtml(st) + "</span>" +
+               '<div class="pc-meta">' + meta.join(" · ") + "</div>" + latest + "</div>";
+      }).join("");
+    }
+
+    // the full record card — a hidden table row that sits under the pile's row
+    function pileCard(r, pileIssues, pileTests) {
+      var chips = [];
+      if (r.design_concrete_grade) chips.push("Grade " + escHtml(r.design_concrete_grade));
+      if (r.drawing_no) chips.push("Drawing " + escHtml(r.drawing_no) + (r.drawing_rev ? " rev " + escHtml(r.drawing_rev) : ""));
+
+      var head =
+        '<div class="pc-head"><strong>' + escHtml(r.pile_mark_no || "") + "</strong> " + stageBadge(r) +
+        (chips.length ? ' <span class="pc-chips">' + chips.join(" · ") + "</span>" : "") + "</div>";
+
+      var dims =
+        "<div><h3>Design vs site vs verified</h3>" +
+        '<table class="pc-table"><thead><tr><th></th><th>Design</th><th>Site reported</th><th>Verified (bore log)</th></tr></thead><tbody>' +
+        cmpRow("Diameter",
+               numCell(r.design_diameter_mm !== null ? r.design_diameter_mm : r.diameter_mm, 0, "mm"),
+               numCell(r.diameter_mm, 0, "mm"),
+               numCell(r.as_built_diameter_mm, 0, "mm")) +
+        cmpRow("Depth / length", numCell(r.design_depth_m, 2, "m"), depthReportedCell(r), numCell(r.verified_pile_length_m, 2, "m")) +
+        cmpRow("Rock socket", numCell(r.design_socket_length_m, 2, "m"), numCell(r.socket_rock_length_m, 2, "m"), numCell(r.verified_cored_socket_m, 2, "m")) +
+        cmpRow("Concrete", numCell(r.design_concrete_m3, 1, "m³"), numCell(r.concrete_volume_m3, 1, "m³"), concreteVerifiedCell(r)) +
+        cmpRow("Steel", numCell(r.design_steel_total_t, 2, "t"), "—", steelCell(r.as_built_steel)) +
+        cmpRow("Cast date", "—", dstr(r.cast_date), dstr(r.verified_cast_date)) +
+        "</tbody></table></div>";
+
+      var dates =
+        "<div><h3>Key dates</h3>" +
+        '<div class="pc-line">Boring: ' + dstr(r.bore_start_date) + " → " + dstr(r.bore_end_date) + "</div>" +
+        '<div class="pc-line">Cast (site): ' + dstr(r.cast_date) + "</div>" +
+        '<div class="pc-line">Cast (verified): ' + dstr(r.verified_cast_date) + "</div></div>";
+
+      var bore =
+        "<div><h3>Bore log</h3>" +
+        '<div class="pc-line">' + boreChip(r) + (r.bore_log_ref ? " · ref " + escHtml(r.bore_log_ref) : "") + "</div>" +
+        (r.bore_verified_by_name
+          ? '<div class="pc-line">verified by ' + escHtml(r.bore_verified_by_name) +
+            (r.bore_verified_at ? " · " + Dash.klDateTime(r.bore_verified_at) : "") + "</div>"
+          : "") + "</div>";
+
+      return '<tr class="pile-card-row" hidden><td colspan="6"><div class="pile-card">' +
+             head +
+             '<div class="pc-grid">' + dims + '<div class="pc-side">' + dates + bore + "</div></div>" +
+             "<div><h3>Testing</h3>" + testListHtml(pileTests) + "</div>" +
+             "<div><h3>Track record</h3>" + issueListHtml(pileIssues) + "</div>" +
+             "</div></td></tr>";
+    }
+
     // header line for a zone block: "12 piles · 9 cast"
     // "cast" = concrete actually poured (cast_complete or head_trimmed)
     function zoneSummary(zr) {
@@ -140,7 +287,8 @@
         var results = await Promise.all([
           Dash.getProjectPulse(),
           Dash.getPileRegister(projectId),
-          Dash.getIssues("all")
+          Dash.getIssues("all"),
+          Dash.getTests(true)          // all tests incl. completed — for the record card
         ]);
         var p = results[0].find(function (x) { return x.project_id === projectId; });
         var piles = results[1];
@@ -152,6 +300,16 @@
           results[2].forEach(function (i) {
             if (i.project_code === p.project_code && i.affected_pile_mark) {
               (issuesByPile[i.affected_pile_mark] = issuesByPile[i.affected_pile_mark] || []).push(i);
+            }
+          });
+        }
+
+        // tests for THIS project's piles, keyed by pile mark (for the card)
+        var testsByPile = {};
+        if (p) {
+          results[3].forEach(function (t) {
+            if (t.project_code === p.project_code && t.pile_mark_no) {
+              (testsByPile[t.pile_mark_no] = testsByPile[t.pile_mark_no] || []).push(t);
             }
           });
         }
@@ -169,14 +327,15 @@
         zonesEl.innerHTML = Object.keys(zones).sort().map(function (z) {
           var zr = zones[z];
           var rows = zr.map(function (r) {
-            return "<tr>" +
-              "<td><strong>" + (r.pile_mark_no || "") + "</strong></td>" +
+            return '<tr class="pile-row" title="Click to open the full record">' +
+              '<td><span class="row-caret">&#9656;</span><strong>' + (r.pile_mark_no || "") + "</strong></td>" +
               "<td>" + stageBadge(r) + "</td>" +
               '<td class="num">' + depthCell(r) + "</td>" +
               "<td>" + boreChip(r) + "</td>" +
               "<td>" + testBadge(r) + "</td>" +
               "<td>" + commentCell(issuesByPile[r.pile_mark_no]) + "</td>" +
-            "</tr>";
+            "</tr>" +
+            pileCard(r, issuesByPile[r.pile_mark_no], testsByPile[r.pile_mark_no]);
           }).join("");
           return '<details class="zone" open>' +
                  '<summary><span class="zone-name">' + z + '</span>' +
@@ -186,6 +345,16 @@
                  "</details>";
         }).join("");
         document.getElementById("zone-tools").hidden = false;
+
+        // click a pile row -> toggle the record card row that sits under it
+        zonesEl.addEventListener("click", function (ev) {
+          var tr = ev.target.closest("tr.pile-row");
+          if (!tr) return;
+          var card = tr.nextElementSibling;
+          if (!card || !card.classList.contains("pile-card-row")) return;
+          card.hidden = !card.hidden;
+          tr.classList.toggle("open", !card.hidden);
+        });
       } catch (e) {
         titleEl.textContent = "";
         document.getElementById("error").innerHTML =
