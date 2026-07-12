@@ -44,6 +44,21 @@
          (element 3) exist — until then clicking is a harmless no-op. -->
     <div id="attention"></div>
 
+    <!-- ================= MACHINES BY SITE (element 3) =================
+         One collapsible block per site (same details/summary pattern as the
+         pile page zones), Unassigned last. Header: SITE CODE — name ·
+         N machines · M operating. Columns:
+         Machine | Type | Brand/model | Last report (state badge + date,
+         amber date when 3+ days stale) | Diesel 7d | Mobilised | Comment
+         (= the machine's issue track record, all issues ever linked:
+         amber Yes when open, grey Yes when history only, tooltip lists).
+         Record card comes as element 4. -->
+    <div class="zone-tools" id="zone-tools" hidden>
+      <button type="button" onclick="setAllZones(true)">Expand all</button>
+      <button type="button" onclick="setAllZones(false)">Collapse all</button>
+    </div>
+    <div id="sites"></div>
+
     <div id="error"></div>
 
   </main>
@@ -185,6 +200,86 @@
              '<div class="chase-body">' + body + "</div></details>";
     }
 
+    // ================= MACHINES BY SITE (element 3) =================
+    function setAllZones(open) {
+      document.querySelectorAll("details.zone").forEach(function (d) { d.open = open; });
+    }
+
+    function typeLabel(t) { return String(t || "").replace(/_/g, " "); }
+
+    // state badge + report date; date turns amber when 3+ days stale
+    function lastReportCell(m) {
+      if (!m.last_status) return '<span class="muted-line">never</span>';
+      var cls = m.last_status === "operating" ? "approved"
+              : m.last_status === "breakdown" ? "breakdown" : "gray";
+      var d = daysSince(m.last_status_date);
+      var dateHtml = m.last_status_date
+        ? ' <span class="' + (d !== null && d >= 3 ? "stale-warn" : "muted") + '">' + m.last_status_date + "</span>"
+        : "";
+      return '<span class="badge badge-' + cls + '">' + escHtml(m.last_status) + "</span>" + dateHtml;
+    }
+
+    // same meaning as the pile page Comment column: the machine's problem
+    // track record — every issue ever linked to it
+    function commentCell(machineIssues) {
+      if (!machineIssues || !machineIssues.length) return '<span class="muted-line">No</span>';
+      var open = machineIssues.some(function (i) {
+        return i.status === "open" || i.status === "in_progress";
+      });
+      var tip = machineIssues.map(function (i) {
+        return "#" + i.issue_number + " " + (i.title || "") + " (" + i.status + ")";
+      }).join("\n");
+      return '<span class="badge ' + (open ? "badge-anomaly" : "badge-gray") + '" title="' + esc(tip) + '">Yes' +
+             (machineIssues.length > 1 ? " (" + machineIssues.length + ")" : "") + "</span>";
+    }
+
+    var THEAD =
+      "<thead><tr>" +
+      "<th>Machine</th><th>Type</th><th>Brand / model</th>" +
+      '<th title="Latest daily report: state and date (amber date = 3+ days old)">Last report</th>' +
+      '<th class="num" title="Diesel consumed, last 7 days (L)">Diesel 7d</th>' +
+      '<th title="On this site since (from the transfer group)">Mobilised</th>' +
+      '<th title="Has any problem been recorded against this machine? Hover a Yes for the list.">Comment</th>' +
+      "</tr></thead>";
+
+    function siteTables(machines, allIssuesByMachine) {
+      var groups = {};
+      machines.forEach(function (m) {
+        var k = m.current_site || "Unassigned";
+        (groups[k] = groups[k] || []).push(m);
+      });
+      var keys = Object.keys(groups).sort(function (a, b) {
+        if (a === "Unassigned") return 1;
+        if (b === "Unassigned") return -1;
+        return a.localeCompare(b);
+      });
+
+      return keys.map(function (k) {
+        var list = groups[k];
+        var operating = list.filter(function (m) { return m.last_status === "operating"; }).length;
+        var title = k === "Unassigned" ? "Unassigned"
+                  : k + (list[0].current_site_name ? " — " + escHtml(list[0].current_site_name) : "");
+        var rows = list.map(function (m) {
+          return '<tr class="machine-row" data-machine="' + esc(m.machine_code) + '">' +
+            "<td><strong>" + escHtml(m.machine_code) + "</strong></td>" +
+            "<td>" + escHtml(typeLabel(m.machine_type)) + "</td>" +
+            '<td class="wrap">' + escHtml([m.brand, m.model].filter(Boolean).join(" ")) + "</td>" +
+            "<td>" + lastReportCell(m) + "</td>" +
+            '<td class="num">' + (m.last_status ? Math.round(m.diesel_last_7_days || 0) : "—") + "</td>" +
+            "<td>" + (m.mobilised_date || "—") + "</td>" +
+            "<td>" + commentCell(allIssuesByMachine[m.machine_code]) + "</td>" +
+          "</tr>";
+        }).join("");
+        return '<details class="zone" open>' +
+               '<summary><span class="zone-name">' + title + "</span>" +
+               '<span class="zone-count">' + list.length + " machine" + (list.length === 1 ? "" : "s") +
+               " · " + operating + " operating</span></summary>" +
+               '<div class="table-wrap zone-table"><table>' + THEAD +
+               "<tbody>" + rows + "</tbody></table></div>" +
+               "</details>";
+      }).join("");
+    }
+
     // chip click -> jump to the machine's row (no-op until element 3 tables exist)
     function wireAttentionJumps() {
       document.getElementById("attention").addEventListener("click", function (ev) {
@@ -205,20 +300,26 @@
       try {
         var results = await Promise.all([
           Dash.getMachines(),
-          Dash.getIssues("open")     // open + in_progress, for the attention panel
+          Dash.getIssues("all")      // full history — Comment col wants resolved ones too
         ]);
         var machines = results[0];
 
-        // open issues keyed by machine code (v_issue_board carries machine_code)
-        var issuesByMachine = {};
+        // issues keyed by machine code (v_issue_board carries machine_code):
+        // ALL issues feed the Comment column (track record), the open subset
+        // feeds the needs-attention tooltips
+        var allIssuesByMachine = {}, openIssuesByMachine = {};
         results[1].forEach(function (i) {
-          if (i.machine_code) {
-            (issuesByMachine[i.machine_code] = issuesByMachine[i.machine_code] || []).push(i);
+          if (!i.machine_code) return;
+          (allIssuesByMachine[i.machine_code] = allIssuesByMachine[i.machine_code] || []).push(i);
+          if (i.status === "open" || i.status === "in_progress") {
+            (openIssuesByMachine[i.machine_code] = openIssuesByMachine[i.machine_code] || []).push(i);
           }
         });
 
         document.getElementById("fleet-strip").innerHTML = fleetStrip(machines);
-        document.getElementById("attention").innerHTML = needsAttention(machines, issuesByMachine);
+        document.getElementById("attention").innerHTML = needsAttention(machines, openIssuesByMachine);
+        document.getElementById("sites").innerHTML = siteTables(machines, allIssuesByMachine);
+        document.getElementById("zone-tools").hidden = false;
         wireAttentionJumps();
       } catch (e) {
         document.getElementById("error").innerHTML =
