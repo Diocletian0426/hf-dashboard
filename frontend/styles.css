@@ -180,6 +180,24 @@ details.zone > .table-wrap { margin-top: 6px; }
 }
 .zone-tools button:hover { text-decoration: underline; }
 
+/* ---- records-to-chase panel (pile records step 4) ---- */
+.chase-panel {
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+  padding: 10px 14px; margin: 14px 0 4px;
+}
+.chase-body { padding: 8px 0 2px; display: grid; gap: 8px; }
+.chase-row { font-size: 13px; display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline; }
+.chase-label { color: #4b5563; font-weight: 600; white-space: nowrap; }
+.chase-count { color: #b45309; font-weight: 700; }
+.chase-chips { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+button.chase-pile {
+  background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe;
+  border-radius: 999px; padding: 2px 10px; font-size: 12px; cursor: pointer;
+}
+button.chase-pile:hover { background: #dbeafe; }
+@keyframes chase-flash { 0% { background: #fde68a; } 100% { background: transparent; } }
+tr.pile-row.flash > td { animation: chase-flash 1.6s ease-out; }
+
 /* ---- pile record card (pile records step 3) ---- */
 tr.pile-row { cursor: pointer; }
 tr.pile-row .row-caret {

@@ -26,7 +26,14 @@
          RECORD CARD (step 3, draft): click a pile row and a full-width card
          opens under it — design vs site-reported vs verified numbers, key
          dates, bore-log state, tests, and the pile's full problem track
-         record. Click the row again to close. -->
+         record. Click the row again to close.
+
+         RECORDS TO CHASE (step 4): collapsible panel listing piles with
+         missing paperwork, four rules — 1) cast but no bore log,
+         2) test overdue, 3) test eligible but not scheduled, 4) test done
+         but report reference missing. Click a pile chip to jump to its row
+         and open its card. -->
+    <div id="chase"></div>
     <div class="zone-tools" id="zone-tools" hidden>
       <button type="button" onclick="setAllZones(true)">Expand all</button>
       <button type="button" onclick="setAllZones(false)">Collapse all</button>
@@ -249,6 +256,92 @@
              "</div></td></tr>";
     }
 
+    // ================= RECORDS TO CHASE (step 4) =================
+
+    // a clickable pile chip; data-pile lets the click handler find the row
+    function chaseChip(pileMark, label) {
+      return '<button type="button" class="chase-pile" data-pile="' + esc(pileMark) + '">' +
+             escHtml(label) + "</button>";
+    }
+    function chaseRow(title, chips) {
+      return '<div class="chase-row"><span class="chase-label">' + title +
+             ' <span class="chase-count">' + chips.length + "</span></span>" +
+             '<span class="chase-chips">' + chips.join("") + "</span></div>";
+    }
+
+    // the four chase rules, computed from data the page already loaded
+    function chaseChecklist(piles, testsByPile) {
+      var done = ["completed", "passed", "failed"];
+      var allTests = [];
+      Object.keys(testsByPile).forEach(function (k) { allTests = allTests.concat(testsByPile[k]); });
+      allTests.sort(function (a, b) { return String(a.pile_mark_no).localeCompare(String(b.pile_mark_no)); });
+
+      // 1) cast but no bore log captured at all
+      var boreMissing = piles.filter(function (r) {
+        return (r.construction_status === "cast_complete" || r.construction_status === "head_trimmed") &&
+               r.bore_log_ref === null && r.bore_review_status === null;
+      }).map(function (r) { return chaseChip(r.pile_mark_no, r.pile_mark_no); });
+
+      // 2) test overdue (the tracker computes is_overdue)
+      var overdue = allTests.filter(function (t) { return t.is_overdue === true; })
+        .map(function (t) {
+          return chaseChip(t.pile_mark_no, t.pile_mark_no + " · " + (t.test_code || t.test_name || "test") +
+                           (t.overdue_days ? " · " + t.overdue_days + "d late" : ""));
+        });
+
+      // 3) curing done, test eligible, but nothing booked yet
+      var unscheduled = allTests.filter(function (t) {
+        return !t.scheduled_test_date && !t.actual_test_date && !t.test_result &&
+               done.indexOf(t.status) === -1 &&
+               t.days_until_eligible !== null && t.days_until_eligible <= 0;
+      }).map(function (t) {
+        return chaseChip(t.pile_mark_no, t.pile_mark_no + " · " + (t.test_code || t.test_name || "test"));
+      });
+
+      // 4) test carried out but no report reference filed
+      var reportMissing = allTests.filter(function (t) {
+        return (t.actual_test_date || t.test_result) && !t.report_reference;
+      }).map(function (t) {
+        return chaseChip(t.pile_mark_no, t.pile_mark_no + " · " + (t.test_code || t.test_name || "test"));
+      });
+
+      var sections = [];
+      if (boreMissing.length)   sections.push(chaseRow("Bore log missing", boreMissing));
+      if (overdue.length)       sections.push(chaseRow("Test overdue", overdue));
+      if (unscheduled.length)   sections.push(chaseRow("Test not scheduled", unscheduled));
+      if (reportMissing.length) sections.push(chaseRow("Test report missing", reportMissing));
+
+      var total = boreMissing.length + overdue.length + unscheduled.length + reportMissing.length;
+      var body = total === 0
+        ? '<div class="muted-line">&#10003; Nothing to chase — pile records are up to date.</div>'
+        : sections.join("");
+      return '<details class="zone chase-panel" open>' +
+             '<summary><span class="zone-name">Records to chase</span>' +
+             '<span class="zone-count">' + total + " item" + (total === 1 ? "" : "s") + "</span></summary>" +
+             '<div class="chase-body">' + body + "</div></details>";
+    }
+
+    // click a chase chip -> jump to that pile's row, open its zone + card
+    function wireChaseJumps() {
+      document.getElementById("chase").addEventListener("click", function (ev) {
+        var btn = ev.target.closest("button.chase-pile");
+        if (!btn) return;
+        var mark = btn.getAttribute("data-pile").replace(/"/g, '\\"');
+        var row = document.querySelector('tr.pile-row[data-pile="' + mark + '"]');
+        if (!row) return;
+        var det = row.closest("details");
+        if (det) det.open = true;
+        var card = row.nextElementSibling;
+        if (card && card.classList.contains("pile-card-row") && card.hidden) {
+          card.hidden = false;
+          row.classList.add("open");
+        }
+        row.scrollIntoView({ behavior: "smooth", block: "center" });
+        row.classList.add("flash");
+        setTimeout(function () { row.classList.remove("flash"); }, 1700);
+      });
+    }
+
     // header line for a zone block: "12 piles · 9 cast"
     // "cast" = concrete actually poured (cast_complete or head_trimmed)
     function zoneSummary(zr) {
@@ -327,7 +420,7 @@
         zonesEl.innerHTML = Object.keys(zones).sort().map(function (z) {
           var zr = zones[z];
           var rows = zr.map(function (r) {
-            return '<tr class="pile-row" title="Click to open the full record">' +
+            return '<tr class="pile-row" data-pile="' + esc(r.pile_mark_no || "") + '" title="Click to open the full record">' +
               '<td><span class="row-caret">&#9656;</span><strong>' + (r.pile_mark_no || "") + "</strong></td>" +
               "<td>" + stageBadge(r) + "</td>" +
               '<td class="num">' + depthCell(r) + "</td>" +
@@ -345,6 +438,10 @@
                  "</details>";
         }).join("");
         document.getElementById("zone-tools").hidden = false;
+
+        // records-to-chase panel above the tables
+        document.getElementById("chase").innerHTML = chaseChecklist(piles, testsByPile);
+        wireChaseJumps();
 
         // click a pile row -> toggle the record card row that sits under it
         zonesEl.addEventListener("click", function (ev) {
