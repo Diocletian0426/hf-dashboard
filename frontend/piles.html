@@ -12,11 +12,28 @@
 
   <main id="main">
 
-    <!-- ================= PAGE HEADER (step 1) =================
-         "This is the pile record page for which project:
-          project code — project name."                        -->
+    <!-- ================= PAGE HEADER (step 1) ================= -->
     <div class="page-eyebrow">Pile Records</div>
     <h1 id="project-title">Loading…</h1>
+
+    <!-- ================= WORKING TABLE (step 2) =================
+         Compact scan rows, zone-grouped. Starting columns:
+         Pile | Stage | Depth (reported / design) | Bore log | Testing
+         Grows/shrinks by user reaction. Expand-card comes in step 3. -->
+    <div class="table-wrap" id="table-wrap" style="display:none">
+      <table>
+        <thead>
+          <tr>
+            <th>Pile</th>
+            <th>Stage</th>
+            <th class="num" title="Latest reported depth (site reports, provisional) / design depth (drawing)">Depth — reported / design (m)</th>
+            <th title="Bore-log record state">Bore log</th>
+            <th>Testing</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
 
     <div id="error"></div>
 
@@ -28,6 +45,53 @@
   <script src="shell.js"></script>
 
   <script>
+    // ---- helpers (same definitions the v1 page used) ----
+    var STAGES = [
+      ["Planned", ["planned"]],
+      ["Boring",  ["casing_installed", "boring_in_progress"]],
+      ["Bored",   ["bored_complete"]],
+      ["Cage",    ["cage_in_progress", "cage_installed"]],
+      ["Cast",    ["casting_in_progress", "cast_complete"]],
+      ["Trimmed", ["head_trimmed"]]
+    ];
+    function stageOf(status) {
+      for (var i = 0; i < STAGES.length; i++)
+        if (STAGES[i][1].indexOf(status) !== -1) return STAGES[i][0];
+      return "Planned";
+    }
+    function stageBadge(r) {
+      var s = r.construction_status || "";
+      var cls = (s === "cast_complete" || s === "head_trimmed") ? "approved"
+              : (s === "planned") ? "gray" : "in_progress";
+      return '<span class="badge badge-' + cls + '">' + stageOf(s) + "</span>";
+    }
+    function boreChip(r) {
+      if (r.bore_review_status === "confirmed")
+        return '<span class="badge badge-approved">verified</span>';
+      if (r.bore_log_ref !== null || r.bore_review_status !== null)
+        return '<span class="badge badge-pending">in review</span>';
+      var st = stageOf(r.construction_status);
+      if (st === "Cast" || st === "Trimmed")
+        return '<span class="badge badge-anomaly">pending</span>';
+      return "—";
+    }
+    function testBadge(r) {
+      var t = r.testing_status || "";
+      if (t === "passed") return '<span class="badge badge-passed">passed</span>';
+      if (t === "failed") return '<span class="badge badge-failed">failed</span>';
+      if (t === "not_assigned" || t === "") return "—";
+      return '<span class="badge badge-gray">' + t + "</span>";
+    }
+    function n(v) { return v === null || v === undefined ? null : Number(v); }
+    function f(v, dp) { return v === null ? "—" : v.toFixed(dp === undefined ? 1 : dp); }
+    function depthCell(r) {
+      var design   = n(r.design_depth_m);
+      var actual   = n(r.actual_depth_m);
+      var reported = actual !== null ? actual : n(r.current_depth_m);
+      if (reported === null && design === null) return "—";
+      return f(reported, 2) + " / " + f(design, 2);
+    }
+
     window.onShellReady = async function () {
       var projectId = new URLSearchParams(location.search).get("project");
       var titleEl = document.getElementById("project-title");
@@ -41,11 +105,35 @@
       }
 
       try {
-        var projects = await Dash.getProjectPulse();
-        var p = projects.find(function (x) { return x.project_id === projectId; });
-        titleEl.textContent = p
-          ? p.project_code + " — " + (p.project_name || "")
-          : "Unknown project";
+        var results = await Promise.all([Dash.getProjectPulse(), Dash.getPileRegister(projectId)]);
+        var p = results[0].find(function (x) { return x.project_id === projectId; });
+        var piles = results[1];
+        titleEl.textContent = p ? p.project_code + " — " + (p.project_name || "") : "Unknown project";
+
+        var tbody = document.getElementById("rows");
+        document.getElementById("table-wrap").style.display = "";
+        if (!piles.length) {
+          tbody.innerHTML = '<tr><td colspan="5" class="empty">No piles registered for this project yet.</td></tr>';
+          return;
+        }
+
+        // zone-grouped rows
+        var zones = {};
+        piles.forEach(function (r) { var z = r.zone || "Unzoned"; (zones[z] = zones[z] || []).push(r); });
+
+        tbody.innerHTML = Object.keys(zones).sort().map(function (z) {
+          var zr = zones[z];
+          return '<tr class="zone-row"><td colspan="5">' + z + " — " + zr.length + " pile(s)</td></tr>" +
+            zr.map(function (r) {
+              return "<tr>" +
+                "<td><strong>" + (r.pile_mark_no || "") + "</strong></td>" +
+                "<td>" + stageBadge(r) + "</td>" +
+                '<td class="num">' + depthCell(r) + "</td>" +
+                "<td>" + boreChip(r) + "</td>" +
+                "<td>" + testBadge(r) + "</td>" +
+              "</tr>";
+            }).join("");
+        }).join("");
       } catch (e) {
         titleEl.textContent = "";
         document.getElementById("error").innerHTML =
