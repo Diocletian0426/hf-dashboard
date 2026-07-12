@@ -30,6 +30,8 @@
    await Dash.getIssues(status?)                  -> issue board ('open' default = open+in_progress,
                                                      'all', or an exact status)
    await Dash.getMachines()                       -> machine fleet rows
+   await Dash.getMachineServiceHistory()          -> all servicing records (newest first)
+   await Dash.getMachineActivity()                -> last 14 days of daily machine reports
    await Dash.getShifts(dateYYYYMMDD, projectId?) -> who worked that day (punch data)
    await Dash.getSitesMissingGeofence()           -> active sites with workers but no GPS set
    await Dash.getRecentPunches(dateYYYYMMDD, projectId?, limit?) -> raw punch list
@@ -129,8 +131,18 @@
   }
 
   function getMachines() {
-    // the view already orders maintenance-first, then by machine code
+    // the view orders by machine code (since 0030)
     return q(sb.from("v_machine_fleet").select("*"));
+  }
+
+  function getMachineServiceHistory() {
+    // full servicing history, newest first (view is pre-ordered)
+    return q(sb.from("v_machine_service_history").select("*"));
+  }
+
+  function getMachineActivity() {
+    // last 14 days of daily machine reports, newest first (view is pre-ordered)
+    return q(sb.from("v_machine_recent_activity").select("*"));
   }
 
   function getShifts(date, projectId) {
@@ -215,6 +227,8 @@
     getPileRegister: getPileRegister,
     getIssues: getIssues,
     getMachines: getMachines,
+    getMachineServiceHistory: getMachineServiceHistory,
+    getMachineActivity: getMachineActivity,
     getShifts: getShifts,
     getSitesMissingGeofence: getSitesMissingGeofence,
     getRecentPunches: getRecentPunches,

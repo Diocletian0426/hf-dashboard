@@ -218,13 +218,13 @@ button.chase-pile:hover { background: #dbeafe; }
 @keyframes chase-flash { 0% { background: #fde68a; } 100% { background: transparent; } }
 tr.pile-row.flash > td, tr.machine-row.flash > td { animation: chase-flash 1.6s ease-out; }
 
-/* ---- pile record card (pile records step 3) ---- */
-tr.pile-row { cursor: pointer; }
-tr.pile-row .row-caret {
+/* ---- record card (pile + machine pages share these) ---- */
+tr.pile-row, tr.machine-row { cursor: pointer; }
+tr.pile-row .row-caret, tr.machine-row .row-caret {
   display: inline-block; font-size: 10px; color: #9ca3af;
   margin-right: 6px; transition: transform .15s;
 }
-tr.pile-row.open .row-caret { transform: rotate(90deg); }
+tr.pile-row.open .row-caret, tr.machine-row.open .row-caret { transform: rotate(90deg); }
 tr[hidden] { display: none; }
 tr.pile-card-row > td {
   background: #fbfcfe; white-space: normal;

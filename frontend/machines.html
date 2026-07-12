@@ -52,7 +52,13 @@
          amber date when 3+ days stale) | Diesel 7d | Mobilised | Comment
          (= the machine's issue track record, all issues ever linked:
          amber Yes when open, grey Yes when history only, tooltip lists).
-         Record card comes as element 4. -->
+
+         RECORD CARD (element 4): click a machine row and a full-width card
+         opens under it (reuses the pile page's record-card styles — same
+         component): identity chips, whereabouts + move dates, servicing
+         summary + full service history (0031 view), recent activity
+         (last 14 days of daily reports), and the issue track record.
+         Click the row again to close. -->
     <div class="zone-tools" id="zone-tools" hidden>
       <button type="button" onclick="setAllZones(true)">Expand all</button>
       <button type="button" onclick="setAllZones(false)">Collapse all</button>
@@ -233,6 +239,126 @@
              (machineIssues.length > 1 ? " (" + machineIssues.length + ")" : "") + "</span>";
     }
 
+    // ================= RECORD CARD (element 4) =================
+    // '2026-07-03' -> '03 Jul 2026'
+    function dstr(d) {
+      if (!d) return "—";
+      return new Intl.DateTimeFormat("en-MY", { day: "2-digit", month: "short", year: "numeric" })
+        .format(new Date(d + "T00:00:00"));
+    }
+    function numOr(v, unit) {
+      return (v === null || v === undefined) ? "—" : Math.round(Number(v)) + (unit ? " " + unit : "");
+    }
+    // parts jsonb: expected [{name, qty}] — render compactly, skip when absent
+    function partsText(parts) {
+      if (!parts) return "";
+      if (typeof parts === "string") { try { parts = JSON.parse(parts); } catch (e) { return ""; } }
+      if (!Array.isArray(parts) || !parts.length) return "";
+      return parts.map(function (p) {
+        return (p.name || "?") + (p.qty ? " ×" + p.qty : "");
+      }).join(", ");
+    }
+
+    function serviceListHtml(list) {
+      if (!list || !list.length)
+        return '<div class="muted-line">No servicing recorded for this machine yet.</div>';
+      return list.map(function (r) {
+        var cls = r.service_type === "repair" ? "badge-pending" : "badge-approved";
+        var bits = [];
+        if (r.hour_meter !== null && r.hour_meter !== undefined) bits.push("hour meter " + Math.round(Number(r.hour_meter)));
+        var parts = partsText(r.parts);
+        if (parts) bits.push("parts: " + escHtml(parts));
+        if (r.vendor) bits.push("vendor: " + escHtml(r.vendor));
+        if (r.performed_by_name) bits.push("by " + escHtml(r.performed_by_name));
+        return '<div class="pc-line"><strong>' + dstr(r.service_date) + "</strong> " +
+               '<span class="badge ' + cls + '">' + escHtml(r.service_type || "?") + "</span> " +
+               escHtml(r.description || "") +
+               (bits.length ? ' <span class="pc-meta-inline">· ' + bits.join(" · ") + "</span>" : "") +
+               (r.remarks ? '<div class="pc-meta">' + escHtml(r.remarks) + "</div>" : "") +
+               "</div>";
+      }).join("");
+    }
+
+    function activityListHtml(list) {
+      if (!list || !list.length)
+        return '<div class="muted-line">No reports in the last 14 days.</div>';
+      return list.slice(0, 7).map(function (a) {
+        var cls = a.status === "operating" ? "badge-approved"
+                : a.status === "breakdown" ? "badge-breakdown" : "badge-gray";
+        var bits = [];
+        if (a.hours_operated !== null && a.hours_operated !== undefined) bits.push(a.hours_operated + "h operated");
+        if (a.fuel_consumed_l) bits.push(Math.round(a.fuel_consumed_l) + " L diesel");
+        if (a.refuel_l) bits.push("refuel " + Math.round(a.refuel_l) + " L");
+        if (a.diesel_balance_l !== null && a.diesel_balance_l !== undefined) bits.push("balance " + Math.round(a.diesel_balance_l) + " L");
+        return '<div class="pc-line"><strong>' + dstr(a.log_date) + "</strong> " +
+               '<span class="badge ' + cls + '">' + escHtml(a.status || "?") + "</span>" +
+               (bits.length ? ' <span class="pc-meta-inline">' + bits.join(" · ") + "</span>" : "") +
+               (a.remarks ? '<div class="pc-meta">' + escHtml(a.remarks) + "</div>" : "") +
+               "</div>";
+      }).join("") + (list.length > 7
+        ? '<div class="pc-meta">+ ' + (list.length - 7) + " older report(s) in the last 14 days</div>" : "");
+    }
+
+    function issueListHtml(list) {
+      if (!list || !list.length)
+        return '<div class="muted-line">No problems recorded against this machine.</div>';
+      var sorted = list.slice().sort(function (a, b) {
+        return String(b.raised_date || "").localeCompare(String(a.raised_date || ""));
+      });
+      return sorted.map(function (i) {
+        var st = i.status || "";
+        var cls = (st === "open") ? "open" : (st === "in_progress") ? "in_progress" : "resolved";
+        var meta = [dstr(i.raised_date) + (i.resolved_date ? " → resolved " + dstr(i.resolved_date) : "")];
+        if (i.priority) meta.push(escHtml(i.priority));
+        if (i.raised_by_name_resolved) meta.push("raised by " + escHtml(i.raised_by_name_resolved));
+        var latest = i.latest_action
+          ? '<div class="pc-latest">latest action: ' + escHtml(i.latest_action) +
+            (i.latest_action_date ? " (" + Dash.klDateTime(i.latest_action_date) + ")" : "") + "</div>"
+          : "";
+        return '<div class="pc-issue"><strong>#' + i.issue_number + "</strong> " + escHtml(i.title || "") +
+               ' <span class="badge badge-' + cls + '">' + escHtml(st) + "</span>" +
+               '<div class="pc-meta">' + meta.join(" · ") + "</div>" + latest + "</div>";
+      }).join("");
+    }
+
+    function machineCard(m, services, activity, issues) {
+      var chips = [];
+      if (m.registration_no) chips.push("Reg " + escHtml(m.registration_no));
+      if (m.serial_number) chips.push("S/N " + escHtml(m.serial_number));
+      if (m.year_manufactured) chips.push("Year " + m.year_manufactured);
+
+      var head =
+        '<div class="pc-head"><strong>' + escHtml(m.machine_code) + "</strong> " +
+        escHtml(typeLabel(m.machine_type)) +
+        (m.brand || m.model ? " · " + escHtml([m.brand, m.model].filter(Boolean).join(" ")) : "") +
+        (chips.length ? ' <span class="pc-chips">' + chips.join(" · ") + "</span>" : "") + "</div>";
+
+      var where =
+        "<div><h3>Whereabouts</h3>" +
+        '<div class="pc-line">Site: ' + (m.current_site
+          ? escHtml(m.current_site) + (m.current_site_name ? " — " + escHtml(m.current_site_name) : "")
+          : "unassigned") + "</div>" +
+        '<div class="pc-line">Mobilised: ' + dstr(m.mobilised_date) + "</div>" +
+        '<div class="pc-line">Next move: ' + dstr(m.next_move_date) + "</div></div>";
+
+      var tracking =
+        "<div><h3>Service tracking</h3>" +
+        '<div class="pc-line">Hour meter: ' + numOr(m.current_hour_meter, "h") +
+        (m.service_interval_hours ? ' <span class="muted">(interval ' + m.service_interval_hours + " h)</span>" : "") + "</div>" +
+        '<div class="pc-line">Next service due: ' + numOr(m.next_service_due_hours, "h") +
+        (m.hour_service_overdue ? ' <span class="badge badge-critical">overdue</span>' : "") + "</div>" +
+        '<div class="pc-line">Last touched: ' + dstr(m.last_touched_date) +
+        ' <span class="muted">(any service or repair)</span></div></div>';
+
+      return '<tr class="pile-card-row" hidden><td colspan="7"><div class="pile-card">' +
+             head +
+             '<div class="pc-grid"><div><h3>Servicing history</h3>' + serviceListHtml(services) + "</div>" +
+             '<div class="pc-side">' + where + tracking + "</div></div>" +
+             "<div><h3>Recent activity (14 days)</h3>" + activityListHtml(activity) + "</div>" +
+             "<div><h3>Track record</h3>" + issueListHtml(issues) + "</div>" +
+             "</div></td></tr>";
+    }
+
     var THEAD =
       "<thead><tr>" +
       "<th>Machine</th><th>Type</th><th>Brand / model</th>" +
@@ -242,7 +368,7 @@
       '<th title="Has any problem been recorded against this machine? Hover a Yes for the list.">Comment</th>' +
       "</tr></thead>";
 
-    function siteTables(machines, allIssuesByMachine) {
+    function siteTables(machines, allIssuesByMachine, serviceByMachine, activityByMachine) {
       var groups = {};
       machines.forEach(function (m) {
         var k = m.current_site || "Unassigned";
@@ -260,15 +386,17 @@
         var title = k === "Unassigned" ? "Unassigned"
                   : k + (list[0].current_site_name ? " — " + escHtml(list[0].current_site_name) : "");
         var rows = list.map(function (m) {
-          return '<tr class="machine-row" data-machine="' + esc(m.machine_code) + '">' +
-            "<td><strong>" + escHtml(m.machine_code) + "</strong></td>" +
+          return '<tr class="machine-row" data-machine="' + esc(m.machine_code) + '" title="Click to open the full record">' +
+            '<td><span class="row-caret">&#9656;</span><strong>' + escHtml(m.machine_code) + "</strong></td>" +
             "<td>" + escHtml(typeLabel(m.machine_type)) + "</td>" +
             '<td class="wrap">' + escHtml([m.brand, m.model].filter(Boolean).join(" ")) + "</td>" +
             "<td>" + lastReportCell(m) + "</td>" +
             '<td class="num">' + (m.last_status ? Math.round(m.diesel_last_7_days || 0) : "—") + "</td>" +
             "<td>" + (m.mobilised_date || "—") + "</td>" +
             "<td>" + commentCell(allIssuesByMachine[m.machine_code]) + "</td>" +
-          "</tr>";
+          "</tr>" +
+          machineCard(m, serviceByMachine[m.machine_code], activityByMachine[m.machine_code],
+                      allIssuesByMachine[m.machine_code]);
         }).join("");
         return '<details class="zone" open>' +
                '<summary><span class="zone-name">' + title + "</span>" +
@@ -280,7 +408,7 @@
       }).join("");
     }
 
-    // chip click -> jump to the machine's row (no-op until element 3 tables exist)
+    // chip click -> jump to the machine's row, open its site block + card
     function wireAttentionJumps() {
       document.getElementById("attention").addEventListener("click", function (ev) {
         var btn = ev.target.closest("button.chase-pile");
@@ -290,9 +418,26 @@
         if (!row) return;
         var det = row.closest("details");
         if (det) det.open = true;
+        var card = row.nextElementSibling;
+        if (card && card.classList.contains("pile-card-row") && card.hidden) {
+          card.hidden = false;
+          row.classList.add("open");
+        }
         row.scrollIntoView({ behavior: "smooth", block: "center" });
         row.classList.add("flash");
         setTimeout(function () { row.classList.remove("flash"); }, 1700);
+      });
+    }
+
+    // click a machine row -> toggle its record card
+    function wireCardToggles() {
+      document.getElementById("sites").addEventListener("click", function (ev) {
+        var tr = ev.target.closest("tr.machine-row");
+        if (!tr) return;
+        var card = tr.nextElementSibling;
+        if (!card || !card.classList.contains("pile-card-row")) return;
+        card.hidden = !card.hidden;
+        tr.classList.toggle("open", !card.hidden);
       });
     }
 
@@ -300,9 +445,20 @@
       try {
         var results = await Promise.all([
           Dash.getMachines(),
-          Dash.getIssues("all")      // full history — Comment col wants resolved ones too
+          Dash.getIssues("all"),           // full history — Comment col wants resolved ones too
+          Dash.getMachineServiceHistory(), // record card: servicing history
+          Dash.getMachineActivity()        // record card: last 14 days of reports
         ]);
         var machines = results[0];
+
+        var serviceByMachine = {};
+        results[2].forEach(function (r) {
+          (serviceByMachine[r.machine_code] = serviceByMachine[r.machine_code] || []).push(r);
+        });
+        var activityByMachine = {};
+        results[3].forEach(function (a) {
+          (activityByMachine[a.machine_code] = activityByMachine[a.machine_code] || []).push(a);
+        });
 
         // issues keyed by machine code (v_issue_board carries machine_code):
         // ALL issues feed the Comment column (track record), the open subset
@@ -318,9 +474,11 @@
 
         document.getElementById("fleet-strip").innerHTML = fleetStrip(machines);
         document.getElementById("attention").innerHTML = needsAttention(machines, openIssuesByMachine);
-        document.getElementById("sites").innerHTML = siteTables(machines, allIssuesByMachine);
+        document.getElementById("sites").innerHTML =
+          siteTables(machines, allIssuesByMachine, serviceByMachine, activityByMachine);
         document.getElementById("zone-tools").hidden = false;
         wireAttentionJumps();
+        wireCardToggles();
       } catch (e) {
         document.getElementById("error").innerHTML =
           '<div class="banner banner-red">Could not load: ' + (e.message || e) + "</div>";
