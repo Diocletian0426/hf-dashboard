@@ -16,24 +16,13 @@
     <div class="page-eyebrow">Pile Records</div>
     <h1 id="project-title">Loading…</h1>
 
-    <!-- ================= WORKING TABLE (step 2) =================
-         Compact scan rows, zone-grouped. Starting columns:
-         Pile | Stage | Depth (reported / design) | Bore log | Testing
-         Grows/shrinks by user reaction. Expand-card comes in step 3. -->
-    <div class="table-wrap" id="table-wrap" style="display:none">
-      <table>
-        <thead>
-          <tr>
-            <th>Pile</th>
-            <th>Stage</th>
-            <th class="num" title="Latest reported depth (site reports, provisional) / design depth (drawing)">Depth — reported / design (m)</th>
-            <th title="Bore-log record state">Bore log</th>
-            <th>Testing</th>
-          </tr>
-        </thead>
-        <tbody id="rows"></tbody>
-      </table>
-    </div>
+    <!-- ================= WORKING TABLES (step 2) =================
+         One table block PER ZONE. Columns:
+         Pile | Stage | Depth (reported / design) | Bore log | Testing | Comment
+         "Comment" = Yes/No: has any problem ever been recorded against this
+         pile (site issues linked to it)? Tooltip lists the issues.
+         Expand-card comes in step 3. -->
+    <div id="zones"></div>
 
     <div id="error"></div>
 
@@ -84,6 +73,7 @@
     }
     function n(v) { return v === null || v === undefined ? null : Number(v); }
     function f(v, dp) { return v === null ? "—" : v.toFixed(dp === undefined ? 1 : dp); }
+    function esc(s) { return String(s === null || s === undefined ? "" : s).replace(/"/g, "&quot;"); }
     function depthCell(r) {
       var design   = n(r.design_depth_m);
       var actual   = n(r.actual_depth_m);
@@ -91,6 +81,30 @@
       if (reported === null && design === null) return "—";
       return f(reported, 2) + " / " + f(design, 2);
     }
+
+    // "Comment" = have any problems ever been recorded against this pile?
+    // Source: site issues linked to the pile. Yes -> tooltip lists them;
+    // amber when at least one is still open, grey when all are closed.
+    function commentCell(pileIssues) {
+      if (!pileIssues || !pileIssues.length) return '<span class="muted-line">No</span>';
+      var open = pileIssues.some(function (i) {
+        return i.status === "open" || i.status === "in_progress";
+      });
+      var tip = pileIssues.map(function (i) {
+        return "#" + i.issue_number + " " + (i.title || "") + " (" + i.status + ")";
+      }).join("\n");
+      return '<span class="badge ' + (open ? "badge-anomaly" : "badge-gray") + '" title="' + esc(tip) + '">Yes' +
+             (pileIssues.length > 1 ? " (" + pileIssues.length + ")" : "") + "</span>";
+    }
+
+    var THEAD =
+      "<thead><tr>" +
+      "<th>Pile</th><th>Stage</th>" +
+      '<th class="num" title="Latest reported depth (site reports, provisional) / design depth (drawing)">Depth — reported / design (m)</th>' +
+      '<th title="Bore-log record state">Bore log</th>' +
+      "<th>Testing</th>" +
+      '<th title="Has any problem been recorded against this pile? Hover a Yes for the list.">Comment</th>' +
+      "</tr></thead>";
 
     window.onShellReady = async function () {
       var projectId = new URLSearchParams(location.search).get("project");
@@ -105,34 +119,50 @@
       }
 
       try {
-        var results = await Promise.all([Dash.getProjectPulse(), Dash.getPileRegister(projectId)]);
+        var results = await Promise.all([
+          Dash.getProjectPulse(),
+          Dash.getPileRegister(projectId),
+          Dash.getIssues("all")
+        ]);
         var p = results[0].find(function (x) { return x.project_id === projectId; });
         var piles = results[1];
         titleEl.textContent = p ? p.project_code + " — " + (p.project_name || "") : "Unknown project";
 
-        var tbody = document.getElementById("rows");
-        document.getElementById("table-wrap").style.display = "";
+        // issues recorded against THIS project's piles, keyed by pile mark
+        var issuesByPile = {};
+        if (p) {
+          results[2].forEach(function (i) {
+            if (i.project_code === p.project_code && i.affected_pile_mark) {
+              (issuesByPile[i.affected_pile_mark] = issuesByPile[i.affected_pile_mark] || []).push(i);
+            }
+          });
+        }
+
+        var zonesEl = document.getElementById("zones");
         if (!piles.length) {
-          tbody.innerHTML = '<tr><td colspan="5" class="empty">No piles registered for this project yet.</td></tr>';
+          zonesEl.innerHTML = '<div class="table-wrap"><table><tbody><tr><td class="empty">No piles registered for this project yet.</td></tr></tbody></table></div>';
           return;
         }
 
-        // zone-grouped rows
+        // one table block per zone
         var zones = {};
         piles.forEach(function (r) { var z = r.zone || "Unzoned"; (zones[z] = zones[z] || []).push(r); });
 
-        tbody.innerHTML = Object.keys(zones).sort().map(function (z) {
+        zonesEl.innerHTML = Object.keys(zones).sort().map(function (z) {
           var zr = zones[z];
-          return '<tr class="zone-row"><td colspan="5">' + z + " — " + zr.length + " pile(s)</td></tr>" +
-            zr.map(function (r) {
-              return "<tr>" +
-                "<td><strong>" + (r.pile_mark_no || "") + "</strong></td>" +
-                "<td>" + stageBadge(r) + "</td>" +
-                '<td class="num">' + depthCell(r) + "</td>" +
-                "<td>" + boreChip(r) + "</td>" +
-                "<td>" + testBadge(r) + "</td>" +
-              "</tr>";
-            }).join("");
+          var rows = zr.map(function (r) {
+            return "<tr>" +
+              "<td><strong>" + (r.pile_mark_no || "") + "</strong></td>" +
+              "<td>" + stageBadge(r) + "</td>" +
+              '<td class="num">' + depthCell(r) + "</td>" +
+              "<td>" + boreChip(r) + "</td>" +
+              "<td>" + testBadge(r) + "</td>" +
+              "<td>" + commentCell(issuesByPile[r.pile_mark_no]) + "</td>" +
+            "</tr>";
+          }).join("");
+          return '<h2 class="section-title">' + z + " — " + zr.length + " pile(s)</h2>" +
+                 '<div class="table-wrap zone-table"><table>' + THEAD +
+                 "<tbody>" + rows + "</tbody></table></div>";
         }).join("");
       } catch (e) {
         titleEl.textContent = "";
