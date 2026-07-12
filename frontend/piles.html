@@ -32,7 +32,13 @@
          missing paperwork, four rules — 1) cast but no bore log,
          2) test overdue, 3) test eligible but not scheduled, 4) test done
          but report reference missing. Click a pile chip to jump to its row
-         and open its card. -->
+         and open its card.
+
+         PIPELINE STRIP (step 5): one thin segmented meter — how many piles
+         sit at each stage. Planned = neutral grey (not yet progress); the
+         five working stages wear one blue, light to dark toward done
+         (ordinal ramp, validated). Hover a segment for the exact count. -->
+    <div id="pipeline"></div>
     <div id="chase"></div>
     <div class="zone-tools" id="zone-tools" hidden>
       <button type="button" onclick="setAllZones(true)">Expand all</button>
@@ -256,6 +262,46 @@
              "</div></td></tr>";
     }
 
+    // ================= PIPELINE STRIP (step 5) =================
+    // Planned = grey (no progress ink); boring stages = blues deepening
+    // with progress; Cast/Trimmed switch to green — same "green = cast"
+    // language as the stage badges. Palette validated (CVD-safe on white).
+    var STAGE_COLORS = {
+      "Planned": "#e5e7eb",
+      "Boring":  "#5598e7",
+      "Bored":   "#2a78d6",
+      "Cage":    "#1c5cab",
+      "Cast":    "#1baf7a",
+      "Trimmed": "#008300"
+    };
+
+    function pipelineStrip(piles) {
+      var counts = {};
+      STAGES.forEach(function (s) { counts[s[0]] = 0; });
+      piles.forEach(function (r) { counts[stageOf(r.construction_status)]++; });
+      var total = piles.length;
+      if (!total) return "";
+
+      var segs = STAGES.map(function (s) {
+        var name = s[0], c = counts[name];
+        if (!c) return "";
+        var pct = Math.round(c * 100 / total);
+        return '<span class="pipe-seg" style="flex-grow:' + c + ";background:" + STAGE_COLORS[name] +
+               '" title="' + name + " — " + c + " pile" + (c === 1 ? "" : "s") + " (" + pct + '%)"></span>';
+      }).join("");
+
+      var keys = STAGES.map(function (s) {
+        var name = s[0], c = counts[name];
+        return '<span class="pipe-key' + (c ? "" : " zero") + '">' +
+               '<i style="background:' + STAGE_COLORS[name] + '"></i>' +
+               name + " <b>" + c + "</b></span>";
+      }).join("");
+
+      return '<div class="pipe-card"><div class="pipe-bar">' + segs + "</div>" +
+             '<div class="pipe-legend"><span class="pipe-total">' + total + " piles</span>" +
+             keys + "</div></div>";
+    }
+
     // ================= RECORDS TO CHASE (step 4) =================
 
     // a clickable pile chip; data-pile lets the click handler find the row
@@ -439,7 +485,8 @@
         }).join("");
         document.getElementById("zone-tools").hidden = false;
 
-        // records-to-chase panel above the tables
+        // pipeline strip + records-to-chase panel above the tables
+        document.getElementById("pipeline").innerHTML = pipelineStrip(piles);
         document.getElementById("chase").innerHTML = chaseChecklist(piles, testsByPile);
         wireChaseJumps();
 
