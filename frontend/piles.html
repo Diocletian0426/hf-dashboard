@@ -17,11 +17,16 @@
     <h1 id="project-title">Loading…</h1>
 
     <!-- ================= WORKING TABLES (step 2) =================
-         One table block PER ZONE. Columns:
-         Pile | Stage | Depth (reported / design) | Bore log | Testing | Comment
+         One COLLAPSIBLE block per zone (click the zone header to open/close).
+         Header shows: zone name · pile count · cast count.
+         Columns: Pile | Stage | Depth (reported / design) | Bore log | Testing | Comment
          "Comment" = Yes/No: has any problem ever been recorded against this
          pile (site issues linked to it)? Tooltip lists the issues.
          Expand-card comes in step 3. -->
+    <div class="zone-tools" id="zone-tools" hidden>
+      <button type="button" onclick="setAllZones(true)">Expand all</button>
+      <button type="button" onclick="setAllZones(false)">Collapse all</button>
+    </div>
     <div id="zones"></div>
 
     <div id="error"></div>
@@ -97,6 +102,19 @@
              (pileIssues.length > 1 ? " (" + pileIssues.length + ")" : "") + "</span>";
     }
 
+    // header line for a zone block: "12 piles · 9 cast"
+    // "cast" = concrete actually poured (cast_complete or head_trimmed)
+    function zoneSummary(zr) {
+      var cast = zr.filter(function (r) {
+        return r.construction_status === "cast_complete" || r.construction_status === "head_trimmed";
+      }).length;
+      return zr.length + " pile" + (zr.length === 1 ? "" : "s") + " · " + cast + " cast";
+    }
+
+    function setAllZones(open) {
+      document.querySelectorAll("details.zone").forEach(function (d) { d.open = open; });
+    }
+
     var THEAD =
       "<thead><tr>" +
       "<th>Pile</th><th>Stage</th>" +
@@ -160,10 +178,14 @@
               "<td>" + commentCell(issuesByPile[r.pile_mark_no]) + "</td>" +
             "</tr>";
           }).join("");
-          return '<h2 class="section-title">' + z + " — " + zr.length + " pile(s)</h2>" +
+          return '<details class="zone" open>' +
+                 '<summary><span class="zone-name">' + z + '</span>' +
+                 '<span class="zone-count">' + zoneSummary(zr) + "</span></summary>" +
                  '<div class="table-wrap zone-table"><table>' + THEAD +
-                 "<tbody>" + rows + "</tbody></table></div>";
+                 "<tbody>" + rows + "</tbody></table></div>" +
+                 "</details>";
         }).join("");
+        document.getElementById("zone-tools").hidden = false;
       } catch (e) {
         titleEl.textContent = "";
         document.getElementById("error").innerHTML =

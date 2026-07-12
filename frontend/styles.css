@@ -158,6 +158,28 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .neg { color: #dc2626; font-weight: 600; }
 .bold { font-weight: 700; }
 
+/* ---- collapsible zone blocks (pile records) ---- */
+details.zone { margin: 18px 0 10px; }
+details.zone > summary {
+  cursor: pointer; list-style: none; display: flex; align-items: baseline; gap: 8px;
+  font-size: 15px; color: #4b5563; padding: 4px 0; user-select: none;
+}
+details.zone > summary::-webkit-details-marker { display: none; }
+details.zone > summary::before {
+  content: "\25B8"; display: inline-block; font-size: 12px; color: #9ca3af;
+  transition: transform .15s; align-self: center;
+}
+details.zone[open] > summary::before { transform: rotate(90deg); }
+details.zone > summary:hover .zone-name { color: #111827; }
+.zone-name { font-weight: 600; }
+.zone-count { color: #9ca3af; font-size: 13px; }
+details.zone > .table-wrap { margin-top: 6px; }
+.zone-tools { display: flex; gap: 14px; margin: 14px 0 0; }
+.zone-tools button {
+  background: none; border: none; padding: 0; color: #2563eb; font-size: 13px; cursor: pointer;
+}
+.zone-tools button:hover { text-decoration: underline; }
+
 /* progress bar (projects page) */
 .bar { background: #e5e7eb; border-radius: 6px; height: 10px; min-width: 90px; overflow: hidden; }
 .bar > span { display: block; height: 100%; background: #16a34a; }
