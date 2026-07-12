@@ -136,6 +136,12 @@ h1 { font-size: 20px; margin: 6px 0 4px; }
 .lg-swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
 .lg-dash { width: 20px; border-top: 2px dashed #52514e; display: inline-block; }
 
+/* ---- page header (pile records v2) ---- */
+.page-eyebrow {
+  font-size: 12px; font-weight: 600; letter-spacing: 1.2px;
+  text-transform: uppercase; color: #898781; margin: 6px 0 2px;
+}
+
 tr.zone-row td {
   background: #eef2f7; font-weight: 600; font-size: 12.5px;
   color: #374151; border-top: 2px solid #dbe2ea;
