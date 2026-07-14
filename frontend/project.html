@@ -31,6 +31,12 @@
 
     <div id="pile-strip"></div>
 
+    <!-- 14-day production trend (round C): headline this-week vs last-week,
+         then one column per day — blue bar = metres bored (only reports that
+         included start/end depths carry metres), green number = piles cast
+         that day. Hidden entirely when the project has no recent activity. -->
+    <div id="trend"></div>
+
     <div id="sections"></div>
 
     <div id="error"></div>
@@ -132,6 +138,79 @@
              '<div class="pipe-legend"><span class="pipe-total">' + piles.length + " piles</span>" + keys +
              '<a class="pipe-link" href="piles.html?project=' + projectId + '">Open pile records →</a></div>' +
              zoneRows + "</div>";
+    }
+
+    // ---- 14-day production trend ----
+    function addDays(dateStr, n) {
+      var d = new Date(dateStr + "T00:00:00Z");
+      d.setUTCDate(d.getUTCDate() + n);
+      return d.toISOString().slice(0, 10);
+    }
+    function f1(v) { return (Math.round(v * 10) / 10).toString(); }
+
+    function trendSection(rows) {
+      if (!rows.length) return "";   // no recent activity at all -> no card
+      var today = Dash.todayKL();
+      var byDate = {};
+      rows.forEach(function (r) { byDate[r.log_date] = r; });
+
+      // last 14 days, oldest first
+      var days = [];
+      for (var i = 13; i >= 0; i--) {
+        var key = addDays(today, -i);
+        var r = byDate[key];
+        days.push({
+          date: key,
+          metres: r ? Number(r.metres_bored) || 0 : 0,
+          cast: r ? Number(r.piles_cast) || 0 : 0,
+          boredOn: r ? Number(r.piles_bored_on) || 0 : 0
+        });
+      }
+      var prev = days.slice(0, 7), cur = days.slice(7);
+      function sums(list) {
+        return list.reduce(function (s, d) {
+          return { cast: s.cast + d.cast, metres: s.metres + d.metres };
+        }, { cast: 0, metres: 0 });
+      }
+      var cw = sums(cur), pw = sums(prev);
+
+      var anything = days.some(function (d) { return d.metres > 0 || d.cast > 0 || d.boredOn > 0; });
+      if (!anything) return "";      // active elsewhere in the 28d window only
+
+      var deltaBits = [];
+      deltaBits.push((cw.cast === pw.cast ? "=" : cw.cast > pw.cast ? "↑" : "↓") +
+                     " casts " + (cw.cast - pw.cast >= 0 ? "+" : "") + (cw.cast - pw.cast));
+      deltaBits.push((cw.metres === pw.metres ? "=" : cw.metres > pw.metres ? "↑" : "↓") +
+                     " metres " + (cw.metres - pw.metres >= 0 ? "+" : "") + f1(cw.metres - pw.metres));
+
+      var maxM = Math.max.apply(null, days.map(function (d) { return d.metres; }).concat([1]));
+      var cols = days.map(function (d) {
+        var hPct = d.metres > 0 ? Math.max(6, Math.round(d.metres / maxM * 100)) : 0;
+        var tip = dstr(d.date) + " — " + f1(d.metres) + " m bored" +
+                  (d.boredOn ? " (" + d.boredOn + " pile" + (d.boredOn === 1 ? "" : "s") + ")" : "") +
+                  " · " + d.cast + " cast";
+        return '<div class="trend-col" title="' + esc(tip) + '">' +
+               '<div class="trend-barbox">' +
+               (hPct ? '<div class="trend-bar" style="height:' + hPct + '%"></div>' : "") +
+               "</div>" +
+               '<div class="trend-cast">' + (d.cast ? d.cast : "") + "</div>" +
+               "</div>";
+      }).join("");
+
+      var labels = '<div class="trend-labels">' +
+                   "<span>" + dstr(days[0].date) + "</span>" +
+                   "<span>" + dstr(days[7].date) + "</span>" +
+                   "<span>" + dstr(days[13].date) + "</span></div>";
+
+      return '<div class="pipe-card">' +
+             '<div class="trend-head"><strong>This week: ' + cw.cast + " pile" + (cw.cast === 1 ? "" : "s") +
+             " cast · " + f1(cw.metres) + ' m bored</strong>' +
+             '<span class="trend-compare">last week: ' + pw.cast + " cast · " + f1(pw.metres) + " m · " +
+             deltaBits.join(" · ") + "</span></div>" +
+             '<div class="trend-chart">' + cols + "</div>" + labels +
+             '<div class="trend-castnote"><i></i>green number = piles cast that day</div>' +
+             '<div class="pipe-note">metres count only the reports that included start/end depths — ' +
+             "quiet days may still have had boring</div></div>";
     }
 
     // ---- section: open issues on this site ----
@@ -259,7 +338,8 @@
           Dash.getIssues("all"),
           Dash.getMachines(),
           Dash.getTests(true),
-          Dash.getProjectSupervisors()
+          Dash.getProjectSupervisors(),
+          Dash.getProjectDailyOutput()
         ]);
         var p = results[0].find(function (x) { return x.project_id === projectId; });
         if (!p) {
@@ -336,8 +416,10 @@
                  '<div class="value">' + k[1] + "</div></div>";
         }).join("");
 
-        // ---- progress by zone + sections ----
+        // ---- progress by zone + trend + sections ----
         document.getElementById("pile-strip").innerHTML = zoneProgress(piles, projectId);
+        var outputRows = results[6].filter(function (r) { return r.project_id === projectId; });
+        document.getElementById("trend").innerHTML = trendSection(outputRows);
         document.getElementById("sections").innerHTML =
           issuesSection(openIssues) +
           machinesSection(machines) +
