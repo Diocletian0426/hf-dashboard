@@ -153,31 +153,58 @@
              '<a class="section-link" href="machines.html">machines page →</a></h2>' + body;
     }
 
-    // ---- section: tests due / overdue ----
-    function testsSection(tests) {
-      var pending = tests.filter(function (t) {
-        return ["completed", "passed"].indexOf(t.status) === -1;
+    // ---- tests: pipeline buckets (shared by the KPI card + tests section) ----
+    // Curing -> To arrange (curing done, not booked; RED after the 7-day
+    // grace) -> Booked -> done. "Date missed" = a booked date passed.
+    var TEST_GRACE_DAYS = 7;
+    function testBuckets(tests) {
+      var done = ["completed", "passed"];
+      var b = { missed: [], notBooked: [], toArrange: [], booked: [], curing: [] };
+      tests.forEach(function (t) {
+        if (done.indexOf(t.status) !== -1 || t.test_result || t.actual_test_date) return;
+        if (t.is_overdue === true) { b.missed.push(t); return; }
+        if (t.scheduled_test_date) { b.booked.push(t); return; }
+        if (t.days_until_eligible === null || t.days_until_eligible === undefined) return;
+        if (t.days_until_eligible > 0) { b.curing.push(t); return; }
+        if (-t.days_until_eligible > TEST_GRACE_DAYS) b.notBooked.push(t);
+        else b.toArrange.push(t);
       });
-      var body;
-      if (!pending.length) {
-        body = '<div class="muted-line">&#10003; No tests waiting on this site.</div>';
-      } else {
-        body = pending.map(function (t) {
-          var over = t.is_overdue
-            ? ' <span class="badge badge-critical">overdue ' + (t.overdue_days || 0) + "d</span>" : "";
-          var when = t.actual_test_date ? "done " + dstr(t.actual_test_date)
-                   : t.scheduled_test_date ? "scheduled " + dstr(t.scheduled_test_date)
-                   : t.earliest_test_date ? "eligible from " + dstr(t.earliest_test_date)
-                   : "not scheduled";
-          return '<div class="pc-line"><strong>' + escHtml(t.pile_mark_no || "") + "</strong> " +
-                 escHtml(t.test_code || t.test_name || "test") +
-                 ' <span class="badge badge-' + (["scheduled", "pending"].indexOf(t.status) !== -1 ? t.status : "gray") + '">' +
-                 escHtml(t.status || "?") + "</span>" + over +
-                 ' <span class="pc-meta-inline">· ' + when + "</span></div>";
-        }).join("");
-      }
-      return '<h2 class="section-title">Tests waiting (' + pending.length + ")</h2>" +
+      return b;
+    }
+
+    function testsSection(tests) {
+      var b = testBuckets(tests);
+      var rows = [];
+      b.missed.forEach(function (t) {
+        rows.push(testLine(t, "badge-critical", "date missed",
+          "booked " + dstr(t.scheduled_test_date) + " · " + (t.overdue_days || 0) + "d late"));
+      });
+      b.notBooked.forEach(function (t) {
+        rows.push(testLine(t, "badge-critical", "not booked",
+          "curing done " + (-t.days_until_eligible) + "d ago"));
+      });
+      b.toArrange.forEach(function (t) {
+        rows.push(testLine(t, "badge-pending", "to arrange",
+          "curing done " + (-t.days_until_eligible) + "d ago"));
+      });
+      b.booked.forEach(function (t) {
+        rows.push(testLine(t, "badge-gray", "booked", dstr(t.scheduled_test_date)));
+      });
+      b.curing.forEach(function (t) {
+        rows.push(testLine(t, "badge-gray", "curing", "until " + dstr(t.earliest_test_date)));
+      });
+      var body = rows.length ? rows.join("")
+        : '<div class="muted-line">&#10003; No tests waiting on this site.</div>';
+      var actionable = b.missed.length + b.notBooked.length;
+      return '<h2 class="section-title">Tests (' +
+             (actionable ? actionable + " need action · " : "") + rows.length + " waiting)</h2>" +
              '<div class="hub-panel">' + body + "</div>";
+    }
+    function testLine(t, badgeCls, badgeText, detail) {
+      return '<div class="pc-line"><strong>' + escHtml(t.pile_mark_no || "") + "</strong> " +
+             escHtml(t.test_code || t.test_name || "test") +
+             ' <span class="badge ' + badgeCls + '">' + badgeText + "</span>" +
+             ' <span class="pc-meta-inline">· ' + detail + "</span></div>";
     }
 
     window.onShellReady = async function () {
@@ -198,7 +225,8 @@
           Dash.getPileRegister(projectId),
           Dash.getIssues("all"),
           Dash.getMachines(),
-          Dash.getTests(true)
+          Dash.getTests(true),
+          Dash.getProjectSupervisors()
         ]);
         var p = results[0].find(function (x) { return x.project_id === projectId; });
         if (!p) {
@@ -220,6 +248,8 @@
         var subBits = ['<span class="badge badge-' +
           (p.project_status === "active" ? "approved" : "gray") + '">' + p.project_status + "</span>"];
         if (p.client_name) subBits.push("Client: " + escHtml(p.client_name));
+        var supRow = results[5].find(function (s) { return s.project_id === projectId; });
+        if (supRow && supRow.supervisors) subBits.push("Supervisor: " + escHtml(supRow.supervisors));
         if (p.start_date) subBits.push(dstr(p.start_date) + " → " + dstr(p.target_end_date));
         if (p.days_remaining !== null && p.days_remaining !== undefined)
           subBits.push(p.days_remaining < 0
@@ -234,16 +264,38 @@
         subBits.push(health);
         document.getElementById("project-sub").innerHTML = subBits.join(" · ");
 
-        // ---- KPI cards ----
+        // ---- KPI cards (6, decision-focused) ----
         var total = p.total_piles_planned || p.total_piles_registered || 0;
         var pct = Math.max(0, Math.min(100, Number(p.progress_pct) || 0));
+
+        var crit = p.critical_open_issues || 0;
+        var oldestOpen = openIssues.reduce(function (mx, i) {
+          return Math.max(mx, i.days_since_raised || 0);
+        }, 0);
+
+        // test pipeline buckets (curing / to arrange / booked / late)
+        var tb = testBuckets(tests);
+        var testsNeedAction = tb.missed.length + tb.notBooked.length;
+
+        var opCount = machines.filter(function (m) { return m.last_status === "operating"; }).length;
+        var brkCount = machines.filter(function (m) { return m.last_status === "breakdown"; }).length;
+
+        var overTarget = (p.days_remaining !== null && p.days_remaining !== undefined && p.days_remaining < 0);
         var kpis = [
-          ["Progress", pct + "%", false],
-          ["Piles cast", (p.piles_completed || 0) + " / " + total, false],
-          ["Open issues", p.open_issues || 0, (p.critical_open_issues || 0) > 0],
-          ["Tests overdue", p.tests_overdue || 0, (p.tests_overdue || 0) > 0],
-          ["Machines on site", p.machines_on_site || 0, false],
-          ["Workers assigned", p.workers_assigned || 0, false]
+          ["Piles cast · " + pct + "%", (p.piles_completed || 0) + " / " + total, false],
+          ["Open issues" + (crit ? " · " + crit + " critical" : "") +
+             (oldestOpen ? " · oldest " + oldestOpen + "d" : ""),
+           openIssues.length, crit > 0],
+          ["Tests need action · " + tb.curing.length + " curing · " +
+             tb.toArrange.length + " to arrange · " + tb.booked.length + " booked",
+           testsNeedAction, testsNeedAction > 0],
+          ["Machines operating · of " + machines.length + " on site" +
+             (brkCount ? " · " + brkCount + " breakdown" : ""),
+           opCount, brkCount > 0],
+          ["Workers reported (site reports)", p.workers_assigned || 0, false],
+          [overTarget ? "Days OVER target" : "Days to target",
+           (p.days_remaining === null || p.days_remaining === undefined) ? "—" : Math.abs(p.days_remaining),
+           overTarget]
         ];
         document.getElementById("kpis").innerHTML = kpis.map(function (k) {
           return '<div class="card' + (k[2] ? " alert" : "") + '">' +
