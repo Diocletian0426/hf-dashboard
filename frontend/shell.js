@@ -58,7 +58,9 @@
       var links = NAV_LINKS
         .filter(function (l) { return allowed(l.href, profile); })
         .map(function (l) {
-          var active = (l.href === page || (page === "piles.html" && l.href === "projects.html"));
+          var active = (l.href === page ||
+                        (page === "piles.html" && l.href === "projects.html") ||
+                        (page === "project.html" && l.href === "index.html"));
           return '<a href="' + l.href + '"' + (active ? ' class="active"' : "") + ">" + l.label + "</a>";
         })
         .join("");

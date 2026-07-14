@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HF Dashboard — Project</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <header id="nav"></header>
+
+  <main id="main">
+
+    <!-- ================= PROJECT HUB (draft — adjust together) =================
+         Reached by clicking a project card on the Overview. One page that
+         answers "how is THIS site doing?" and links deeper:
+           1. Header — code, name, status, client, dates, report health
+           2. KPI cards — progress, cast, issues, tests overdue, machines, workers
+           3. Pile pipeline strip (same component as the pile page) + link
+           4. Open issues on this site
+           5. Machines on this site (last-known state)
+           6. Tests due / overdue
+         Built entirely from existing reads — no new views. -->
+    <div class="page-eyebrow">Project</div>
+    <h1 id="project-title">Loading…</h1>
+    <p id="project-sub" class="page-caption"></p>
+
+    <div id="kpis" class="cards"></div>
+
+    <div id="pile-strip"></div>
+
+    <div id="sections"></div>
+
+    <div id="error"></div>
+
+  </main>
+
+  <script src="vendor/supabase.js"></script>
+  <script src="config.js"></script>
+  <script src="dashboard-client.js"></script>
+  <script src="shell.js"></script>
+
+  <script>
+    // ---- shared helpers (same definitions the pile/machine pages use) ----
+    function esc(s) { return String(s === null || s === undefined ? "" : s).replace(/"/g, "&quot;"); }
+    function escHtml(s) {
+      return String(s === null || s === undefined ? "" : s)
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+    function dstr(d) {
+      if (!d) return "—";
+      return new Intl.DateTimeFormat("en-MY", { day: "2-digit", month: "short", year: "numeric" })
+        .format(new Date(d + "T00:00:00"));
+    }
+    function daysSince(dateStr) {
+      if (!dateStr) return null;
+      return Math.round((new Date(Dash.todayKL()) - new Date(dateStr)) / 86400000);
+    }
+
+    // ---- pile pipeline strip (same component as piles.html) ----
+    var STAGES = [
+      ["Planned", ["planned"]],
+      ["Boring",  ["casing_installed", "boring_in_progress"]],
+      ["Bored",   ["bored_complete"]],
+      ["Cage",    ["cage_in_progress", "cage_installed"]],
+      ["Cast",    ["casting_in_progress", "cast_complete"]],
+      ["Trimmed", ["head_trimmed"]]
+    ];
+    function stageOf(status) {
+      for (var i = 0; i < STAGES.length; i++)
+        if (STAGES[i][1].indexOf(status) !== -1) return STAGES[i][0];
+      return "Planned";
+    }
+    var STAGE_COLORS = {
+      "Planned": "#e5e7eb", "Boring": "#5598e7", "Bored": "#2a78d6",
+      "Cage": "#1c5cab", "Cast": "#1baf7a", "Trimmed": "#008300"
+    };
+
+    function pipelineStrip(piles, projectId) {
+      if (!piles.length) return "";
+      var counts = {};
+      STAGES.forEach(function (s) { counts[s[0]] = 0; });
+      piles.forEach(function (r) { counts[stageOf(r.construction_status)]++; });
+      var total = piles.length;
+      var segs = STAGES.map(function (s) {
+        var name = s[0], c = counts[name];
+        if (!c) return "";
+        var pct = Math.round(c * 100 / total);
+        return '<span class="pipe-seg" style="flex-grow:' + c + ";background:" + STAGE_COLORS[name] +
+               '" title="' + name + " — " + c + " pile" + (c === 1 ? "" : "s") + " (" + pct + '%)"></span>';
+      }).join("");
+      var keys = STAGES.map(function (s) {
+        var name = s[0], c = counts[name];
+        return '<span class="pipe-key' + (c ? "" : " zero") + '">' +
+               '<i style="background:' + STAGE_COLORS[name] + '"></i>' + name + " <b>" + c + "</b></span>";
+      }).join("");
+      return '<div class="pipe-card"><div class="pipe-bar">' + segs + "</div>" +
+             '<div class="pipe-legend"><span class="pipe-total">' + total + " piles</span>" + keys +
+             '<a class="pipe-link" href="piles.html?project=' + projectId + '">Open pile records →</a>' +
+             "</div></div>";
+    }
+
+    // ---- section: open issues on this site ----
+    function issuesSection(openIssues) {
+      var body;
+      if (!openIssues.length) {
+        body = '<div class="muted-line">&#10003; No open issues on this site.</div>';
+      } else {
+        body = openIssues.map(function (i) {
+          var cls = (i.status === "open") ? "open" : "in_progress";
+          var meta = [dstr(i.raised_date) + (i.days_since_raised ? " · " + i.days_since_raised + "d open" : "")];
+          if (i.priority) meta.push(escHtml(i.priority));
+          if (i.assigned_to_name_resolved) meta.push("PIC: " + escHtml(i.assigned_to_name_resolved));
+          var latest = i.latest_action
+            ? '<div class="pc-latest">latest: ' + escHtml(i.latest_action) + "</div>" : "";
+          return '<div class="pc-issue"><strong>#' + i.issue_number + "</strong> " + escHtml(i.title || "") +
+                 ' <span class="badge badge-' + cls + '">' + escHtml(i.status) + "</span>" +
+                 '<div class="pc-meta">' + meta.join(" · ") + "</div>" + latest + "</div>";
+        }).join("");
+      }
+      return '<h2 class="section-title">Open issues (' + openIssues.length + ")</h2>" +
+             '<div class="hub-panel">' + body + "</div>";
+    }
+
+    // ---- section: machines on this site ----
+    function machinesSection(machines) {
+      var body;
+      if (!machines.length) {
+        body = '<div class="muted-line">No machines assigned to this site.</div>';
+      } else {
+        var rows = machines.map(function (m) {
+          var stateCls = m.last_status === "operating" ? "approved"
+                       : m.last_status === "breakdown" ? "breakdown" : "gray";
+          var d = daysSince(m.last_status_date);
+          var state = m.last_status
+            ? '<span class="badge badge-' + stateCls + '">' + escHtml(m.last_status) + "</span>" +
+              ' <span class="' + (d !== null && d >= 3 ? "stale-warn" : "muted") + '">' + (m.last_status_date || "") + "</span>"
+            : '<span class="muted-line">never reported</span>';
+          return "<tr>" +
+            "<td><strong>" + escHtml(m.machine_code) + "</strong></td>" +
+            "<td>" + escHtml(String(m.machine_type || "").replace(/_/g, " ")) + "</td>" +
+            "<td>" + state + "</td>" +
+            '<td class="num' + (m.open_issues > 0 ? " bold" : "") + '">' + (m.open_issues || 0) + "</td>" +
+          "</tr>";
+        }).join("");
+        body = '<div class="table-wrap"><table>' +
+               "<thead><tr><th>Machine</th><th>Type</th><th>Last report</th>" +
+               '<th class="num">Open issues</th></tr></thead>' +
+               "<tbody>" + rows + "</tbody></table></div>";
+      }
+      return '<h2 class="section-title">Machines on site (' + machines.length + ") " +
+             '<a class="section-link" href="machines.html">machines page →</a></h2>' + body;
+    }
+
+    // ---- section: tests due / overdue ----
+    function testsSection(tests) {
+      var pending = tests.filter(function (t) {
+        return ["completed", "passed"].indexOf(t.status) === -1;
+      });
+      var body;
+      if (!pending.length) {
+        body = '<div class="muted-line">&#10003; No tests waiting on this site.</div>';
+      } else {
+        body = pending.map(function (t) {
+          var over = t.is_overdue
+            ? ' <span class="badge badge-critical">overdue ' + (t.overdue_days || 0) + "d</span>" : "";
+          var when = t.actual_test_date ? "done " + dstr(t.actual_test_date)
+                   : t.scheduled_test_date ? "scheduled " + dstr(t.scheduled_test_date)
+                   : t.earliest_test_date ? "eligible from " + dstr(t.earliest_test_date)
+                   : "not scheduled";
+          return '<div class="pc-line"><strong>' + escHtml(t.pile_mark_no || "") + "</strong> " +
+                 escHtml(t.test_code || t.test_name || "test") +
+                 ' <span class="badge badge-' + (["scheduled", "pending"].indexOf(t.status) !== -1 ? t.status : "gray") + '">' +
+                 escHtml(t.status || "?") + "</span>" + over +
+                 ' <span class="pc-meta-inline">· ' + when + "</span></div>";
+        }).join("");
+      }
+      return '<h2 class="section-title">Tests waiting (' + pending.length + ")</h2>" +
+             '<div class="hub-panel">' + body + "</div>";
+    }
+
+    window.onShellReady = async function () {
+      var projectId = new URLSearchParams(location.search).get("project");
+      var titleEl = document.getElementById("project-title");
+
+      if (!projectId) {
+        titleEl.textContent = "";
+        document.getElementById("error").innerHTML =
+          '<div class="banner banner-amber">No project selected — open a project from the ' +
+          '<a href="index.html">Overview</a>.</div>';
+        return;
+      }
+
+      try {
+        var results = await Promise.all([
+          Dash.getProjects(),          // all statuses, so completed sites open too
+          Dash.getPileRegister(projectId),
+          Dash.getIssues("all"),
+          Dash.getMachines(),
+          Dash.getTests(true)
+        ]);
+        var p = results[0].find(function (x) { return x.project_id === projectId; });
+        if (!p) {
+          titleEl.textContent = "";
+          document.getElementById("error").innerHTML =
+            '<div class="banner banner-red">Project not found.</div>';
+          return;
+        }
+        var piles = results[1];
+        var openIssues = results[2].filter(function (i) {
+          return i.project_code === p.project_code &&
+                 (i.status === "open" || i.status === "in_progress");
+        });
+        var machines = results[3].filter(function (m) { return m.current_site === p.project_code; });
+        var tests = results[4].filter(function (t) { return t.project_code === p.project_code; });
+
+        // ---- header ----
+        titleEl.textContent = p.project_code + " — " + (p.project_name || "");
+        var subBits = ['<span class="badge badge-' +
+          (p.project_status === "active" ? "approved" : "gray") + '">' + p.project_status + "</span>"];
+        if (p.client_name) subBits.push("Client: " + escHtml(p.client_name));
+        if (p.start_date) subBits.push(dstr(p.start_date) + " → " + dstr(p.target_end_date));
+        if (p.days_remaining !== null && p.days_remaining !== undefined)
+          subBits.push(p.days_remaining < 0
+            ? '<span class="stale-warn">' + Math.abs(p.days_remaining) + " days over target</span>"
+            : p.days_remaining + " days to target");
+        var health = p.last_report_date
+          ? "last report " + p.last_report_date +
+            ((p.piles_bored_on_last_report || p.piles_cast_on_last_report)
+              ? " (bored " + (p.piles_bored_on_last_report || 0) + " · cast " + (p.piles_cast_on_last_report || 0) + ")"
+              : "")
+          : "no site reports yet";
+        subBits.push(health);
+        document.getElementById("project-sub").innerHTML = subBits.join(" · ");
+
+        // ---- KPI cards ----
+        var total = p.total_piles_planned || p.total_piles_registered || 0;
+        var pct = Math.max(0, Math.min(100, Number(p.progress_pct) || 0));
+        var kpis = [
+          ["Progress", pct + "%", false],
+          ["Piles cast", (p.piles_completed || 0) + " / " + total, false],
+          ["Open issues", p.open_issues || 0, (p.critical_open_issues || 0) > 0],
+          ["Tests overdue", p.tests_overdue || 0, (p.tests_overdue || 0) > 0],
+          ["Machines on site", p.machines_on_site || 0, false],
+          ["Workers assigned", p.workers_assigned || 0, false]
+        ];
+        document.getElementById("kpis").innerHTML = kpis.map(function (k) {
+          return '<div class="card' + (k[2] ? " alert" : "") + '">' +
+                 '<div class="label">' + k[0] + "</div>" +
+                 '<div class="value">' + k[1] + "</div></div>";
+        }).join("");
+
+        // ---- strip + sections ----
+        document.getElementById("pile-strip").innerHTML = pipelineStrip(piles, projectId);
+        document.getElementById("sections").innerHTML =
+          issuesSection(openIssues) +
+          machinesSection(machines) +
+          testsSection(tests);
+      } catch (e) {
+        titleEl.textContent = "";
+        document.getElementById("error").innerHTML =
+          '<div class="banner banner-red">Could not load: ' + (e.message || e) + "</div>";
+      }
+    };
+  </script>
+</body>
+</html>
