@@ -17,7 +17,8 @@
          answers "how is THIS site doing?" and links deeper:
            1. Header — code, name, status, client, dates, report health
            2. KPI cards — progress, cast, issues, tests overdue, machines, workers
-           3. Pile pipeline strip (same component as the pile page) + link
+           3. Progress by zone — all-zones bar + one thin bar per zone;
+              zone names jump into the pile page at that zone
            4. Open issues on this site
            5. Machines on this site (last-known state)
            6. Tests due / overdue
@@ -77,28 +78,60 @@
       "Cage": "#1c5cab", "Cast": "#1baf7a", "Trimmed": "#008300"
     };
 
-    function pipelineStrip(piles, projectId) {
-      if (!piles.length) return "";
+    // one segmented stage bar for any list of piles
+    function stageBarHtml(list) {
       var counts = {};
       STAGES.forEach(function (s) { counts[s[0]] = 0; });
-      piles.forEach(function (r) { counts[stageOf(r.construction_status)]++; });
-      var total = piles.length;
-      var segs = STAGES.map(function (s) {
+      list.forEach(function (r) { counts[stageOf(r.construction_status)]++; });
+      var total = list.length;
+      return STAGES.map(function (s) {
         var name = s[0], c = counts[name];
         if (!c) return "";
         var pct = Math.round(c * 100 / total);
         return '<span class="pipe-seg" style="flex-grow:' + c + ";background:" + STAGE_COLORS[name] +
                '" title="' + name + " — " + c + " pile" + (c === 1 ? "" : "s") + " (" + pct + '%)"></span>';
       }).join("");
+    }
+
+    // PROGRESS BY ZONE: all-zones bar + legend on top, then one thin bar per
+    // zone (only when the project actually has 2+ zones). Zone names link
+    // into the pile page, landing on that zone's block.
+    function zoneProgress(piles, projectId) {
+      if (!piles.length) return "";
+      var counts = {};
+      STAGES.forEach(function (s) { counts[s[0]] = 0; });
+      piles.forEach(function (r) { counts[stageOf(r.construction_status)]++; });
       var keys = STAGES.map(function (s) {
         var name = s[0], c = counts[name];
         return '<span class="pipe-key' + (c ? "" : " zero") + '">' +
                '<i style="background:' + STAGE_COLORS[name] + '"></i>' + name + " <b>" + c + "</b></span>";
       }).join("");
-      return '<div class="pipe-card"><div class="pipe-bar">' + segs + "</div>" +
-             '<div class="pipe-legend"><span class="pipe-total">' + total + " piles</span>" + keys +
-             '<a class="pipe-link" href="piles.html?project=' + projectId + '">Open pile records →</a>' +
-             "</div></div>";
+
+      var zones = {};
+      piles.forEach(function (r) { var z = r.zone || "Unzoned"; (zones[z] = zones[z] || []).push(r); });
+      var zoneNames = Object.keys(zones).sort();
+      var zoneRows = "";
+      if (zoneNames.length > 1) {
+        zoneRows = '<div class="zonebar-rows">' + zoneNames.map(function (z) {
+          var zr = zones[z];
+          var cast = zr.filter(function (r) {
+            return r.construction_status === "cast_complete" || r.construction_status === "head_trimmed";
+          }).length;
+          return '<div class="zonebar-row">' +
+                 '<a class="zonebar-label" title="Open pile records at ' + esc(z) + '" ' +
+                 'href="piles.html?project=' + projectId + "&zone=" + encodeURIComponent(z) + '">' +
+                 escHtml(z) + "</a>" +
+                 '<span class="pipe-bar">' + stageBarHtml(zr) + "</span>" +
+                 '<span class="zonebar-count">' + zr.length + " pile" + (zr.length === 1 ? "" : "s") +
+                 " · " + cast + " cast</span></div>";
+        }).join("") + "</div>";
+      }
+
+      return '<div class="pipe-card">' +
+             '<div class="pipe-bar">' + stageBarHtml(piles) + "</div>" +
+             '<div class="pipe-legend"><span class="pipe-total">' + piles.length + " piles</span>" + keys +
+             '<a class="pipe-link" href="piles.html?project=' + projectId + '">Open pile records →</a></div>' +
+             zoneRows + "</div>";
     }
 
     // ---- section: open issues on this site ----
@@ -303,8 +336,8 @@
                  '<div class="value">' + k[1] + "</div></div>";
         }).join("");
 
-        // ---- strip + sections ----
-        document.getElementById("pile-strip").innerHTML = pipelineStrip(piles, projectId);
+        // ---- progress by zone + sections ----
+        document.getElementById("pile-strip").innerHTML = zoneProgress(piles, projectId);
         document.getElementById("sections").innerHTML =
           issuesSection(openIssues) +
           machinesSection(machines) +

@@ -479,7 +479,7 @@
             "</tr>" +
             pileCard(r, issuesByPile[r.pile_mark_no], testsByPile[r.pile_mark_no]);
           }).join("");
-          return '<details class="zone" open>' +
+          return '<details class="zone" open data-zone="' + esc(z) + '">' +
                  '<summary><span class="zone-name">' + z + '</span>' +
                  '<span class="zone-count">' + zoneSummary(zr) + "</span></summary>" +
                  '<div class="table-wrap zone-table"><table>' + THEAD +
@@ -492,6 +492,19 @@
         document.getElementById("pipeline").innerHTML = pipelineStrip(piles);
         document.getElementById("chase").innerHTML = chaseChecklist(piles, testsByPile);
         wireChaseJumps();
+
+        // arrived via a zone link on the project hub? land on that zone
+        var zoneParam = new URLSearchParams(location.search).get("zone");
+        if (zoneParam) {
+          var targetZone = document.querySelector(
+            'details.zone[data-zone="' + zoneParam.replace(/"/g, '\\"') + '"]');
+          if (targetZone) {
+            targetZone.open = true;
+            targetZone.scrollIntoView({ behavior: "smooth", block: "start" });
+            targetZone.classList.add("flash-zone");
+            setTimeout(function () { targetZone.classList.remove("flash-zone"); }, 1700);
+          }
+        }
 
         // click a pile row -> toggle the record card row that sits under it
         zonesEl.addEventListener("click", function (ev) {
