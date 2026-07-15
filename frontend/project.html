@@ -33,10 +33,13 @@
 
     <div id="pile-strip"></div>
 
-    <!-- 14-day production trend (round C): headline this-week vs last-week,
-         then one column per day — blue bar = metres bored (only reports that
-         included start/end depths carry metres), green number = piles cast
-         that day. Hidden entirely when the project has no recent activity. -->
+    <!-- Production trend (round C + follow-ups): dual-axis SVG — blue bars =
+         metres bored (left scale; only reports carrying start/end depths),
+         orange line = diesel L (right scale), green numbers = piles cast.
+         Range controls: 7d / 14d / 28d / All time / custom from-to; ranges
+         over ~2 months switch to weekly bars. Preset ranges also show a
+         previous-equal-window comparison. Hidden when the project has no
+         activity rows at all. -->
     <div id="trend"></div>
 
     <div id="sections"></div>
@@ -142,7 +145,84 @@
              zoneRows + "</div>";
     }
 
-    // ---- 14-day production trend ----
+    // ---- 14-day production trend (dual-axis combo, owner's choice) ----
+    // Blue bars = metres bored (LEFT scale). Orange line + dots = diesel
+    // (RIGHT scale). The two scales are independent — crossings carry no
+    // meaning; per-side scale labels + per-day tooltips keep it honest.
+    // Bars become stacked soil/rock when the bot starts tagging rock coring
+    // as its own activity type (see roadmap bot wishlist).
+    function buildTrendSvg(days, maxM, maxD, weekly) {
+      var W = 700, H = 152, L = 34, R = 40, T = 8, B = 32;
+      var pw = W - L - R, ph = H - T - B, slot = pw / days.length;
+      var parts = [];
+
+      // baseline + per-side scale labels
+      parts.push('<line x1="' + L + '" y1="' + (T + ph) + '" x2="' + (W - R) + '" y2="' + (T + ph) +
+                 '" stroke="#e5e7eb" stroke-width="1"/>');
+      parts.push('<text x="' + (L - 4) + '" y="' + (T + 8) + '" text-anchor="end" class="tx-axis">' +
+                 f1(maxM) + " m</text>");
+      parts.push('<text x="' + (L - 4) + '" y="' + (T + ph) + '" text-anchor="end" class="tx-axis">0</text>');
+      parts.push('<text x="' + (W - R + 4) + '" y="' + (T + 8) + '" class="tx-axis">' +
+                 Math.round(maxD) + " L</text>");
+      parts.push('<text x="' + (W - R + 4) + '" y="' + (T + ph) + '" class="tx-axis">0</text>');
+
+      // metres bars + cast numbers
+      days.forEach(function (d, i) {
+        var cx = L + slot * (i + 0.5);
+        if (d.metres > 0) {
+          var h = Math.max(3, d.metres / maxM * ph);
+          var bw = slot * 0.55;
+          parts.push('<rect x="' + (cx - bw / 2).toFixed(1) + '" y="' + (T + ph - h).toFixed(1) +
+                     '" width="' + bw.toFixed(1) + '" height="' + h.toFixed(1) +
+                     '" rx="2" fill="#2a78d6"/>');
+        }
+        if (d.cast) {
+          parts.push('<text x="' + cx.toFixed(1) + '" y="' + (T + ph + 13) +
+                     '" text-anchor="middle" class="tx-cast">' + d.cast + "</text>");
+        }
+      });
+
+      // diesel line + dots (right scale)
+      var pts = days.map(function (d, i) {
+        return {
+          x: L + slot * (i + 0.5),
+          y: T + ph - (d.diesel / maxD * ph)
+        };
+      });
+      parts.push('<polyline fill="none" stroke="#eb6834" stroke-width="2" points="' +
+                 pts.map(function (pt) { return pt.x.toFixed(1) + "," + pt.y.toFixed(1); }).join(" ") + '"/>');
+      pts.forEach(function (pt, i) {
+        if (days[i].diesel > 0) {
+          parts.push('<circle cx="' + pt.x.toFixed(1) + '" cy="' + pt.y.toFixed(1) +
+                     '" r="3" fill="#eb6834" stroke="#fff" stroke-width="1"/>');
+        }
+      });
+
+      // date anchors: start · middle · end (deduped for tiny ranges)
+      var anchorIdx = [0, Math.floor(days.length / 2), days.length - 1]
+        .filter(function (v, i, arr) { return arr.indexOf(v) === i; });
+      var anchors = [
+        { x: L, a: "start" }, { x: L + pw / 2, a: "middle" }, { x: W - R, a: "end" }
+      ];
+      anchorIdx.forEach(function (idx, i) {
+        var pos = anchors[anchorIdx.length === 1 ? 0 : (anchorIdx.length === 2 && i === 1 ? 2 : i)];
+        parts.push('<text x="' + pos.x + '" y="' + (H - 4) + '" text-anchor="' + pos.a +
+                   '" class="tx-axis">' + (weekly ? "wk " : "") + dstr(days[idx].date) + "</text>");
+      });
+
+      // hover targets last (on top): whole-column, native tooltip
+      days.forEach(function (d, i) {
+        var tip = (weekly ? "Week of " : "") + dstr(d.date) + " — " + f1(d.metres) + " m bored" +
+                  (d.boredOn ? " (" + d.boredOn + " pile" + (d.boredOn === 1 ? "" : "s") + ")" : "") +
+                  " · " + d.cast + " cast · " + Math.round(d.diesel) + " L diesel";
+        parts.push('<rect x="' + (L + slot * i).toFixed(1) + '" y="0" width="' + slot.toFixed(1) +
+                   '" height="' + H + '" fill="transparent"><title>' + escHtml(tip) + "</title></rect>");
+      });
+
+      return '<svg class="trend-svg" viewBox="0 0 ' + W + " " + H + '" role="img">' +
+             parts.join("") + "</svg>";
+    }
+
     function addDays(dateStr, n) {
       var d = new Date(dateStr + "T00:00:00Z");
       d.setUTCDate(d.getUTCDate() + n);
@@ -150,81 +230,149 @@
     }
     function f1(v) { return (Math.round(v * 10) / 10).toString(); }
 
-    function trendSection(rows) {
-      if (!rows.length) return "";   // no recent activity at all -> no card
-      var today = Dash.todayKL();
-      var byDate = {};
-      rows.forEach(function (r) { byDate[r.log_date] = r; });
+    // range state: rows cached once, chart re-renders client-side
+    var _trendRows = null, _trendMin = null;
 
-      // last 14 days, oldest first
-      var days = [];
-      for (var i = 13; i >= 0; i--) {
-        var key = addDays(today, -i);
-        var r = byDate[key];
+    function trendSums(list) {
+      return list.reduce(function (s, d) {
+        return { cast: s.cast + d.cast, metres: s.metres + d.metres, diesel: s.diesel + d.diesel };
+      }, { cast: 0, metres: 0, diesel: 0 });
+    }
+
+    function buildRangeDays(byDate, fromStr, toStr) {
+      var days = [], cur = fromStr, guard = 0;
+      while (cur <= toStr && guard++ < 4000) {
+        var r = byDate[cur];
         days.push({
-          date: key,
+          date: cur,
           metres: r ? Number(r.metres_bored) || 0 : 0,
           cast: r ? Number(r.piles_cast) || 0 : 0,
           boredOn: r ? Number(r.piles_bored_on) || 0 : 0,
           diesel: r ? Number(r.diesel_l) || 0 : 0
         });
+        cur = addDays(cur, 1);
       }
-      var prev = days.slice(0, 7), cur = days.slice(7);
-      function sums(list) {
-        return list.reduce(function (s, d) {
-          return { cast: s.cast + d.cast, metres: s.metres + d.metres, diesel: s.diesel + d.diesel };
-        }, { cast: 0, metres: 0, diesel: 0 });
+      return days;
+    }
+
+    // ranges longer than ~2 months read as slivers day-by-day -> weekly bars
+    function weekStartOf(dateStr) {
+      var d = new Date(dateStr + "T00:00:00Z");
+      return addDays(dateStr, -((d.getUTCDay() + 6) % 7));   // back to Monday
+    }
+    function bucketWeekly(days) {
+      var map = {}, order = [];
+      days.forEach(function (d) {
+        var wk = weekStartOf(d.date);
+        if (!map[wk]) {
+          map[wk] = { date: wk, metres: 0, cast: 0, boredOn: 0, diesel: 0 };
+          order.push(wk);
+        }
+        map[wk].metres += d.metres; map[wk].cast += d.cast;
+        map[wk].boredOn += d.boredOn; map[wk].diesel += d.diesel;
+      });
+      return order.map(function (k) { return map[k]; });
+    }
+
+    function renderTrendBody(mode, from, to) {
+      var byDate = {};
+      _trendRows.forEach(function (r) { byDate[r.log_date] = r; });
+      var today = Dash.todayKL();
+      var fromStr, toStr, label;
+      if (mode === "all") { fromStr = _trendMin; toStr = today; label = "All time"; }
+      else if (mode === "custom") { fromStr = from; toStr = to; label = dstr(from) + " → " + dstr(to); }
+      else {
+        var n = parseInt(mode, 10);
+        fromStr = addDays(today, -(n - 1)); toStr = today; label = "Last " + n + " days";
       }
-      var cw = sums(cur), pw = sums(prev);
+
+      var days = buildRangeDays(byDate, fromStr, toStr);
+      var weekly = days.length > 60;
+      var series = weekly ? bucketWeekly(days) : days;
+      var tot = trendSums(days);
+
+      var head = "<strong>" + label + ": " + tot.cast + " pile" + (tot.cast === 1 ? "" : "s") +
+                 " cast · " + f1(tot.metres) + " m bored · " + Math.round(tot.diesel) + " L diesel</strong>";
+
+      // previous equal window comparison — presets only (meaningless for all/custom)
+      var compare = "";
+      if (mode !== "all" && mode !== "custom") {
+        var n2 = parseInt(mode, 10);
+        var pv = trendSums(buildRangeDays(byDate, addDays(fromStr, -n2), addDays(fromStr, -1)));
+        var deltaBits = [
+          (tot.cast === pv.cast ? "=" : tot.cast > pv.cast ? "↑" : "↓") + " casts " +
+            (tot.cast - pv.cast >= 0 ? "+" : "") + (tot.cast - pv.cast),
+          (tot.metres === pv.metres ? "=" : tot.metres > pv.metres ? "↑" : "↓") + " metres " +
+            (tot.metres - pv.metres >= 0 ? "+" : "") + f1(tot.metres - pv.metres),
+          (tot.diesel === pv.diesel ? "=" : tot.diesel > pv.diesel ? "↑" : "↓") + " diesel " +
+            (tot.diesel - pv.diesel >= 0 ? "+" : "") + Math.round(tot.diesel - pv.diesel) + " L"
+        ];
+        compare = '<span class="trend-compare">previous ' + n2 + "d: " + pv.cast + " cast · " +
+                  f1(pv.metres) + " m · " + Math.round(pv.diesel) + " L · " +
+                  deltaBits.join(" · ") + "</span>";
+      }
 
       var anything = days.some(function (d) {
         return d.metres > 0 || d.cast > 0 || d.boredOn > 0 || d.diesel > 0;
       });
-      if (!anything) return "";      // active elsewhere in the 28d window only
+      var body;
+      if (!anything) {
+        body = '<div class="muted-line" style="margin-top:10px">No reported activity in this period.</div>';
+      } else {
+        var maxM = Math.max.apply(null, series.map(function (d) { return d.metres; }).concat([1]));
+        var maxD = Math.max.apply(null, series.map(function (d) { return d.diesel; }).concat([1]));
+        body = buildTrendSvg(series, maxM, maxD, weekly) +
+               '<div class="trend-castnote"><i class="key-metres"></i>metres bored (left scale)' +
+               ' <i class="key-diesel"></i>diesel line (right scale, L' + (weekly ? "/week" : "/day") + ")" +
+               ' <i class="key-cast"></i>green number = piles cast' +
+               (weekly ? " that week (weekly bars — long range)" : " that day") + "</div>" +
+               '<div class="pipe-note">metres count only the reports that included start/end depths — ' +
+               "quiet days may still have had boring; diesel comes from the nightly machine reports; " +
+               "bars split into soil/rock once reports tag rock coring separately</div>";
+      }
+      document.getElementById("trend-body").innerHTML =
+        '<div class="trend-head">' + head + compare + "</div>" + body;
+    }
 
-      var deltaBits = [];
-      deltaBits.push((cw.cast === pw.cast ? "=" : cw.cast > pw.cast ? "↑" : "↓") +
-                     " casts " + (cw.cast - pw.cast >= 0 ? "+" : "") + (cw.cast - pw.cast));
-      deltaBits.push((cw.metres === pw.metres ? "=" : cw.metres > pw.metres ? "↑" : "↓") +
-                     " metres " + (cw.metres - pw.metres >= 0 ? "+" : "") + f1(cw.metres - pw.metres));
-      deltaBits.push((cw.diesel === pw.diesel ? "=" : cw.diesel > pw.diesel ? "↑" : "↓") +
-                     " diesel " + (cw.diesel - pw.diesel >= 0 ? "+" : "") + Math.round(cw.diesel - pw.diesel) + " L");
+    function initTrend(rows) {
+      var el = document.getElementById("trend");
+      if (!rows.length) { el.innerHTML = ""; return; }
+      _trendRows = rows;
+      _trendMin = rows.reduce(function (m, r) {
+        return (!m || r.log_date < m) ? r.log_date : m;
+      }, null);
 
-      var maxM = Math.max.apply(null, days.map(function (d) { return d.metres; }).concat([1]));
-      var maxD = Math.max.apply(null, days.map(function (d) { return d.diesel; }).concat([1]));
-      var cols = days.map(function (d) {
-        var hPct = d.metres > 0 ? Math.max(6, Math.round(d.metres / maxM * 100)) : 0;
-        var dPct = d.diesel > 0 ? Math.max(8, Math.round(d.diesel / maxD * 100)) : 0;
-        var tip = dstr(d.date) + " — " + f1(d.metres) + " m bored" +
-                  (d.boredOn ? " (" + d.boredOn + " pile" + (d.boredOn === 1 ? "" : "s") + ")" : "") +
-                  " · " + d.cast + " cast · " + Math.round(d.diesel) + " L diesel";
-        return '<div class="trend-col" title="' + esc(tip) + '">' +
-               '<div class="trend-barbox">' +
-               (hPct ? '<div class="trend-bar" style="height:' + hPct + '%"></div>' : "") +
-               "</div>" +
-               '<div class="trend-dieselbox">' +
-               (dPct ? '<div class="trend-diesel" style="height:' + dPct + '%"></div>' : "") +
-               "</div>" +
-               '<div class="trend-cast">' + (d.cast ? d.cast : "") + "</div>" +
-               "</div>";
-      }).join("");
+      el.innerHTML =
+        '<div class="pipe-card">' +
+        '<div class="trend-controls">' +
+        '<button type="button" data-range="7">7d</button>' +
+        '<button type="button" data-range="14" class="active">14d</button>' +
+        '<button type="button" data-range="28">28d</button>' +
+        '<button type="button" data-range="all">All time</button>' +
+        '<span class="trend-custom">from <input type="date" id="trend-from" value="' + _trendMin + '">' +
+        ' to <input type="date" id="trend-to" value="' + Dash.todayKL() + '">' +
+        ' <button type="button" id="trend-apply">Apply</button></span>' +
+        "</div>" +
+        '<div id="trend-body"></div></div>';
 
-      var labels = '<div class="trend-labels">' +
-                   "<span>" + dstr(days[0].date) + "</span>" +
-                   "<span>" + dstr(days[7].date) + "</span>" +
-                   "<span>" + dstr(days[13].date) + "</span></div>";
+      el.addEventListener("click", function (ev) {
+        var b = ev.target.closest("button");
+        if (!b) return;
+        if (b.id === "trend-apply") {
+          var from = document.getElementById("trend-from").value;
+          var to = document.getElementById("trend-to").value;
+          if (!from || !to || from > to) return;
+          el.querySelectorAll(".trend-controls button").forEach(function (x) { x.classList.remove("active"); });
+          b.classList.add("active");
+          renderTrendBody("custom", from, to);
+        } else if (b.getAttribute("data-range")) {
+          el.querySelectorAll(".trend-controls button").forEach(function (x) { x.classList.remove("active"); });
+          b.classList.add("active");
+          renderTrendBody(b.getAttribute("data-range"));
+        }
+      });
 
-      return '<div class="pipe-card">' +
-             '<div class="trend-head"><strong>This week: ' + cw.cast + " pile" + (cw.cast === 1 ? "" : "s") +
-             " cast · " + f1(cw.metres) + " m bored · " + Math.round(cw.diesel) + ' L diesel</strong>' +
-             '<span class="trend-compare">last week: ' + pw.cast + " cast · " + f1(pw.metres) + " m · " +
-             Math.round(pw.diesel) + " L · " + deltaBits.join(" · ") + "</span></div>" +
-             '<div class="trend-chart">' + cols + "</div>" + labels +
-             '<div class="trend-castnote"><i class="key-metres"></i>metres bored' +
-             ' <i class="key-diesel"></i>diesel (L/day)' +
-             ' <i class="key-cast"></i>green number = piles cast that day</div>' +
-             '<div class="pipe-note">metres count only the reports that included start/end depths — ' +
-             "quiet days may still have had boring; diesel comes from the nightly machine reports</div></div>";
+      renderTrendBody("14");
     }
 
     // ---- MANAGEMENT ATTENTION (round D) ----
@@ -487,7 +635,7 @@
         // ---- progress by zone + trend + sections ----
         document.getElementById("pile-strip").innerHTML = zoneProgress(piles, projectId);
         var outputRows = results[6].filter(function (r) { return r.project_id === projectId; });
-        document.getElementById("trend").innerHTML = trendSection(outputRows);
+        initTrend(outputRows);
         document.getElementById("sections").innerHTML =
           attentionSection(p, openIssues, machines, tb, piles) +
           machinesSection(machines);
