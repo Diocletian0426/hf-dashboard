@@ -231,6 +231,11 @@ a.zonebar-label:hover { color: #1d4ed8; text-decoration: underline; }
   border-bottom: 1px solid #e5e7eb;
 }
 .trend-bar { width: 100%; background: #2a78d6; border-radius: 3px 3px 0 0; }
+.trend-dieselbox {
+  height: 26px; display: flex; align-items: flex-end;
+  border-bottom: 1px solid #e5e7eb; margin-top: 3px;
+}
+.trend-diesel { width: 100%; background: #eb6834; border-radius: 2px 2px 0 0; }
 .trend-cast {
   height: 15px; text-align: center; font-size: 10.5px;
   font-weight: 700; color: #008300;
@@ -242,8 +247,12 @@ a.zonebar-label:hover { color: #1d4ed8; text-decoration: underline; }
 .trend-castnote { font-size: 11px; color: #9ca3af; margin-top: 6px; }
 .trend-castnote i {
   display: inline-block; width: 8px; height: 8px; border-radius: 2px;
-  background: #008300; margin-right: 5px; vertical-align: baseline;
+  margin: 0 5px 0 10px; vertical-align: baseline;
 }
+.trend-castnote i:first-child { margin-left: 0; }
+.trend-castnote i.key-metres { background: #2a78d6; }
+.trend-castnote i.key-diesel { background: #eb6834; }
+.trend-castnote i.key-cast   { background: #008300; }
 
 /* pile page: landing flash when arriving via a hub zone link */
 @keyframes zone-flash { 0% { background: #fde68a; } 100% { background: transparent; } }

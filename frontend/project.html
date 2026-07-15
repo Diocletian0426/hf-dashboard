@@ -165,18 +165,21 @@
           date: key,
           metres: r ? Number(r.metres_bored) || 0 : 0,
           cast: r ? Number(r.piles_cast) || 0 : 0,
-          boredOn: r ? Number(r.piles_bored_on) || 0 : 0
+          boredOn: r ? Number(r.piles_bored_on) || 0 : 0,
+          diesel: r ? Number(r.diesel_l) || 0 : 0
         });
       }
       var prev = days.slice(0, 7), cur = days.slice(7);
       function sums(list) {
         return list.reduce(function (s, d) {
-          return { cast: s.cast + d.cast, metres: s.metres + d.metres };
-        }, { cast: 0, metres: 0 });
+          return { cast: s.cast + d.cast, metres: s.metres + d.metres, diesel: s.diesel + d.diesel };
+        }, { cast: 0, metres: 0, diesel: 0 });
       }
       var cw = sums(cur), pw = sums(prev);
 
-      var anything = days.some(function (d) { return d.metres > 0 || d.cast > 0 || d.boredOn > 0; });
+      var anything = days.some(function (d) {
+        return d.metres > 0 || d.cast > 0 || d.boredOn > 0 || d.diesel > 0;
+      });
       if (!anything) return "";      // active elsewhere in the 28d window only
 
       var deltaBits = [];
@@ -184,16 +187,23 @@
                      " casts " + (cw.cast - pw.cast >= 0 ? "+" : "") + (cw.cast - pw.cast));
       deltaBits.push((cw.metres === pw.metres ? "=" : cw.metres > pw.metres ? "↑" : "↓") +
                      " metres " + (cw.metres - pw.metres >= 0 ? "+" : "") + f1(cw.metres - pw.metres));
+      deltaBits.push((cw.diesel === pw.diesel ? "=" : cw.diesel > pw.diesel ? "↑" : "↓") +
+                     " diesel " + (cw.diesel - pw.diesel >= 0 ? "+" : "") + Math.round(cw.diesel - pw.diesel) + " L");
 
       var maxM = Math.max.apply(null, days.map(function (d) { return d.metres; }).concat([1]));
+      var maxD = Math.max.apply(null, days.map(function (d) { return d.diesel; }).concat([1]));
       var cols = days.map(function (d) {
         var hPct = d.metres > 0 ? Math.max(6, Math.round(d.metres / maxM * 100)) : 0;
+        var dPct = d.diesel > 0 ? Math.max(8, Math.round(d.diesel / maxD * 100)) : 0;
         var tip = dstr(d.date) + " — " + f1(d.metres) + " m bored" +
                   (d.boredOn ? " (" + d.boredOn + " pile" + (d.boredOn === 1 ? "" : "s") + ")" : "") +
-                  " · " + d.cast + " cast";
+                  " · " + d.cast + " cast · " + Math.round(d.diesel) + " L diesel";
         return '<div class="trend-col" title="' + esc(tip) + '">' +
                '<div class="trend-barbox">' +
                (hPct ? '<div class="trend-bar" style="height:' + hPct + '%"></div>' : "") +
+               "</div>" +
+               '<div class="trend-dieselbox">' +
+               (dPct ? '<div class="trend-diesel" style="height:' + dPct + '%"></div>' : "") +
                "</div>" +
                '<div class="trend-cast">' + (d.cast ? d.cast : "") + "</div>" +
                "</div>";
@@ -206,13 +216,15 @@
 
       return '<div class="pipe-card">' +
              '<div class="trend-head"><strong>This week: ' + cw.cast + " pile" + (cw.cast === 1 ? "" : "s") +
-             " cast · " + f1(cw.metres) + ' m bored</strong>' +
+             " cast · " + f1(cw.metres) + " m bored · " + Math.round(cw.diesel) + ' L diesel</strong>' +
              '<span class="trend-compare">last week: ' + pw.cast + " cast · " + f1(pw.metres) + " m · " +
-             deltaBits.join(" · ") + "</span></div>" +
+             Math.round(pw.diesel) + " L · " + deltaBits.join(" · ") + "</span></div>" +
              '<div class="trend-chart">' + cols + "</div>" + labels +
-             '<div class="trend-castnote"><i></i>green number = piles cast that day</div>' +
+             '<div class="trend-castnote"><i class="key-metres"></i>metres bored' +
+             ' <i class="key-diesel"></i>diesel (L/day)' +
+             ' <i class="key-cast"></i>green number = piles cast that day</div>' +
              '<div class="pipe-note">metres count only the reports that included start/end depths — ' +
-             "quiet days may still have had boring</div></div>";
+             "quiet days may still have had boring; diesel comes from the nightly machine reports</div></div>";
     }
 
     // ---- MANAGEMENT ATTENTION (round D) ----
