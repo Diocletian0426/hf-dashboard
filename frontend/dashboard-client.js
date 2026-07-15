@@ -43,6 +43,44 @@
    await Dash.getTests(showAll?)                  -> pile test tracker (hides completed/passed
                                                      unless showAll is true)
 
+   MONEY COMMANDS (management/office designations only — the DATABASE refuses
+   everyone else with 'not_authorised'; pages must render these sections
+   silently absent when the call throws, never an error banner)
+   -----------------------------------------------------------------------------
+   await Dash.getClaimSummaries()          -> one row per project that has BQ/claim
+                                              data: contract sum (orig + VO), claimed/
+                                              certified to date, retention held,
+                                              claimed-not-certified gap, last claim
+   await Dash.getClaimRegister(projectId)  -> that project's progress claims, newest
+                                              first (claimed vs certified per claim)
+   await Dash.getBqStatus(projectId)       -> that project's BQ lines with cumulative
+                                              claimed / certified qtys and %
+   await Dash.getClaimLines(projectId)     -> every claim's lines for the project
+                                              (newest claim first), each with
+                                              previous / this-claim / cumulative qty
+                                              — the paper IPC's PREVIOUS WD /
+                                              CURRENT WD / GROSS WD columns
+
+   MONEY WRITE COMMANDS (same management/office database gate; each returns
+   { ok, ... } or throws with .message = the database's error code)
+   -----------------------------------------------------------------------------
+   await Dash.createClaim(projectId, {periodTo, submittedDate, retentionPct,
+                                      retentionCapPct, remarks})
+                                           -> { ok, claim_id, claim_no } — number
+                                              auto-assigned (next in sequence)
+   await Dash.setClaimLine(claimId, bqItemId, qtyClaimed, remarks?)
+                                           -> add/correct one line's THIS-period
+                                              qty; qty 0 on an uncertified line
+                                              removes it
+   await Dash.updateClaim(claimId, {periodTo, submittedDate, retentionPct,
+                                    retentionCapPct, remarks})
+                                           -> fix header facts (null = unchanged)
+   await Dash.certifyClaimLine(claimId, bqItemId, qtyCertified|null)
+                                           -> record certified qty (null clears)
+   await Dash.setClaimStatus(claimId, status, certifiedDate?)
+                                           -> submitted | certified | paid
+   await Dash.deleteClaim(claimId)         -> latest claim of its project ONLY
+
    HELPERS
    -----------------------------------------------------------------------------
    Dash.todayKL()        -> 'YYYY-MM-DD' for TODAY in Malaysia time (never use
@@ -192,6 +230,81 @@
     return q(b.order("priority_bucket").order("scheduled_test_date", { ascending: true }));
   }
 
+  // ---- claims (MONEY) --------------------------------------------------------
+  // All three call designation-gated database functions (0035): the database
+  // itself raises 'not_authorised' unless the signed-in staff row is
+  // management/office. UI buttons/ifs alone are never the guard.
+  function getClaimSummaries() {
+    return q(sb.rpc("get_claim_summaries"));
+  }
+
+  function getClaimRegister(projectId) {
+    return q(sb.rpc("get_claim_register", { p_project_id: projectId }));
+  }
+
+  function getBqStatus(projectId) {
+    return q(sb.rpc("get_bq_status", { p_project_id: projectId }));
+  }
+
+  function getClaimLines(projectId) {
+    return q(sb.rpc("get_claim_lines", { p_project_id: projectId }));
+  }
+
+  // money WRITES (0037) — the database re-checks the caller's designation on
+  // every call; these wrappers just shape the parameters.
+  function numOrNull(v) {
+    return (v === undefined || v === null || v === "") ? null : Number(v);
+  }
+
+  function createClaim(projectId, o) {
+    o = o || {};
+    return q(sb.rpc("create_claim", {
+      p_project_id: projectId,
+      p_period_to: o.periodTo || null,
+      p_submitted_date: o.submittedDate || null,
+      p_retention_pct: numOrNull(o.retentionPct),
+      p_retention_cap_pct: numOrNull(o.retentionCapPct),
+      p_remarks: o.remarks || null
+    }));
+  }
+
+  function setClaimLine(claimId, bqItemId, qtyClaimed, remarks) {
+    return q(sb.rpc("set_claim_line", {
+      p_claim_id: claimId, p_bq_item_id: bqItemId,
+      p_qty_claimed: qtyClaimed, p_remarks: remarks || null
+    }));
+  }
+
+  function updateClaim(claimId, o) {
+    o = o || {};
+    return q(sb.rpc("update_claim", {
+      p_claim_id: claimId,
+      p_period_to: o.periodTo || null,
+      p_submitted_date: o.submittedDate || null,
+      p_retention_pct: numOrNull(o.retentionPct),
+      p_retention_cap_pct: numOrNull(o.retentionCapPct),
+      p_remarks: o.remarks || null
+    }));
+  }
+
+  function certifyClaimLine(claimId, bqItemId, qtyCertified) {
+    return q(sb.rpc("certify_claim_line", {
+      p_claim_id: claimId, p_bq_item_id: bqItemId,
+      p_qty_certified: numOrNull(qtyCertified)
+    }));
+  }
+
+  function setClaimStatus(claimId, status, certifiedDate) {
+    return q(sb.rpc("set_claim_status", {
+      p_claim_id: claimId, p_status: status,
+      p_certified_date: certifiedDate || null
+    }));
+  }
+
+  function deleteClaim(claimId) {
+    return q(sb.rpc("delete_claim", { p_claim_id: claimId }));
+  }
+
   // FUTURE (write actions — deliberately not wired up in the view-only MVP):
   //   approveLeave(requestId)        -> sb.rpc("approve_leave", { p_request_id: requestId })
   //   rejectLeave(requestId, reason) -> sb.rpc("reject_leave",  { p_request_id: requestId, p_reason: reason })
@@ -249,6 +362,17 @@
     getLeaveBalances: getLeaveBalances,
     getLeaveRequests: getLeaveRequests,
     getTests: getTests,
+
+    getClaimSummaries: getClaimSummaries,
+    getClaimRegister: getClaimRegister,
+    getBqStatus: getBqStatus,
+    getClaimLines: getClaimLines,
+    createClaim: createClaim,
+    setClaimLine: setClaimLine,
+    updateClaim: updateClaim,
+    certifyClaimLine: certifyClaimLine,
+    setClaimStatus: setClaimStatus,
+    deleteClaim: deleteClaim,
 
     todayKL: todayKL,
     currentYearKL: currentYearKL,

@@ -535,6 +535,483 @@
     //  management-attention panel above; curing/booked pipeline counts
     //  live in the Tests KPI card, full detail on the pile page)
 
+    // ---- CLAIMS & CERTIFICATION (rounds E+F — MONEY, management/office only) ----
+    // Double-gated: rendered only when the profile designation allows it AND
+    // the database call succeeds (the DB refuses everyone else with
+    // 'not_authorised'). Any failure = the section simply never appears —
+    // no empty box, no error banner.
+    // Round F adds EDITING (create claim / edit lines / certify / status /
+    // delete latest). Every write is re-checked by the database (0037) —
+    // the buttons here are convenience, never the guard.
+    var RM_FMT = new Intl.NumberFormat("en-MY", {
+      minimumFractionDigits: 2, maximumFractionDigits: 2
+    });
+    function fmtRM(v) {
+      if (v === null || v === undefined || v === "") return "—";
+      return "RM " + RM_FMT.format(Number(v));
+    }
+    function fmtPct(v) {
+      return (v === null || v === undefined || v === "") ? "—" : Number(v) + "%";
+    }
+    // claim periods read as a month, not a day ("May 2026") — the stored date
+    // is the month's last day by entry convention
+    function mstr(d) {
+      if (!d) return "—";
+      return new Intl.DateTimeFormat("en-MY", { month: "short", year: "numeric" })
+        .format(new Date(d + "T00:00:00"));
+    }
+    var CLAIM_BADGE = { submitted: "badge-pending", certified: "badge-approved", paid: "badge-gray" };
+    // '2026-05' (month picker) -> '2026-05-31' (period_to stores the month's last day)
+    function monthEnd(ym) {
+      if (!ym) return null;
+      var p = ym.split("-");
+      var last = new Date(Date.UTC(+p[0], +p[1], 0)).getUTCDate();
+      return ym + "-" + (last < 10 ? "0" + last : last);
+    }
+
+    // shared claims state — survives every re-render between edits
+    var CL = {
+      projectId: null, p: null, sum: null, register: [], bq: [],
+      linesByClaim: {}, open: {}, edit: null, err: ""
+    };
+    function claimByNo(no) {
+      return CL.register.find(function (c) { return c.claim_no === Number(no); });
+    }
+    function maxClaimNo() {
+      return CL.register.reduce(function (m, c) { return Math.max(m, c.claim_no); }, 0);
+    }
+
+    function claimsSummaryCards(sum) {
+      var vo = Number(sum.contract_sum_vo) || 0;
+      var gap = Number(sum.claimed_not_certified) || 0;
+      var cards = [
+        ["Contract sum" + (vo > 0 ? " · incl. VO " + fmtRM(vo) : ""), fmtRM(sum.contract_sum), ""],
+        ["Claimed to date · " + fmtPct(sum.pct_claimed), fmtRM(sum.claimed_to_date), ""],
+        ["Certified to date · " + fmtPct(sum.pct_certified), fmtRM(sum.certified_to_date), ""],
+        ["Retention held", fmtRM(sum.retention_held), ""],
+        ["Claimed, not certified", fmtRM(sum.claimed_not_certified), gap > 0 ? " stale-warn" : ""]
+      ];
+      return '<div class="cards">' + cards.map(function (c) {
+        return '<div class="card"><div class="label">' + c[0] + "</div>" +
+               '<div class="value money' + c[2] + '">' + c[1] + "</div></div>";
+      }).join("") + "</div>";
+    }
+
+    // the lines INSIDE one claim, laid out like page 2 of the paper IPC:
+    // PREVIOUS qty | THIS CLAIM qty | CUMULATIVE qty per BQ item
+    function claimLinesTable(lines) {
+      if (!lines.length) {
+        return '<div class="muted-line" style="padding:8px 12px">No lines recorded for this claim.</div>';
+      }
+      var certAny = false, totalThis = 0, totalCert = 0;
+      var rows = lines.map(function (l) {
+        totalThis += Number(l.amount_claimed) || 0;
+        totalCert += Number(l.amount_certified) || 0;
+        if (l.qty_certified !== null) certAny = true;
+        return "<tr>" +
+          "<td>" + escHtml(l.item_code || "") + "</td>" +
+          '<td class="wrap">' + escHtml(l.description) + "</td>" +
+          "<td>" + escHtml(l.unit || "") + "</td>" +
+          '<td class="num">' + (l.rate === null ? "—" : fmtRM(l.rate)) + "</td>" +
+          '<td class="num">' + (Number(l.prev_qty_claimed) ? l.prev_qty_claimed : "—") + "</td>" +
+          '<td class="num"><strong>' + l.qty_claimed + "</strong></td>" +
+          '<td class="num">' + l.cum_qty_claimed + "</td>" +
+          '<td class="num">' + fmtRM(l.amount_claimed) + "</td>" +
+          '<td class="num">' + (l.qty_certified === null ? "—" : l.qty_certified) + "</td>" +
+        "</tr>";
+      }).join("");
+      return '<table class="claim-lines">' +
+             "<thead><tr><th>#</th><th>Description</th><th>Unit</th>" +
+             '<th class="num">Rate</th><th class="num">Previous</th>' +
+             '<th class="num">This claim</th><th class="num">Cumulative</th>' +
+             '<th class="num">Amount</th><th class="num">Certified qty</th></tr></thead>' +
+             "<tbody>" + rows + "</tbody>" +
+             '<tfoot><tr><td colspan="7">This claim total</td>' +
+             '<td class="num">' + fmtRM(totalThis) + "</td>" +
+             '<td class="num">' + (certAny ? fmtRM(totalCert) : "—") + "</td></tr></tfoot></table>";
+    }
+
+    // EDIT LINES: one qty input per BQ item (blank/0 = not claimed this claim);
+    // per-line amount and the claim total recompute live as you type.
+    function claimLinesEditTable(claim) {
+      var lines = CL.linesByClaim[claim.claim_no] || [];
+      var byItem = {};
+      lines.forEach(function (l) { byItem[l.bq_item_id] = l; });
+      var rows = CL.bq.map(function (b) {
+        var l = byItem[b.bq_item_id];
+        var val = l ? l.qty_claimed : "";
+        return "<tr>" +
+          "<td>" + escHtml(b.item_code || "") + "</td>" +
+          '<td class="wrap">' + escHtml(b.description) + "</td>" +
+          "<td>" + escHtml(b.unit || "") + "</td>" +
+          '<td class="num">' + (b.rate === null ? "—" : fmtRM(b.rate)) + "</td>" +
+          '<td class="num">' + (l && Number(l.prev_qty_claimed) ? l.prev_qty_claimed : "—") + "</td>" +
+          '<td class="num"><input class="qty" type="number" step="0.01" min="0"' +
+            ' data-item="' + b.bq_item_id + '" data-old="' + val + '"' +
+            ' data-rate="' + (b.rate === null ? "" : b.rate) + '" value="' + val + '" placeholder="—"></td>' +
+          '<td class="num line-amt">' + (l ? fmtRM(l.amount_claimed) : "—") + "</td>" +
+        "</tr>";
+      }).join("");
+      return '<table class="claim-lines">' +
+             "<thead><tr><th>#</th><th>Description</th><th>Unit</th>" +
+             '<th class="num">Rate</th><th class="num">Previous</th>' +
+             '<th class="num">This claim qty</th><th class="num">Amount</th></tr></thead>' +
+             "<tbody>" + rows + "</tbody>" +
+             '<tfoot><tr><td colspan="6">This claim total</td>' +
+             '<td class="num claim-live-total"></td></tr></tfoot></table>' +
+             '<div class="claim-actions">' +
+             '<button type="button" data-action="save-lines" data-claim="' + claim.claim_no + '">Save lines</button>' +
+             '<button type="button" data-action="cancel-edit">Cancel</button>' +
+             '<span class="muted-line">blank or 0 = not claimed (an uncertified line is removed)</span></div>';
+    }
+
+    // CERTIFY: inputs only for the lines this claim actually claimed.
+    function claimCertifyTable(claim) {
+      var lines = CL.linesByClaim[claim.claim_no] || [];
+      if (!lines.length) {
+        return '<div class="muted-line" style="padding:8px 12px">Nothing claimed — nothing to certify.</div>' +
+               '<div class="claim-actions"><button type="button" data-action="cancel-edit">Close</button></div>';
+      }
+      var rows = lines.map(function (l) {
+        var val = l.qty_certified === null ? "" : l.qty_certified;
+        return "<tr>" +
+          "<td>" + escHtml(l.item_code || "") + "</td>" +
+          '<td class="wrap">' + escHtml(l.description) + "</td>" +
+          "<td>" + escHtml(l.unit || "") + "</td>" +
+          '<td class="num">' + (l.rate === null ? "—" : fmtRM(l.rate)) + "</td>" +
+          '<td class="num">' + l.qty_claimed + "</td>" +
+          '<td class="num"><input class="qty" type="number" step="0.01" min="0"' +
+            ' data-item="' + l.bq_item_id + '" data-old="' + val + '" value="' + val + '" placeholder="—"></td>' +
+        "</tr>";
+      }).join("");
+      return '<table class="claim-lines">' +
+             "<thead><tr><th>#</th><th>Description</th><th>Unit</th>" +
+             '<th class="num">Rate</th><th class="num">Claimed</th>' +
+             '<th class="num">Certified qty</th></tr></thead>' +
+             "<tbody>" + rows + "</tbody></table>" +
+             '<div class="claim-actions">' +
+             '<label>certified date <input type="date" id="certify-date" value="' +
+               esc(claim.certified_date || Dash.todayKL()) + '"></label>' +
+             '<button type="button" data-action="save-certify" data-claim="' + claim.claim_no + '">Save &amp; mark certified</button>' +
+             '<button type="button" data-action="cancel-edit">Cancel</button>' +
+             '<span class="muted-line">blank = not certified</span></div>';
+    }
+
+    // header facts form (period / submitted / retention / remarks)
+    function claimHeaderForm(claim) {
+      var ym = claim.period_to ? String(claim.period_to).slice(0, 7) : "";
+      return '<div class="claim-form">' +
+        '<label>period (month) <input type="month" id="cf-period" value="' + ym + '"></label>' +
+        '<label>submitted <input type="date" id="cf-submitted" value="' + esc(claim.submitted_date || "") + '"></label>' +
+        '<label>retention % <input type="number" id="cf-ret" step="0.5" min="0" max="100" value="' + claim.retention_pct + '"></label>' +
+        '<label>cap % of contract <input type="number" id="cf-cap" step="0.5" min="0" max="100" value="' +
+          (claim.retention_cap_pct === null ? "" : claim.retention_cap_pct) + '"></label>' +
+        '<label>remarks <input type="text" id="cf-remarks" size="30" value="' + esc(claim.remarks || "") + '"></label>' +
+        '<button type="button" data-action="save-header" data-claim="' + claim.claim_no + '">Save</button>' +
+        '<button type="button" data-action="cancel-edit">Cancel</button>' +
+        "</div>";
+    }
+
+    function newClaimForm() {
+      return '<div class="claim-form">' +
+        "<strong>New claim #" + (maxClaimNo() + 1) + "</strong>" +
+        '<label>period (month) <input type="month" id="nc-period"></label>' +
+        '<label>submitted <input type="date" id="nc-submitted" value="' + Dash.todayKL() + '"></label>' +
+        '<label>retention % <input type="number" id="nc-ret" step="0.5" min="0" max="100" value="10"></label>' +
+        '<label>cap % of contract <input type="number" id="nc-cap" step="0.5" min="0" max="100" value="5"></label>' +
+        '<label>remarks <input type="text" id="nc-remarks" size="24"></label>' +
+        '<button type="button" data-action="create-claim">Create — then enter quantities</button>' +
+        '<button type="button" data-action="cancel-edit">Cancel</button>' +
+        "</div>";
+    }
+
+    function claimActionsBar(claim) {
+      var b = [
+        '<button type="button" data-action="edit-lines" data-claim="' + claim.claim_no + '">Edit lines</button>',
+        '<button type="button" data-action="certify" data-claim="' + claim.claim_no + '">Certify…</button>',
+        '<button type="button" data-action="edit-header" data-claim="' + claim.claim_no + '">Claim info…</button>'
+      ];
+      if (claim.status === "certified")
+        b.push('<button type="button" data-action="mark-paid" data-claim="' + claim.claim_no + '">Mark paid</button>');
+      if (claim.status === "paid")
+        b.push('<button type="button" data-action="unmark-paid" data-claim="' + claim.claim_no + '">Back to certified</button>');
+      if (claim.claim_no === maxClaimNo())
+        b.push('<button type="button" class="danger" data-action="delete-claim" data-claim="' + claim.claim_no + '">Delete claim…</button>');
+      return '<div class="claim-actions">' + b.join("") + "</div>";
+    }
+
+    function claimRegisterTable() {
+      if (!CL.register.length) {
+        return '<div class="muted-line">No claims submitted yet.</div>';
+      }
+      var rows = CL.register.map(function (c) {
+        var isOpen = !!CL.open[c.claim_no];
+        var editing = (CL.edit && CL.edit.claimNo === c.claim_no) ? CL.edit.mode : null;
+        var main = '<tr class="claim-row" data-claim="' + c.claim_no +
+          '" title="Click to open this claim' + "'" + 's lines">' +
+          '<td><span class="claim-caret">' + (isOpen ? "&#9662;" : "&#9656;") + "</span> <strong>" + c.claim_no + "</strong></td>" +
+          "<td>" + mstr(c.period_to) + "</td>" +
+          '<td class="num">' + fmtRM(c.claimed_amount) + "</td>" +
+          '<td class="num">' + fmtRM(c.certified_amount) + "</td>" +
+          '<td class="num">' + fmtPct(c.pct_certified_vs_claimed) + "</td>" +
+          '<td><span class="badge ' + (CLAIM_BADGE[c.status] || "badge-gray") + '">' +
+            escHtml(c.status) + "</span></td>" +
+          "<td>" + dstr(c.submitted_date) + "</td>" +
+          "<td>" + dstr(c.certified_date) + "</td>" +
+        "</tr>";
+        var inner;
+        if (editing === "lines")        inner = claimLinesEditTable(c);
+        else if (editing === "certify") inner = claimCertifyTable(c);
+        else if (editing === "header")  inner = claimHeaderForm(c) + claimLinesTable(CL.linesByClaim[c.claim_no] || []);
+        else inner = claimActionsBar(c) + claimLinesTable(CL.linesByClaim[c.claim_no] || []);
+        var detail = '<tr class="claim-lines-row"' + (isOpen ? "" : ' style="display:none"') +
+                     '><td colspan="8">' + inner + "</td></tr>";
+        return main + detail;
+      }).join("");
+      return '<div class="table-wrap"><table>' +
+             "<thead><tr><th>#</th><th>Period</th>" +
+             '<th class="num">Claimed</th><th class="num">Certified</th>' +
+             '<th class="num">% certified</th><th>Status</th>' +
+             "<th>Submitted</th><th>Certified on</th></tr></thead>" +
+             "<tbody>" + rows + "</tbody></table></div>";
+    }
+
+    function bqStatusBlock(bq) {
+      if (!bq.length) return "";
+      var rows = bq.map(function (b) {
+        var desc = escHtml(b.description) +
+          (b.remarks ? ' <span class="muted-line">(' + escHtml(b.remarks) + ")</span>" : "") +
+          (b.is_variation ? ' <span class="badge badge-anomaly">VO</span>' : "");
+        return "<tr>" +
+          "<td>" + escHtml(b.item_code || "") + "</td>" +
+          '<td class="wrap">' + desc + "</td>" +
+          "<td>" + escHtml(b.unit || "") + "</td>" +
+          '<td class="num">' + (b.rate === null ? "—" : fmtRM(b.rate)) + "</td>" +
+          '<td class="num">' + b.contract_qty + "</td>" +
+          '<td class="num">' + fmtRM(b.amount) + "</td>" +
+          '<td class="num">' + b.cum_qty_claimed + "</td>" +
+          '<td class="num">' + (b.cum_qty_certified === null ? "—" : b.cum_qty_certified) + "</td>" +
+          '<td class="num">' + fmtPct(b.pct_certified) + "</td>" +
+        "</tr>";
+      }).join("");
+      // description wraps (td.wrap) so the whole table fits on screen —
+      // item and rate visible together, no left/right scrolling
+      return '<details class="zone"><summary><span class="zone-name">Bill of Quantities — item status</span>' +
+             '<span class="zone-count">' + bq.length + " items · rates visible</span></summary>" +
+             '<div class="table-wrap"><table>' +
+             "<thead><tr><th>#</th><th>Description</th><th>Unit</th>" +
+             '<th class="num">Rate</th><th class="num">Contract</th><th class="num">Amount</th>' +
+             '<th class="num">Claimed</th><th class="num">Certified</th>' +
+             '<th class="num">% cert</th></tr></thead>' +
+             "<tbody>" + rows + "</tbody></table></div></details>";
+    }
+
+    async function fetchClaims() {
+      var res = await Promise.all([
+        Dash.getClaimSummaries(),
+        Dash.getClaimRegister(CL.projectId),
+        Dash.getBqStatus(CL.projectId),
+        Dash.getClaimLines(CL.projectId)
+      ]);
+      CL.sum = res[0].find(function (s) { return s.project_id === CL.projectId; }) || null;
+      CL.register = res[1];
+      CL.bq = res[2];
+      CL.linesByClaim = {};
+      res[3].forEach(function (l) {
+        (CL.linesByClaim[l.claim_no] = CL.linesByClaim[l.claim_no] || []).push(l);
+      });
+    }
+
+    function renderClaims() {
+      var el = document.getElementById("claims");
+      if (!el) return;
+
+      if (!CL.sum && !CL.register.length) {
+        el.innerHTML =
+          '<details class="zone" open><summary><span class="zone-name">Claims &amp; certification</span>' +
+          '<span class="zone-count">management/office only</span></summary>' +
+          '<div class="muted-line" style="margin-top:8px">No BQ entered for this project yet — ' +
+          "money figures appear once its Bill of Quantities is in the system (BQ entry stays a working-session job).</div></details>";
+        return;
+      }
+
+      // honesty pairing: physical progress vs money progress, side by side
+      var castPct = Math.max(0, Math.min(100, Number(CL.p.progress_pct) || 0));
+      var honesty = CL.sum
+        ? '<div class="muted-line" style="margin:2px 0 12px">' +
+          "Physical vs money: piles cast <strong>" + castPct + "%</strong> · claimed <strong>" +
+          fmtPct(CL.sum.pct_claimed) + "</strong> · certified <strong>" + fmtPct(CL.sum.pct_certified) +
+          "</strong>" + (CL.sum.last_claim_no
+            ? ' <span class="trend-compare">— last claim #' + CL.sum.last_claim_no + " (" +
+              escHtml(CL.sum.last_claim_status || "") +
+              (CL.sum.last_claim_date ? ", " + dstr(CL.sum.last_claim_date) : "") + ")</span>"
+            : "") + "</div>"
+        : "";
+
+      var err = CL.err
+        ? '<div class="banner banner-red" style="margin-bottom:10px">Could not save: ' + escHtml(CL.err) + "</div>"
+        : "";
+      var newBtn = (CL.edit && CL.edit.mode === "new")
+        ? newClaimForm()
+        : '<div class="claim-actions" style="padding:0 0 10px">' +
+          '<button type="button" data-action="new-claim-form">+ New claim</button></div>';
+
+      el.innerHTML =
+        '<details class="zone" open><summary><span class="zone-name">Claims &amp; certification</span>' +
+        '<span class="zone-count">' + CL.register.length + " claim" + (CL.register.length === 1 ? "" : "s") +
+        " · management/office only</span></summary>" +
+        '<div style="margin-top:10px">' +
+        err + (CL.sum ? claimsSummaryCards(CL.sum) : "") + honesty + newBtn +
+        claimRegisterTable() + bqStatusBlock(CL.bq) +
+        "</div></details>";
+      updateLiveTotals(el);
+    }
+
+    // live per-line amount + claim total while typing in edit mode
+    function updateLiveTotals(el) {
+      el.querySelectorAll("table.claim-lines").forEach(function (tbl) {
+        var totCell = tbl.querySelector(".claim-live-total");
+        if (!totCell) return;
+        var t = 0;
+        tbl.querySelectorAll("input.qty").forEach(function (inp) {
+          var rate = inp.getAttribute("data-rate");
+          var amtCell = inp.closest("tr").querySelector(".line-amt");
+          var v = inp.value === "" ? 0 : Number(inp.value);
+          var amt = (rate === "" || rate === null) ? 0 : v * Number(rate);
+          t += amt;
+          if (amtCell) amtCell.textContent = inp.value === "" ? "—" : fmtRM(amt);
+        });
+        totCell.textContent = fmtRM(t);
+      });
+    }
+
+    async function refreshClaims() {
+      try { await fetchClaims(); } catch (e) { CL.err = (e && e.message) || String(e); }
+      renderClaims();
+    }
+
+    // ---- write actions (each: try the database call, surface its error,
+    //      re-fetch so every derived figure recomputes) ----
+    function collectQtyChanges(el, blankIs) {
+      var changes = [];
+      el.querySelectorAll("table.claim-lines input.qty").forEach(function (inp) {
+        var oldV = inp.getAttribute("data-old"), newV = inp.value;
+        var oldN = oldV === "" ? blankIs : Number(oldV);
+        var newN = newV === "" ? blankIs : Number(newV);
+        if (oldN !== newN) changes.push({ item: inp.getAttribute("data-item"), qty: newN });
+      });
+      return changes;
+    }
+
+    async function actCreateClaim() {
+      var period = document.getElementById("nc-period").value;
+      try {
+        var r = await Dash.createClaim(CL.projectId, {
+          periodTo: period ? monthEnd(period) : null,
+          submittedDate: document.getElementById("nc-submitted").value || null,
+          retentionPct: document.getElementById("nc-ret").value,
+          retentionCapPct: document.getElementById("nc-cap").value,
+          remarks: document.getElementById("nc-remarks").value || null
+        });
+        CL.err = "";
+        CL.edit = { mode: "lines", claimNo: r.claim_no };   // straight into qty entry
+        CL.open[r.claim_no] = true;
+      } catch (e) { CL.err = (e && e.message) || String(e); }
+      await refreshClaims();
+    }
+
+    async function actSaveLines(c) {
+      var el = document.getElementById("claims");
+      var changes = collectQtyChanges(el, 0);   // blank = 0 = not claimed
+      try {
+        for (var i = 0; i < changes.length; i++)
+          await Dash.setClaimLine(c.claim_id, changes[i].item, changes[i].qty);
+        CL.err = ""; CL.edit = null;
+      } catch (e) { CL.err = (e && e.message) || String(e); }
+      await refreshClaims();
+    }
+
+    async function actSaveCertify(c) {
+      var el = document.getElementById("claims");
+      var date = document.getElementById("certify-date").value || null;
+      var changes = collectQtyChanges(el, null);   // blank = null = not certified
+      try {
+        for (var i = 0; i < changes.length; i++)
+          await Dash.certifyClaimLine(c.claim_id, changes[i].item, changes[i].qty);
+        await Dash.setClaimStatus(c.claim_id, "certified", date);
+        CL.err = ""; CL.edit = null;
+      } catch (e) { CL.err = (e && e.message) || String(e); }
+      await refreshClaims();
+    }
+
+    async function actSaveHeader(c) {
+      var period = document.getElementById("cf-period").value;
+      try {
+        await Dash.updateClaim(c.claim_id, {
+          periodTo: period ? monthEnd(period) : null,
+          submittedDate: document.getElementById("cf-submitted").value || null,
+          retentionPct: document.getElementById("cf-ret").value,
+          retentionCapPct: document.getElementById("cf-cap").value,
+          remarks: document.getElementById("cf-remarks").value || null
+        });
+        CL.err = ""; CL.edit = null;
+      } catch (e) { CL.err = (e && e.message) || String(e); }
+      await refreshClaims();
+    }
+
+    async function actStatus(c, status, date) {
+      try { await Dash.setClaimStatus(c.claim_id, status, date); CL.err = ""; }
+      catch (e) { CL.err = (e && e.message) || String(e); }
+      await refreshClaims();
+    }
+
+    async function actDelete(c) {
+      if (!window.confirm("Delete claim #" + c.claim_no + " and all its lines? This cannot be undone.")) return;
+      try { await Dash.deleteClaim(c.claim_id); CL.err = ""; CL.edit = null; delete CL.open[c.claim_no]; }
+      catch (e) { CL.err = (e && e.message) || String(e); }
+      await refreshClaims();
+    }
+
+    async function onClaimsClick(ev) {
+      var btn = ev.target.closest("button[data-action]");
+      if (btn) {
+        var act = btn.getAttribute("data-action");
+        var c = btn.getAttribute("data-claim") ? claimByNo(btn.getAttribute("data-claim")) : null;
+        if (act === "new-claim-form")    { CL.edit = { mode: "new" }; renderClaims(); }
+        else if (act === "cancel-edit")  { CL.edit = null; renderClaims(); }
+        else if (act === "edit-lines")   { CL.edit = { mode: "lines",   claimNo: c.claim_no }; CL.open[c.claim_no] = true; renderClaims(); }
+        else if (act === "certify")      { CL.edit = { mode: "certify", claimNo: c.claim_no }; CL.open[c.claim_no] = true; renderClaims(); }
+        else if (act === "edit-header")  { CL.edit = { mode: "header",  claimNo: c.claim_no }; CL.open[c.claim_no] = true; renderClaims(); }
+        else if (act === "create-claim") { await actCreateClaim(); }
+        else if (act === "save-lines")   { await actSaveLines(c); }
+        else if (act === "save-certify") { await actSaveCertify(c); }
+        else if (act === "save-header")  { await actSaveHeader(c); }
+        else if (act === "mark-paid")    { await actStatus(c, "paid", null); }
+        else if (act === "unmark-paid")  { await actStatus(c, "certified", c.certified_date); }
+        else if (act === "delete-claim") { await actDelete(c); }
+        return;
+      }
+      var row = ev.target.closest("tr.claim-row");
+      if (!row) return;
+      var no = row.getAttribute("data-claim");
+      CL.open[no] = !CL.open[no];
+      renderClaims();
+    }
+
+    async function loadClaims(projectId, p) {
+      var profile = await Dash.getMyProfile();
+      if (!profile ||
+          (profile.designation !== "management" && profile.designation !== "office")) return;
+      CL.projectId = projectId; CL.p = p;
+      try { await fetchClaims(); } catch (e) { return; }   // DB said no — section stays absent
+      renderClaims();
+      var el = document.getElementById("claims");
+      el.addEventListener("click", onClaimsClick);
+      el.addEventListener("input", function (ev) {
+        if (ev.target.classList && ev.target.classList.contains("qty")) updateLiveTotals(el);
+      });
+    }
+
     window.onShellReady = async function () {
       var projectId = new URLSearchParams(location.search).get("project");
       var titleEl = document.getElementById("project-title");
@@ -638,7 +1115,12 @@
         initTrend(outputRows);
         document.getElementById("sections").innerHTML =
           attentionSection(p, openIssues, machines, tb, piles) +
+          '<div id="claims"></div>' +
           machinesSection(machines);
+
+        // MONEY loads separately after the page is up: only management/office
+        // ever see it, and any refusal/failure leaves the page untouched.
+        loadClaims(projectId, p);
       } catch (e) {
         titleEl.textContent = "";
         document.getElementById("error").innerHTML =
