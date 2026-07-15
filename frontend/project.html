@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HF Dashboard — Project</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <header id="nav"></header>
+
+  <main id="main">
+
+    <!-- ================= PROJECT HUB (draft — adjust together) =================
+         Reached by clicking a project card on the Overview. One page that
+         answers "how is THIS site doing?" and links deeper:
+           1. Header — code, name, status, client, dates, report health
+           2. KPI cards — progress, cast, issues, tests overdue, machines, workers
+           3. Progress by zone — all-zones bar + one thin bar per zone;
+              zone names jump into the pile page at that zone
+           4. 14-day production trend (this week vs last, daily bars)
+           5. Management attention — ONE ranked exceptions panel:
+              breakdowns, critical/high issues, test escalations,
+              stale issues (7d no update), silent site, data gaps
+           6. Machines on this site (last-known state)
+         Reads: existing views + 0032 (supervisors, daily output). -->
+    <div class="page-eyebrow">Project</div>
+    <h1 id="project-title">Loading…</h1>
+    <p id="project-sub" class="page-caption"></p>
+
+    <div id="kpis" class="cards"></div>
+
+    <div id="pile-strip"></div>
+
+    <!-- 14-day production trend (round C): headline this-week vs last-week,
+         then one column per day — blue bar = metres bored (only reports that
+         included start/end depths carry metres), green number = piles cast
+         that day. Hidden entirely when the project has no recent activity. -->
+    <div id="trend"></div>
+
+    <div id="sections"></div>
+
+    <div id="error"></div>
+
+  </main>
+
+  <script src="vendor/supabase.js"></script>
+  <script src="config.js"></script>
+  <script src="dashboard-client.js"></script>
+  <script src="shell.js"></script>
+
+  <script>
+    // ---- shared helpers (same definitions the pile/machine pages use) ----
+    function esc(s) { return String(s === null || s === undefined ? "" : s).replace(/"/g, "&quot;"); }
+    function escHtml(s) {
+      return String(s === null || s === undefined ? "" : s)
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+    function dstr(d) {
+      if (!d) return "—";
+      return new Intl.DateTimeFormat("en-MY", { day: "2-digit", month: "short", year: "numeric" })
+        .format(new Date(d + "T00:00:00"));
+    }
+    function daysSince(dateStr) {
+      if (!dateStr) return null;
+      return Math.round((new Date(Dash.todayKL()) - new Date(dateStr)) / 86400000);
+    }
+
+    // ---- pile pipeline strip (same component as piles.html) ----
+    var STAGES = [
+      ["Planned", ["planned"]],
+      ["Boring",  ["casing_installed", "boring_in_progress"]],
+      ["Bored",   ["bored_complete"]],
+      ["Cage",    ["cage_in_progress", "cage_installed"]],
+      ["Cast",    ["casting_in_progress", "cast_complete"]],
+      ["Trimmed", ["head_trimmed"]]
+    ];
+    function stageOf(status) {
+      for (var i = 0; i < STAGES.length; i++)
+        if (STAGES[i][1].indexOf(status) !== -1) return STAGES[i][0];
+      return "Planned";
+    }
+    var STAGE_COLORS = {
+      "Planned": "#e5e7eb", "Boring": "#5598e7", "Bored": "#2a78d6",
+      "Cage": "#1c5cab", "Cast": "#1baf7a", "Trimmed": "#008300"
+    };
+
+    // one segmented stage bar for any list of piles
+    function stageBarHtml(list) {
+      var counts = {};
+      STAGES.forEach(function (s) { counts[s[0]] = 0; });
+      list.forEach(function (r) { counts[stageOf(r.construction_status)]++; });
+      var total = list.length;
+      return STAGES.map(function (s) {
+        var name = s[0], c = counts[name];
+        if (!c) return "";
+        var pct = Math.round(c * 100 / total);
+        return '<span class="pipe-seg" style="flex-grow:' + c + ";background:" + STAGE_COLORS[name] +
+               '" title="' + name + " — " + c + " pile" + (c === 1 ? "" : "s") + " (" + pct + '%)"></span>';
+      }).join("");
+    }
+
+    // PROGRESS BY ZONE: all-zones bar + legend on top, then one thin bar per
+    // zone (only when the project actually has 2+ zones). Zone names link
+    // into the pile page, landing on that zone's block.
+    function zoneProgress(piles, projectId) {
+      if (!piles.length) return "";
+      var counts = {};
+      STAGES.forEach(function (s) { counts[s[0]] = 0; });
+      piles.forEach(function (r) { counts[stageOf(r.construction_status)]++; });
+      var keys = STAGES.map(function (s) {
+        var name = s[0], c = counts[name];
+        return '<span class="pipe-key' + (c ? "" : " zero") + '">' +
+               '<i style="background:' + STAGE_COLORS[name] + '"></i>' + name + " <b>" + c + "</b></span>";
+      }).join("");
+
+      var zones = {};
+      piles.forEach(function (r) { var z = r.zone || "Unzoned"; (zones[z] = zones[z] || []).push(r); });
+      var zoneNames = Object.keys(zones).sort();
+      var zoneRows = "";
+      if (zoneNames.length > 1) {
+        zoneRows = '<div class="zonebar-rows">' + zoneNames.map(function (z) {
+          var zr = zones[z];
+          var cast = zr.filter(function (r) {
+            return r.construction_status === "cast_complete" || r.construction_status === "head_trimmed";
+          }).length;
+          return '<div class="zonebar-row">' +
+                 '<a class="zonebar-label" title="Open pile records at ' + esc(z) + '" ' +
+                 'href="piles.html?project=' + projectId + "&zone=" + encodeURIComponent(z) + '">' +
+                 escHtml(z) + "</a>" +
+                 '<span class="pipe-bar">' + stageBarHtml(zr) + "</span>" +
+                 '<span class="zonebar-count">' + zr.length + " pile" + (zr.length === 1 ? "" : "s") +
+                 " · " + cast + " cast</span></div>";
+        }).join("") + "</div>";
+      }
+
+      return '<div class="pipe-card">' +
+             '<div class="pipe-bar">' + stageBarHtml(piles) + "</div>" +
+             '<div class="pipe-legend"><span class="pipe-total">' + piles.length + " piles</span>" + keys +
+             '<a class="pipe-link" href="piles.html?project=' + projectId + '">Open pile records →</a></div>' +
+             zoneRows + "</div>";
+    }
+
+    // ---- 14-day production trend ----
+    function addDays(dateStr, n) {
+      var d = new Date(dateStr + "T00:00:00Z");
+      d.setUTCDate(d.getUTCDate() + n);
+      return d.toISOString().slice(0, 10);
+    }
+    function f1(v) { return (Math.round(v * 10) / 10).toString(); }
+
+    function trendSection(rows) {
+      if (!rows.length) return "";   // no recent activity at all -> no card
+      var today = Dash.todayKL();
+      var byDate = {};
+      rows.forEach(function (r) { byDate[r.log_date] = r; });
+
+      // last 14 days, oldest first
+      var days = [];
+      for (var i = 13; i >= 0; i--) {
+        var key = addDays(today, -i);
+        var r = byDate[key];
+        days.push({
+          date: key,
+          metres: r ? Number(r.metres_bored) || 0 : 0,
+          cast: r ? Number(r.piles_cast) || 0 : 0,
+          boredOn: r ? Number(r.piles_bored_on) || 0 : 0,
+          diesel: r ? Number(r.diesel_l) || 0 : 0
+        });
+      }
+      var prev = days.slice(0, 7), cur = days.slice(7);
+      function sums(list) {
+        return list.reduce(function (s, d) {
+          return { cast: s.cast + d.cast, metres: s.metres + d.metres, diesel: s.diesel + d.diesel };
+        }, { cast: 0, metres: 0, diesel: 0 });
+      }
+      var cw = sums(cur), pw = sums(prev);
+
+      var anything = days.some(function (d) {
+        return d.metres > 0 || d.cast > 0 || d.boredOn > 0 || d.diesel > 0;
+      });
+      if (!anything) return "";      // active elsewhere in the 28d window only
+
+      var deltaBits = [];
+      deltaBits.push((cw.cast === pw.cast ? "=" : cw.cast > pw.cast ? "↑" : "↓") +
+                     " casts " + (cw.cast - pw.cast >= 0 ? "+" : "") + (cw.cast - pw.cast));
+      deltaBits.push((cw.metres === pw.metres ? "=" : cw.metres > pw.metres ? "↑" : "↓") +
+                     " metres " + (cw.metres - pw.metres >= 0 ? "+" : "") + f1(cw.metres - pw.metres));
+      deltaBits.push((cw.diesel === pw.diesel ? "=" : cw.diesel > pw.diesel ? "↑" : "↓") +
+                     " diesel " + (cw.diesel - pw.diesel >= 0 ? "+" : "") + Math.round(cw.diesel - pw.diesel) + " L");
+
+      var maxM = Math.max.apply(null, days.map(function (d) { return d.metres; }).concat([1]));
+      var maxD = Math.max.apply(null, days.map(function (d) { return d.diesel; }).concat([1]));
+      var cols = days.map(function (d) {
+        var hPct = d.metres > 0 ? Math.max(6, Math.round(d.metres / maxM * 100)) : 0;
+        var dPct = d.diesel > 0 ? Math.max(8, Math.round(d.diesel / maxD * 100)) : 0;
+        var tip = dstr(d.date) + " — " + f1(d.metres) + " m bored" +
+                  (d.boredOn ? " (" + d.boredOn + " pile" + (d.boredOn === 1 ? "" : "s") + ")" : "") +
+                  " · " + d.cast + " cast · " + Math.round(d.diesel) + " L diesel";
+        return '<div class="trend-col" title="' + esc(tip) + '">' +
+               '<div class="trend-barbox">' +
+               (hPct ? '<div class="trend-bar" style="height:' + hPct + '%"></div>' : "") +
+               "</div>" +
+               '<div class="trend-dieselbox">' +
+               (dPct ? '<div class="trend-diesel" style="height:' + dPct + '%"></div>' : "") +
+               "</div>" +
+               '<div class="trend-cast">' + (d.cast ? d.cast : "") + "</div>" +
+               "</div>";
+      }).join("");
+
+      var labels = '<div class="trend-labels">' +
+                   "<span>" + dstr(days[0].date) + "</span>" +
+                   "<span>" + dstr(days[7].date) + "</span>" +
+                   "<span>" + dstr(days[13].date) + "</span></div>";
+
+      return '<div class="pipe-card">' +
+             '<div class="trend-head"><strong>This week: ' + cw.cast + " pile" + (cw.cast === 1 ? "" : "s") +
+             " cast · " + f1(cw.metres) + " m bored · " + Math.round(cw.diesel) + ' L diesel</strong>' +
+             '<span class="trend-compare">last week: ' + pw.cast + " cast · " + f1(pw.metres) + " m · " +
+             Math.round(pw.diesel) + " L · " + deltaBits.join(" · ") + "</span></div>" +
+             '<div class="trend-chart">' + cols + "</div>" + labels +
+             '<div class="trend-castnote"><i class="key-metres"></i>metres bored' +
+             ' <i class="key-diesel"></i>diesel (L/day)' +
+             ' <i class="key-cast"></i>green number = piles cast that day</div>' +
+             '<div class="pipe-note">metres count only the reports that included start/end depths — ' +
+             "quiet days may still have had boring; diesel comes from the nightly machine reports</div></div>";
+    }
+
+    // ---- MANAGEMENT ATTENTION (round D) ----
+    // One ranked panel replacing the separate issues + tests sections:
+    // exceptions only, worst first. Everything else lives in the drill-downs.
+    function attLine(badgeCls, badgeText, mainHtml, metaHtml) {
+      return '<div class="pc-issue"><span class="badge ' + badgeCls + '">' + badgeText + "</span> " +
+             mainHtml + (metaHtml ? '<div class="pc-meta">' + metaHtml + "</div>" : "") + "</div>";
+    }
+
+    function attentionSection(p, openIssues, machines, tb, piles) {
+      var items = [];
+
+      // 1) machine breakdown
+      machines.filter(function (m) { return m.last_status === "breakdown"; }).forEach(function (m) {
+        items.push({ rank: 1, html: attLine("badge-critical", "breakdown",
+          "<strong>" + escHtml(m.machine_code) + "</strong> " +
+          escHtml(String(m.machine_type || "").replace(/_/g, " ")),
+          "last report " + (m.last_status_date || "—")) });
+      });
+
+      // 2) critical / high open issues
+      openIssues.filter(function (i) {
+        return i.priority === "critical" || i.priority === "high";
+      }).forEach(function (i) {
+        var meta = [(i.days_since_raised || 0) + "d open"];
+        if (i.assigned_to_name_resolved) meta.push("PIC: " + escHtml(i.assigned_to_name_resolved));
+        if (i.latest_action) meta.push("latest: " + escHtml(i.latest_action));
+        items.push({ rank: 2, html: attLine(
+          i.priority === "critical" ? "badge-critical" : "badge-high", i.priority,
+          "<strong>#" + i.issue_number + "</strong> " + escHtml(i.title || ""), meta.join(" · ")) });
+      });
+
+      // 3) test date missed  4) not booked past grace  5) to arrange
+      tb.missed.forEach(function (t) {
+        items.push({ rank: 3, html: attLine("badge-critical", "test date missed",
+          "<strong>" + escHtml(t.pile_mark_no || "") + "</strong> " + escHtml(t.test_code || ""),
+          "booked " + dstr(t.scheduled_test_date) + " · " + (t.overdue_days || 0) + "d late") });
+      });
+      tb.notBooked.forEach(function (t) {
+        items.push({ rank: 4, html: attLine("badge-critical", "not booked",
+          "<strong>" + escHtml(t.pile_mark_no || "") + "</strong> " + escHtml(t.test_code || ""),
+          "curing done " + (-t.days_until_eligible) + "d ago") });
+      });
+      tb.toArrange.forEach(function (t) {
+        items.push({ rank: 5, html: attLine("badge-pending", "to arrange",
+          "<strong>" + escHtml(t.pile_mark_no || "") + "</strong> " + escHtml(t.test_code || ""),
+          "curing done " + (-t.days_until_eligible) + "d ago") });
+      });
+
+      // 6) other open issues with no movement for 7+ days
+      openIssues.filter(function (i) {
+        if (i.priority === "critical" || i.priority === "high") return false;
+        var last = i.latest_action_date ? String(i.latest_action_date).slice(0, 10) : i.raised_date;
+        var d = daysSince(last);
+        return d !== null && d >= 7;
+      }).forEach(function (i) {
+        var last = i.latest_action_date ? String(i.latest_action_date).slice(0, 10) : i.raised_date;
+        items.push({ rank: 6, html: attLine("badge-pending", "no update " + daysSince(last) + "d",
+          "<strong>#" + i.issue_number + "</strong> " + escHtml(i.title || ""),
+          escHtml(i.priority || "") + " · raised " + dstr(i.raised_date)) });
+      });
+
+      // 7) site silent (active projects only — completed sites are quiet by nature)
+      if (p.project_status === "active") {
+        var silentDays = daysSince(p.last_report_date);
+        if (!p.last_report_date) {
+          items.push({ rank: 7, html: attLine("badge-pending", "site silent",
+            "No site reports received yet", "") });
+        } else if (silentDays >= 2) {
+          items.push({ rank: 7, html: attLine("badge-pending", "site silent",
+            "No site report for " + silentDays + " days", "last " + dstr(p.last_report_date)) });
+        }
+      }
+
+      // 8) data gaps — grouped into one low-severity line
+      var gaps = [];
+      var castNoDate = piles.filter(function (r) {
+        return (r.construction_status === "cast_complete" || r.construction_status === "head_trimmed") &&
+               !r.cast_date;
+      }).map(function (r) { return r.pile_mark_no; });
+      if (castNoDate.length) {
+        gaps.push("cast without cast date: " +
+          castNoDate.slice(0, 5).join(", ") +
+          (castNoDate.length > 5 ? " +" + (castNoDate.length - 5) + " more" : ""));
+      }
+      var steelMissing = piles.filter(function (r) {
+        return r.design_steel_total_t === null || r.design_steel_total_t === undefined;
+      }).length;
+      if (steelMissing) gaps.push(steelMissing + " pile design" + (steelMissing === 1 ? "" : "s") +
+                                  " missing reinforcement spec");
+      var neverReported = machines.filter(function (m) { return !m.last_status; })
+        .map(function (m) { return m.machine_code; });
+      if (neverReported.length) gaps.push("machine never reported: " + neverReported.join(", "));
+      if (gaps.length) {
+        items.push({ rank: 8, html: attLine("badge-gray", "data gaps", gaps.map(escHtml).join(" · "), "") });
+      }
+
+      items.sort(function (a, b) { return a.rank - b.rank; });
+      var body = items.length
+        ? items.map(function (it) { return it.html; }).join("")
+        : '<div class="muted-line">&#10003; Nothing needs management attention.</div>';
+      return '<details class="zone chase-panel" open>' +
+             '<summary><span class="zone-name">Management attention</span>' +
+             '<span class="zone-count">' + items.length + " item" + (items.length === 1 ? "" : "s") +
+             "</span></summary>" +
+             '<div class="chase-body">' + body + "</div></details>";
+    }
+
+    // ---- section: machines on this site ----
+    function machinesSection(machines) {
+      var body;
+      if (!machines.length) {
+        body = '<div class="muted-line">No machines assigned to this site.</div>';
+      } else {
+        var rows = machines.map(function (m) {
+          var stateCls = m.last_status === "operating" ? "approved"
+                       : m.last_status === "breakdown" ? "breakdown" : "gray";
+          var d = daysSince(m.last_status_date);
+          var state = m.last_status
+            ? '<span class="badge badge-' + stateCls + '">' + escHtml(m.last_status) + "</span>" +
+              ' <span class="' + (d !== null && d >= 3 ? "stale-warn" : "muted") + '">' + (m.last_status_date || "") + "</span>"
+            : '<span class="muted-line">never reported</span>';
+          return "<tr>" +
+            "<td><strong>" + escHtml(m.machine_code) + "</strong></td>" +
+            "<td>" + escHtml(String(m.machine_type || "").replace(/_/g, " ")) + "</td>" +
+            "<td>" + state + "</td>" +
+            '<td class="num' + (m.open_issues > 0 ? " bold" : "") + '">' + (m.open_issues || 0) + "</td>" +
+          "</tr>";
+        }).join("");
+        body = '<div class="table-wrap"><table>' +
+               "<thead><tr><th>Machine</th><th>Type</th><th>Last report</th>" +
+               '<th class="num">Open issues</th></tr></thead>' +
+               "<tbody>" + rows + "</tbody></table></div>";
+      }
+      return '<h2 class="section-title">Machines on site (' + machines.length + ") " +
+             '<a class="section-link" href="machines.html">machines page →</a></h2>' + body;
+    }
+
+    // ---- tests: pipeline buckets (shared by the KPI card + tests section) ----
+    // Curing -> To arrange (curing done, not booked; RED after the 7-day
+    // grace) -> Booked -> done. "Date missed" = a booked date passed.
+    var TEST_GRACE_DAYS = 7;
+    function testBuckets(tests) {
+      var done = ["completed", "passed"];
+      var b = { missed: [], notBooked: [], toArrange: [], booked: [], curing: [] };
+      tests.forEach(function (t) {
+        if (done.indexOf(t.status) !== -1 || t.test_result || t.actual_test_date) return;
+        if (t.is_overdue === true) { b.missed.push(t); return; }
+        if (t.scheduled_test_date) { b.booked.push(t); return; }
+        if (t.days_until_eligible === null || t.days_until_eligible === undefined) return;
+        if (t.days_until_eligible > 0) { b.curing.push(t); return; }
+        if (-t.days_until_eligible > TEST_GRACE_DAYS) b.notBooked.push(t);
+        else b.toArrange.push(t);
+      });
+      return b;
+    }
+
+    // (the old per-section issue + test lists were absorbed into the
+    //  management-attention panel above; curing/booked pipeline counts
+    //  live in the Tests KPI card, full detail on the pile page)
+
+    window.onShellReady = async function () {
+      var projectId = new URLSearchParams(location.search).get("project");
+      var titleEl = document.getElementById("project-title");
+
+      if (!projectId) {
+        titleEl.textContent = "";
+        document.getElementById("error").innerHTML =
+          '<div class="banner banner-amber">No project selected — open a project from the ' +
+          '<a href="index.html">Overview</a>.</div>';
+        return;
+      }
+
+      try {
+        var results = await Promise.all([
+          Dash.getProjects(),          // all statuses, so completed sites open too
+          Dash.getPileRegister(projectId),
+          Dash.getIssues("all"),
+          Dash.getMachines(),
+          Dash.getTests(true),
+          Dash.getProjectSupervisors(),
+          Dash.getProjectDailyOutput()
+        ]);
+        var p = results[0].find(function (x) { return x.project_id === projectId; });
+        if (!p) {
+          titleEl.textContent = "";
+          document.getElementById("error").innerHTML =
+            '<div class="banner banner-red">Project not found.</div>';
+          return;
+        }
+        var piles = results[1];
+        var openIssues = results[2].filter(function (i) {
+          return i.project_code === p.project_code &&
+                 (i.status === "open" || i.status === "in_progress");
+        });
+        var machines = results[3].filter(function (m) { return m.current_site === p.project_code; });
+        var tests = results[4].filter(function (t) { return t.project_code === p.project_code; });
+
+        // ---- header ----
+        titleEl.textContent = p.project_code + " — " + (p.project_name || "");
+        var subBits = ['<span class="badge badge-' +
+          (p.project_status === "active" ? "approved" : "gray") + '">' + p.project_status + "</span>"];
+        if (p.client_name) subBits.push("Client: " + escHtml(p.client_name));
+        var supRow = results[5].find(function (s) { return s.project_id === projectId; });
+        if (supRow && supRow.supervisors) subBits.push("Supervisor: " + escHtml(supRow.supervisors));
+        if (p.start_date) subBits.push(dstr(p.start_date) + " → " + dstr(p.target_end_date));
+        if (p.days_remaining !== null && p.days_remaining !== undefined)
+          subBits.push(p.days_remaining < 0
+            ? '<span class="stale-warn">' + Math.abs(p.days_remaining) + " days over target</span>"
+            : p.days_remaining + " days to target");
+        var health = p.last_report_date
+          ? "last report " + p.last_report_date +
+            ((p.piles_bored_on_last_report || p.piles_cast_on_last_report)
+              ? " (bored " + (p.piles_bored_on_last_report || 0) + " · cast " + (p.piles_cast_on_last_report || 0) + ")"
+              : "")
+          : "no site reports yet";
+        subBits.push(health);
+        document.getElementById("project-sub").innerHTML = subBits.join(" · ");
+
+        // ---- KPI cards (6, decision-focused) ----
+        var total = p.total_piles_planned || p.total_piles_registered || 0;
+        var pct = Math.max(0, Math.min(100, Number(p.progress_pct) || 0));
+
+        var crit = p.critical_open_issues || 0;
+        var oldestOpen = openIssues.reduce(function (mx, i) {
+          return Math.max(mx, i.days_since_raised || 0);
+        }, 0);
+
+        // test pipeline buckets (curing / to arrange / booked / late)
+        var tb = testBuckets(tests);
+        var testsNeedAction = tb.missed.length + tb.notBooked.length;
+
+        var opCount = machines.filter(function (m) { return m.last_status === "operating"; }).length;
+        var brkCount = machines.filter(function (m) { return m.last_status === "breakdown"; }).length;
+
+        var overTarget = (p.days_remaining !== null && p.days_remaining !== undefined && p.days_remaining < 0);
+        var kpis = [
+          ["Piles cast · " + pct + "%", (p.piles_completed || 0) + " / " + total, false],
+          ["Open issues" + (crit ? " · " + crit + " critical" : "") +
+             (oldestOpen ? " · oldest " + oldestOpen + "d" : ""),
+           openIssues.length, crit > 0],
+          ["Tests need action · " + tb.curing.length + " curing · " +
+             tb.toArrange.length + " to arrange · " + tb.booked.length + " booked",
+           testsNeedAction, testsNeedAction > 0],
+          ["Machines operating · of " + machines.length + " on site" +
+             (brkCount ? " · " + brkCount + " breakdown" : ""),
+           opCount, brkCount > 0],
+          ["Workers reported (site reports)", p.workers_assigned || 0, false],
+          [overTarget ? "Days OVER target" : "Days to target",
+           (p.days_remaining === null || p.days_remaining === undefined) ? "—" : Math.abs(p.days_remaining),
+           overTarget]
+        ];
+        document.getElementById("kpis").innerHTML = kpis.map(function (k) {
+          return '<div class="card' + (k[2] ? " alert" : "") + '">' +
+                 '<div class="label">' + k[0] + "</div>" +
+                 '<div class="value">' + k[1] + "</div></div>";
+        }).join("");
+
+        // ---- progress by zone + trend + sections ----
+        document.getElementById("pile-strip").innerHTML = zoneProgress(piles, projectId);
+        var outputRows = results[6].filter(function (r) { return r.project_id === projectId; });
+        document.getElementById("trend").innerHTML = trendSection(outputRows);
+        document.getElementById("sections").innerHTML =
+          attentionSection(p, openIssues, machines, tb, piles) +
+          machinesSection(machines);
+      } catch (e) {
+        titleEl.textContent = "";
+        document.getElementById("error").innerHTML =
+          '<div class="banner banner-red">Could not load: ' + (e.message || e) + "</div>";
+      }
+    };
+  </script>
+</body>
+</html>

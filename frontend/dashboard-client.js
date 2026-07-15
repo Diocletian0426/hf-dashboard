@@ -27,6 +27,9 @@
    await Dash.getOverview()                       -> ONE row of company-wide "today" stats
    await Dash.getProjects()                       -> per-project progress rows (BP line, all statuses)
    await Dash.getPileRegister(projectId, status?) -> per-pile design-vs-actual rows
+   await Dash.getProjectSupervisors()             -> active supervisors per project (one string)
+   await Dash.getProjectDailyOutput()             -> last 28 days of per-project daily output
+                                                     (piles cast/bored-on, metres bored)
    await Dash.getIssues(status?)                  -> issue board ('open' default = open+in_progress,
                                                      'all', or an exact status)
    await Dash.getMachines()                       -> machine fleet rows
@@ -121,6 +124,15 @@
       .order("pile_mark_no");
     if (status && status !== "all") b = b.eq("construction_status", status);
     return q(b);
+  }
+
+  function getProjectSupervisors() {
+    return q(sb.from("v_project_supervisors").select("*"));
+  }
+
+  function getProjectDailyOutput() {
+    // last 28 days, newest first (view is pre-filtered and pre-ordered)
+    return q(sb.from("v_project_daily_output").select("*"));
   }
 
   function getIssues(status) {
@@ -225,6 +237,8 @@
     getProjectPulse: getProjectPulse,
     getProjects: getProjects,
     getPileRegister: getPileRegister,
+    getProjectSupervisors: getProjectSupervisors,
+    getProjectDailyOutput: getProjectDailyOutput,
     getIssues: getIssues,
     getMachines: getMachines,
     getMachineServiceHistory: getMachineServiceHistory,

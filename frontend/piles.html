@@ -30,7 +30,8 @@
 
          RECORDS TO CHASE (step 4): collapsible panel listing piles with
          missing paperwork, four rules — 1) cast but no bore log,
-         2) test overdue, 3) test eligible but not scheduled, 4) test done
+         2) test date missed (booked date passed), 3) test to arrange
+         (curing done, not booked — chip shows days waiting), 4) test done
          but report reference missing. Click a pile chip to jump to its row
          and open its card.
 
@@ -179,8 +180,8 @@
       if (!tests || !tests.length) return '<div class="muted-line">No tests assigned to this pile.</div>';
       return tests.map(function (t) {
         var when = t.actual_test_date ? "done " + dstr(t.actual_test_date)
-                 : t.scheduled_test_date ? "scheduled " + dstr(t.scheduled_test_date)
-                 : "not scheduled";
+                 : t.scheduled_test_date ? "booked " + dstr(t.scheduled_test_date)
+                 : "to arrange";
         var bits = [when];
         if (t.test_result) bits.push("result: " + escHtml(t.test_result));
         if (t.report_reference) bits.push("report: " + escHtml(t.report_reference));
@@ -328,20 +329,22 @@
                r.bore_log_ref === null && r.bore_review_status === null;
       }).map(function (r) { return chaseChip(r.pile_mark_no, r.pile_mark_no); });
 
-      // 2) test overdue (the tracker computes is_overdue)
-      var overdue = allTests.filter(function (t) { return t.is_overdue === true; })
+      // 2) booked test date came and went (the tracker computes is_overdue)
+      var missed = allTests.filter(function (t) { return t.is_overdue === true; })
         .map(function (t) {
           return chaseChip(t.pile_mark_no, t.pile_mark_no + " · " + (t.test_code || t.test_name || "test") +
                            (t.overdue_days ? " · " + t.overdue_days + "d late" : ""));
         });
 
-      // 3) curing done, test eligible, but nothing booked yet
-      var unscheduled = allTests.filter(function (t) {
+      // 3) curing done, test not booked yet ("to arrange"; days since curing
+      //    shown so long-idle ones stand out — red escalation lives on the hub)
+      var toArrange = allTests.filter(function (t) {
         return !t.scheduled_test_date && !t.actual_test_date && !t.test_result &&
                done.indexOf(t.status) === -1 &&
                t.days_until_eligible !== null && t.days_until_eligible <= 0;
       }).map(function (t) {
-        return chaseChip(t.pile_mark_no, t.pile_mark_no + " · " + (t.test_code || t.test_name || "test"));
+        return chaseChip(t.pile_mark_no, t.pile_mark_no + " · " + (t.test_code || t.test_name || "test") +
+                         " · curing done " + (-t.days_until_eligible) + "d");
       });
 
       // 4) test carried out but no report reference filed
@@ -353,11 +356,11 @@
 
       var sections = [];
       if (boreMissing.length)   sections.push(chaseRow("Bore log missing", boreMissing));
-      if (overdue.length)       sections.push(chaseRow("Test overdue", overdue));
-      if (unscheduled.length)   sections.push(chaseRow("Test not scheduled", unscheduled));
+      if (missed.length)        sections.push(chaseRow("Test date missed", missed));
+      if (toArrange.length)     sections.push(chaseRow("Test to arrange", toArrange));
       if (reportMissing.length) sections.push(chaseRow("Test report missing", reportMissing));
 
-      var total = boreMissing.length + overdue.length + unscheduled.length + reportMissing.length;
+      var total = boreMissing.length + missed.length + toArrange.length + reportMissing.length;
       var body = total === 0
         ? '<div class="muted-line">&#10003; Nothing to chase — pile records are up to date.</div>'
         : sections.join("");
@@ -476,7 +479,7 @@
             "</tr>" +
             pileCard(r, issuesByPile[r.pile_mark_no], testsByPile[r.pile_mark_no]);
           }).join("");
-          return '<details class="zone" open>' +
+          return '<details class="zone" open data-zone="' + esc(z) + '">' +
                  '<summary><span class="zone-name">' + z + '</span>' +
                  '<span class="zone-count">' + zoneSummary(zr) + "</span></summary>" +
                  '<div class="table-wrap zone-table"><table>' + THEAD +
@@ -489,6 +492,19 @@
         document.getElementById("pipeline").innerHTML = pipelineStrip(piles);
         document.getElementById("chase").innerHTML = chaseChecklist(piles, testsByPile);
         wireChaseJumps();
+
+        // arrived via a zone link on the project hub? land on that zone
+        var zoneParam = new URLSearchParams(location.search).get("zone");
+        if (zoneParam) {
+          var targetZone = document.querySelector(
+            'details.zone[data-zone="' + zoneParam.replace(/"/g, '\\"') + '"]');
+          if (targetZone) {
+            targetZone.open = true;
+            targetZone.scrollIntoView({ behavior: "smooth", block: "start" });
+            targetZone.classList.add("flash-zone");
+            setTimeout(function () { targetZone.classList.remove("flash-zone"); }, 1700);
+          }
+        }
 
         // click a pile row -> toggle the record card row that sits under it
         zonesEl.addEventListener("click", function (ev) {
