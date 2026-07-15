@@ -19,10 +19,12 @@
            2. KPI cards — progress, cast, issues, tests overdue, machines, workers
            3. Progress by zone — all-zones bar + one thin bar per zone;
               zone names jump into the pile page at that zone
-           4. Open issues on this site
-           5. Machines on this site (last-known state)
-           6. Tests due / overdue
-         Built entirely from existing reads — no new views. -->
+           4. 14-day production trend (this week vs last, daily bars)
+           5. Management attention — ONE ranked exceptions panel:
+              breakdowns, critical/high issues, test escalations,
+              stale issues (7d no update), silent site, data gaps
+           6. Machines on this site (last-known state)
+         Reads: existing views + 0032 (supervisors, daily output). -->
     <div class="page-eyebrow">Project</div>
     <h1 id="project-title">Loading…</h1>
     <p id="project-sub" class="page-caption"></p>
@@ -213,26 +215,111 @@
              "quiet days may still have had boring</div></div>";
     }
 
-    // ---- section: open issues on this site ----
-    function issuesSection(openIssues) {
-      var body;
-      if (!openIssues.length) {
-        body = '<div class="muted-line">&#10003; No open issues on this site.</div>';
-      } else {
-        body = openIssues.map(function (i) {
-          var cls = (i.status === "open") ? "open" : "in_progress";
-          var meta = [dstr(i.raised_date) + (i.days_since_raised ? " · " + i.days_since_raised + "d open" : "")];
-          if (i.priority) meta.push(escHtml(i.priority));
-          if (i.assigned_to_name_resolved) meta.push("PIC: " + escHtml(i.assigned_to_name_resolved));
-          var latest = i.latest_action
-            ? '<div class="pc-latest">latest: ' + escHtml(i.latest_action) + "</div>" : "";
-          return '<div class="pc-issue"><strong>#' + i.issue_number + "</strong> " + escHtml(i.title || "") +
-                 ' <span class="badge badge-' + cls + '">' + escHtml(i.status) + "</span>" +
-                 '<div class="pc-meta">' + meta.join(" · ") + "</div>" + latest + "</div>";
-        }).join("");
+    // ---- MANAGEMENT ATTENTION (round D) ----
+    // One ranked panel replacing the separate issues + tests sections:
+    // exceptions only, worst first. Everything else lives in the drill-downs.
+    function attLine(badgeCls, badgeText, mainHtml, metaHtml) {
+      return '<div class="pc-issue"><span class="badge ' + badgeCls + '">' + badgeText + "</span> " +
+             mainHtml + (metaHtml ? '<div class="pc-meta">' + metaHtml + "</div>" : "") + "</div>";
+    }
+
+    function attentionSection(p, openIssues, machines, tb, piles) {
+      var items = [];
+
+      // 1) machine breakdown
+      machines.filter(function (m) { return m.last_status === "breakdown"; }).forEach(function (m) {
+        items.push({ rank: 1, html: attLine("badge-critical", "breakdown",
+          "<strong>" + escHtml(m.machine_code) + "</strong> " +
+          escHtml(String(m.machine_type || "").replace(/_/g, " ")),
+          "last report " + (m.last_status_date || "—")) });
+      });
+
+      // 2) critical / high open issues
+      openIssues.filter(function (i) {
+        return i.priority === "critical" || i.priority === "high";
+      }).forEach(function (i) {
+        var meta = [(i.days_since_raised || 0) + "d open"];
+        if (i.assigned_to_name_resolved) meta.push("PIC: " + escHtml(i.assigned_to_name_resolved));
+        if (i.latest_action) meta.push("latest: " + escHtml(i.latest_action));
+        items.push({ rank: 2, html: attLine(
+          i.priority === "critical" ? "badge-critical" : "badge-high", i.priority,
+          "<strong>#" + i.issue_number + "</strong> " + escHtml(i.title || ""), meta.join(" · ")) });
+      });
+
+      // 3) test date missed  4) not booked past grace  5) to arrange
+      tb.missed.forEach(function (t) {
+        items.push({ rank: 3, html: attLine("badge-critical", "test date missed",
+          "<strong>" + escHtml(t.pile_mark_no || "") + "</strong> " + escHtml(t.test_code || ""),
+          "booked " + dstr(t.scheduled_test_date) + " · " + (t.overdue_days || 0) + "d late") });
+      });
+      tb.notBooked.forEach(function (t) {
+        items.push({ rank: 4, html: attLine("badge-critical", "not booked",
+          "<strong>" + escHtml(t.pile_mark_no || "") + "</strong> " + escHtml(t.test_code || ""),
+          "curing done " + (-t.days_until_eligible) + "d ago") });
+      });
+      tb.toArrange.forEach(function (t) {
+        items.push({ rank: 5, html: attLine("badge-pending", "to arrange",
+          "<strong>" + escHtml(t.pile_mark_no || "") + "</strong> " + escHtml(t.test_code || ""),
+          "curing done " + (-t.days_until_eligible) + "d ago") });
+      });
+
+      // 6) other open issues with no movement for 7+ days
+      openIssues.filter(function (i) {
+        if (i.priority === "critical" || i.priority === "high") return false;
+        var last = i.latest_action_date ? String(i.latest_action_date).slice(0, 10) : i.raised_date;
+        var d = daysSince(last);
+        return d !== null && d >= 7;
+      }).forEach(function (i) {
+        var last = i.latest_action_date ? String(i.latest_action_date).slice(0, 10) : i.raised_date;
+        items.push({ rank: 6, html: attLine("badge-pending", "no update " + daysSince(last) + "d",
+          "<strong>#" + i.issue_number + "</strong> " + escHtml(i.title || ""),
+          escHtml(i.priority || "") + " · raised " + dstr(i.raised_date)) });
+      });
+
+      // 7) site silent (active projects only — completed sites are quiet by nature)
+      if (p.project_status === "active") {
+        var silentDays = daysSince(p.last_report_date);
+        if (!p.last_report_date) {
+          items.push({ rank: 7, html: attLine("badge-pending", "site silent",
+            "No site reports received yet", "") });
+        } else if (silentDays >= 2) {
+          items.push({ rank: 7, html: attLine("badge-pending", "site silent",
+            "No site report for " + silentDays + " days", "last " + dstr(p.last_report_date)) });
+        }
       }
-      return '<h2 class="section-title">Open issues (' + openIssues.length + ")</h2>" +
-             '<div class="hub-panel">' + body + "</div>";
+
+      // 8) data gaps — grouped into one low-severity line
+      var gaps = [];
+      var castNoDate = piles.filter(function (r) {
+        return (r.construction_status === "cast_complete" || r.construction_status === "head_trimmed") &&
+               !r.cast_date;
+      }).map(function (r) { return r.pile_mark_no; });
+      if (castNoDate.length) {
+        gaps.push("cast without cast date: " +
+          castNoDate.slice(0, 5).join(", ") +
+          (castNoDate.length > 5 ? " +" + (castNoDate.length - 5) + " more" : ""));
+      }
+      var steelMissing = piles.filter(function (r) {
+        return r.design_steel_total_t === null || r.design_steel_total_t === undefined;
+      }).length;
+      if (steelMissing) gaps.push(steelMissing + " pile design" + (steelMissing === 1 ? "" : "s") +
+                                  " missing reinforcement spec");
+      var neverReported = machines.filter(function (m) { return !m.last_status; })
+        .map(function (m) { return m.machine_code; });
+      if (neverReported.length) gaps.push("machine never reported: " + neverReported.join(", "));
+      if (gaps.length) {
+        items.push({ rank: 8, html: attLine("badge-gray", "data gaps", gaps.map(escHtml).join(" · "), "") });
+      }
+
+      items.sort(function (a, b) { return a.rank - b.rank; });
+      var body = items.length
+        ? items.map(function (it) { return it.html; }).join("")
+        : '<div class="muted-line">&#10003; Nothing needs management attention.</div>';
+      return '<details class="zone chase-panel" open>' +
+             '<summary><span class="zone-name">Management attention</span>' +
+             '<span class="zone-count">' + items.length + " item" + (items.length === 1 ? "" : "s") +
+             "</span></summary>" +
+             '<div class="chase-body">' + body + "</div></details>";
     }
 
     // ---- section: machines on this site ----
@@ -284,40 +371,9 @@
       return b;
     }
 
-    function testsSection(tests) {
-      var b = testBuckets(tests);
-      var rows = [];
-      b.missed.forEach(function (t) {
-        rows.push(testLine(t, "badge-critical", "date missed",
-          "booked " + dstr(t.scheduled_test_date) + " · " + (t.overdue_days || 0) + "d late"));
-      });
-      b.notBooked.forEach(function (t) {
-        rows.push(testLine(t, "badge-critical", "not booked",
-          "curing done " + (-t.days_until_eligible) + "d ago"));
-      });
-      b.toArrange.forEach(function (t) {
-        rows.push(testLine(t, "badge-pending", "to arrange",
-          "curing done " + (-t.days_until_eligible) + "d ago"));
-      });
-      b.booked.forEach(function (t) {
-        rows.push(testLine(t, "badge-gray", "booked", dstr(t.scheduled_test_date)));
-      });
-      b.curing.forEach(function (t) {
-        rows.push(testLine(t, "badge-gray", "curing", "until " + dstr(t.earliest_test_date)));
-      });
-      var body = rows.length ? rows.join("")
-        : '<div class="muted-line">&#10003; No tests waiting on this site.</div>';
-      var actionable = b.missed.length + b.notBooked.length;
-      return '<h2 class="section-title">Tests (' +
-             (actionable ? actionable + " need action · " : "") + rows.length + " waiting)</h2>" +
-             '<div class="hub-panel">' + body + "</div>";
-    }
-    function testLine(t, badgeCls, badgeText, detail) {
-      return '<div class="pc-line"><strong>' + escHtml(t.pile_mark_no || "") + "</strong> " +
-             escHtml(t.test_code || t.test_name || "test") +
-             ' <span class="badge ' + badgeCls + '">' + badgeText + "</span>" +
-             ' <span class="pc-meta-inline">· ' + detail + "</span></div>";
-    }
+    // (the old per-section issue + test lists were absorbed into the
+    //  management-attention panel above; curing/booked pipeline counts
+    //  live in the Tests KPI card, full detail on the pile page)
 
     window.onShellReady = async function () {
       var projectId = new URLSearchParams(location.search).get("project");
@@ -421,9 +477,8 @@
         var outputRows = results[6].filter(function (r) { return r.project_id === projectId; });
         document.getElementById("trend").innerHTML = trendSection(outputRows);
         document.getElementById("sections").innerHTML =
-          issuesSection(openIssues) +
-          machinesSection(machines) +
-          testsSection(tests);
+          attentionSection(p, openIssues, machines, tb, piles) +
+          machinesSection(machines);
       } catch (e) {
         titleEl.textContent = "";
         document.getElementById("error").innerHTML =
