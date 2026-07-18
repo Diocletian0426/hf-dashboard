@@ -61,6 +61,38 @@ h1 { font-size: 20px; margin: 6px 0 4px; }
 .card .label { font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: .4px; }
 .card .value { font-size: 28px; font-weight: 700; margin-top: 4px; }
 .card.alert .value { color: #dc2626; }
+.card .value.money { font-size: 20px; }   /* RM figures are long — smaller than KPI numbers */
+
+/* ---- claims: press a claim row -> nested per-claim lines table ---- */
+tr.claim-row { cursor: pointer; }
+.claim-caret { color: #9ca3af; font-size: 11px; }
+tr.claim-lines-row > td { padding: 0 0 4px; background: #fbfcfe; white-space: normal; }
+table.claim-lines { font-size: 12.5px; }
+table.claim-lines th, table.claim-lines td { padding: 6px 10px; }
+table.claim-lines tfoot td { font-weight: 600; border-top: 1px solid #e5e7eb; border-bottom: none; }
+
+/* claims editing (round F): action buttons, forms, qty inputs */
+.claim-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 8px 10px; font-size: 12.5px; }
+.claim-actions button, .claim-form button {
+  background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 6px;
+  padding: 3px 10px; font-size: 12.5px; cursor: pointer;
+}
+.claim-actions button:hover, .claim-form button:hover { background: #e5e7eb; }
+.claim-actions button.danger { color: #b91c1c; }
+.claim-actions label { display: flex; gap: 6px; align-items: center; color: #4b5563; }
+.claim-form {
+  display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end;
+  padding: 10px 12px; margin-bottom: 12px; font-size: 12.5px;
+  background: #fbfcfe; border: 1px solid #e5e7eb; border-radius: 8px;
+}
+.claim-form label { display: flex; flex-direction: column; gap: 3px; color: #4b5563; }
+.claim-form input, .claim-actions input {
+  padding: 4px 6px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px;
+}
+table.claim-lines input.qty {
+  width: 92px; text-align: right; padding: 3px 6px;
+  border: 1px solid #d1d5db; border-radius: 6px;
+}
 
 /* ---- per-project pulse cards (overview) ---- */
 .section-title { font-size: 15px; color: #4b5563; margin: 22px 0 10px; }

@@ -29,9 +29,11 @@
 
   // page -> designations allowed. Unlisted page = everyone signed in.
   var PAGE_ACCESS = {
-    "leave.html": ["management", "office"]
+    "leave.html": ["management", "office"],
+    "claims.html": ["management", "office"]   // MONEY page — DB re-checks every call too
   };
   // piles.html rides with projects.html (reached from there, unlisted = open).
+  // claims.html is reached from the project hub's claims section.
 
   function currentPage() {
     var p = window.location.pathname.split("/").pop();
@@ -60,7 +62,8 @@
         .map(function (l) {
           var active = (l.href === page ||
                         (page === "piles.html" && l.href === "projects.html") ||
-                        (page === "project.html" && l.href === "index.html"));
+                        (page === "project.html" && l.href === "index.html") ||
+                        (page === "claims.html" && l.href === "index.html"));
           return '<a href="' + l.href + '"' + (active ? ' class="active"' : "") + ">" + l.label + "</a>";
         })
         .join("");
