@@ -321,6 +321,29 @@
       }).join("");
     }
 
+    // office/management only: reassign the machine from its record card.
+    // The database re-checks the caller and logs the move (0039) — this
+    // control is convenience, never the guard.
+    var MOVE = { can: false, projects: [] };
+    function moveControl(m) {
+      if (!MOVE.can) return "";
+      var opts = ['<option value="">move to…</option>'].concat(
+        MOVE.projects.filter(function (p) {
+          return (p.status === "active" || p.status === "completed") &&
+                 p.project_code.indexOf("TEST") !== 0;
+        }).map(function (p) {
+          // code AND name — the office knows sites by name, no cross-checking
+          return '<option value="' + p.project_id + '">' +
+                 escHtml(p.project_code + " — " + (p.project_name || "")) +
+                 (p.status === "completed" ? " (completed)" : "") + "</option>";
+        }),
+        ['<option value="unassign">— unassigned —</option>']).join("");
+      return '<div class="pc-line"><span class="move-ctl">' +
+             '<select data-machine-id="' + m.machine_id + '">' + opts + "</select>" +
+             '<button type="button" data-action="move-machine" data-machine-id="' + m.machine_id + '">Move</button>' +
+             "</span></div>";
+    }
+
     function machineCard(m, services, activity, issues) {
       var chips = [];
       if (m.registration_no) chips.push("Reg " + escHtml(m.registration_no));
@@ -339,7 +362,8 @@
           ? escHtml(m.current_site) + (m.current_site_name ? " — " + escHtml(m.current_site_name) : "")
           : "unassigned") + "</div>" +
         '<div class="pc-line">Mobilised: ' + dstr(m.mobilised_date) + "</div>" +
-        '<div class="pc-line">Next move: ' + dstr(m.next_move_date) + "</div></div>";
+        '<div class="pc-line">Next move: ' + dstr(m.next_move_date) + "</div>" +
+        moveControl(m) + "</div>";
 
       var tracking =
         "<div><h3>Service tracking</h3>" +
@@ -441,15 +465,40 @@
       });
     }
 
+    // move button inside a record card -> move_machine, then reload (the
+    // machine reappears under its new site — self-evident feedback)
+    function wireMachineMoves() {
+      document.getElementById("sites").addEventListener("click", async function (ev) {
+        var btn = ev.target.closest('button[data-action="move-machine"]');
+        if (!btn) return;
+        var id = btn.getAttribute("data-machine-id");
+        var sel = document.querySelector('select[data-machine-id="' + id + '"]');
+        if (!sel || !sel.value) return;
+        try {
+          await Dash.moveMachine(id, sel.value === "unassign" ? null : sel.value);
+          window.location.reload();
+        } catch (e) {
+          document.getElementById("error").innerHTML =
+            '<div class="banner banner-red">Could not move: ' + escHtml((e && e.message) || e) + "</div>";
+        }
+      });
+    }
+
     window.onShellReady = async function () {
       try {
         var results = await Promise.all([
           Dash.getMachines(),
           Dash.getIssues("all"),           // full history — Comment col wants resolved ones too
           Dash.getMachineServiceHistory(), // record card: servicing history
-          Dash.getMachineActivity()        // record card: last 14 days of reports
+          Dash.getMachineActivity(),       // record card: last 14 days of reports
+          Dash.getMyProfile(),             // move controls: management/office only
+          Dash.getProjectDirectory()       // move pickers: ALL sites (pulse is BP-only)
         ]);
         var machines = results[0];
+        var profile = results[4];
+        MOVE.can = !!(profile &&
+          (profile.designation === "management" || profile.designation === "office"));
+        MOVE.projects = results[5];
 
         var serviceByMachine = {};
         results[2].forEach(function (r) {
@@ -479,6 +528,7 @@
         document.getElementById("zone-tools").hidden = false;
         wireAttentionJumps();
         wireCardToggles();
+        wireMachineMoves();
       } catch (e) {
         document.getElementById("error").innerHTML =
           '<div class="banner banner-red">Could not load: ' + (e.message || e) + "</div>";
