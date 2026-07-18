@@ -94,6 +94,18 @@ table.claim-lines input.qty {
   border: 1px solid #d1d5db; border-radius: 6px;
 }
 
+/* ---- manpower / machine move controls ---- */
+.move-ctl { display: inline-flex; gap: 6px; align-items: center; }
+.move-ctl select {
+  padding: 3px 6px; border: 1px solid #d1d5db; border-radius: 6px;
+  font-size: 12.5px; background: #fff; max-width: 280px;   /* fits "CODE — NAME" */
+}
+.move-ctl button {
+  background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 6px;
+  padding: 3px 10px; font-size: 12.5px; cursor: pointer;
+}
+.move-ctl button:hover { background: #e5e7eb; }
+
 /* ---- per-project pulse cards (overview) ---- */
 .section-title { font-size: 15px; color: #4b5563; margin: 22px 0 10px; }
 .pcards {

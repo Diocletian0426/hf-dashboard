@@ -22,6 +22,7 @@
     { href: "projects.html",   label: "Progress"   },
     { href: "issues.html",     label: "Issues"     },
     { href: "machines.html",   label: "Machines"   },
+    { href: "manpower.html",   label: "Manpower"   },
     { href: "attendance.html", label: "Attendance" },
     { href: "leave.html",      label: "Leave"      },
     { href: "tests.html",      label: "Tests"      }

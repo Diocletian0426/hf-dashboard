@@ -42,6 +42,21 @@
    await Dash.getLeaveRequests(year, status?)     -> leave requests ('pending' default, 'all', ...)
    await Dash.getTests(showAll?)                  -> pile test tracker (hides completed/passed
                                                      unless showAll is true)
+   await Dash.getManpowerBySite()                 -> active staff: name/role/company + current
+                                                     site (whereabouts only — no IC/phone)
+   await Dash.getProjectDirectory()               -> every project id/code/name/status (ALL
+                                                     lines, for move pickers — pulse is BP-only)
+
+   MANPOWER WRITE COMMANDS (management/office only — database-enforced; each
+   returns { ok, ... } or throws with .message = the database's error code)
+   -----------------------------------------------------------------------------
+   await Dash.moveStaff(staffId, projectId|null, remarks?)   -> reassign a worker
+                                                     (null = unassigned); every applied
+                                                     move lands in transfer_log
+   await Dash.moveMachine(machineId, projectId|null, remarks?) -> same for machines
+                                                     (stamps mobilised_date on a move)
+   await Dash.getTransferLog(limit?)              -> recent moves, newest first
+                                                     (management/office only)
 
    MONEY COMMANDS (management/office designations only — the DATABASE refuses
    everyone else with 'not_authorised'; pages must render these sections
@@ -230,6 +245,31 @@
     return q(b.order("priority_bucket").order("scheduled_test_date", { ascending: true }));
   }
 
+  // ---- manpower (whereabouts + office-adjustable moves, 0039) ---------------
+  function getManpowerBySite() {
+    return q(sb.from("v_manpower_by_site").select("*").order("full_name"));
+  }
+
+  function getProjectDirectory() {
+    return q(sb.from("v_project_directory").select("*").order("project_code"));
+  }
+
+  function moveStaff(staffId, projectId, remarks) {
+    return q(sb.rpc("move_staff", {
+      p_staff_id: staffId, p_project_id: projectId || null, p_remarks: remarks || null
+    }));
+  }
+
+  function moveMachine(machineId, projectId, remarks) {
+    return q(sb.rpc("move_machine", {
+      p_machine_id: machineId, p_project_id: projectId || null, p_remarks: remarks || null
+    }));
+  }
+
+  function getTransferLog(limit) {
+    return q(sb.rpc("get_transfer_log", { p_limit: limit || 100 }));
+  }
+
   // ---- claims (MONEY) --------------------------------------------------------
   // All three call designation-gated database functions (0035): the database
   // itself raises 'not_authorised' unless the signed-in staff row is
@@ -362,6 +402,12 @@
     getLeaveBalances: getLeaveBalances,
     getLeaveRequests: getLeaveRequests,
     getTests: getTests,
+
+    getManpowerBySite: getManpowerBySite,
+    getProjectDirectory: getProjectDirectory,
+    moveStaff: moveStaff,
+    moveMachine: moveMachine,
+    getTransferLog: getTransferLog,
 
     getClaimSummaries: getClaimSummaries,
     getClaimRegister: getClaimRegister,

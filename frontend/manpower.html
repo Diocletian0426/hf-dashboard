@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HF Dashboard — Manpower</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <header id="nav"></header>
+
+  <main id="main">
+
+    <!-- ================= MANPOWER (whereabouts + office moves) =================
+         Who is on which site, combined across HF-BP and Hai Fu — the same
+         truth the WhatsApp summaries read (staff.current_project_id).
+         Any signed-in login can LOOK (name / role / company / site only —
+         the locked staff table stays locked; the view carries no IC/phone).
+         MOVING someone is management/office only, enforced by the database
+         (move_staff, 0039) — every applied move lands in transfer_log with
+         who moved it, shown in the Recent moves panel below. -->
+    <div class="page-eyebrow">Manpower</div>
+    <h1>Site manpower</h1>
+    <p id="manpower-sub" class="page-caption"></p>
+
+    <div id="error"></div>
+    <div id="groups"></div>
+    <div id="movelog"></div>
+
+  </main>
+
+  <script src="vendor/supabase.js"></script>
+  <script src="config.js"></script>
+  <script src="dashboard-client.js"></script>
+  <script src="shell.js"></script>
+
+  <script>
+    function esc(s) { return String(s === null || s === undefined ? "" : s).replace(/"/g, "&quot;"); }
+    function escHtml(s) {
+      return String(s === null || s === undefined ? "" : s)
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    // page state: rows cached, open-groups + picker choices survive re-renders
+    var MP = { rows: [], projects: [], canMove: false, open: {}, err: "", okMsg: "" };
+
+    function roleSummary(list) {
+      var counts = {};
+      list.forEach(function (r) { var k = r.role || "?"; counts[k] = (counts[k] || 0) + 1; });
+      return Object.keys(counts).sort().map(function (k) {
+        return counts[k] + " " + k.replace(/_/g, " ");
+      }).join(" · ");
+    }
+
+    function moveTargets() {
+      // active first, completed still selectable (test/hacking crews are
+      // normal on completed sites); cancelled + TEST rows excluded
+      return MP.projects.filter(function (p) {
+        return (p.status === "active" || p.status === "completed") &&
+               p.project_code.indexOf("TEST") !== 0;
+      });
+    }
+
+    function moveCell(staffId) {
+      if (!MP.canMove) return "";
+      var opts = ['<option value="">move to…</option>'] .concat(
+        moveTargets().map(function (p) {
+          // code AND name — the office knows sites by name, no cross-checking
+          return '<option value="' + p.project_id + '">' +
+                 escHtml(p.project_code + " — " + (p.project_name || "")) +
+                 (p.status === "completed" ? " (completed)" : "") + "</option>";
+        }),
+        ['<option value="unassign">— unassigned —</option>']
+      ).join("");
+      return '<td><span class="move-ctl"><select data-staff="' + staffId + '">' + opts + "</select>" +
+             '<button type="button" data-action="move" data-staff="' + staffId + '">Move</button></span></td>';
+    }
+
+    function groupBlock(key, title, list) {
+      var isOpen = MP.open[key] !== false;   // default open
+      var rows = list.map(function (r) {
+        return "<tr><td><strong>" + escHtml(r.full_name) + "</strong></td>" +
+               "<td>" + escHtml(String(r.role || "").replace(/_/g, " ")) + "</td>" +
+               "<td>" + escHtml(r.company) + "</td>" +
+               moveCell(r.staff_id) + "</tr>";
+      }).join("");
+      return '<details class="zone" data-group="' + esc(key) + '"' + (isOpen ? " open" : "") + ">" +
+             '<summary><span class="zone-name">' + escHtml(title) + "</span>" +
+             '<span class="zone-count">' + list.length + " worker" + (list.length === 1 ? "" : "s") +
+             " · " + roleSummary(list) + "</span></summary>" +
+             '<div class="table-wrap"><table>' +
+             "<thead><tr><th>Name</th><th>Role</th><th>Company</th>" +
+             (MP.canMove ? "<th>Reassign</th>" : "") + "</tr></thead>" +
+             "<tbody>" + rows + "</tbody></table></div></details>";
+    }
+
+    function render() {
+      var bySite = {}, unassigned = [];
+      MP.rows.forEach(function (r) {
+        if (!r.current_project_id) { unassigned.push(r); return; }
+        var k = r.project_code || "?";
+        (bySite[k] = bySite[k] || { title: r.project_code + " — " + (r.project_name || ""), list: [] })
+          .list.push(r);
+      });
+
+      var hfbp = MP.rows.filter(function (r) { return r.company === "HF-BP"; }).length;
+      var haifu = MP.rows.length - hfbp;
+      document.getElementById("manpower-sub").innerHTML =
+        MP.rows.length + " active workers · HF-BP " + hfbp + " · Hai Fu " + haifu +
+        " · " + unassigned.length + " unassigned" +
+        (MP.canMove ? "" : ' <span class="muted">(view only — moves are office/management)</span>');
+
+      document.getElementById("error").innerHTML =
+        (MP.err ? '<div class="banner banner-red">Could not move: ' + escHtml(MP.err) + "</div>" : "") +
+        (MP.okMsg ? '<div class="banner banner-amber">' + escHtml(MP.okMsg) + "</div>" : "");
+
+      var html = Object.keys(bySite).sort().map(function (k) {
+        return groupBlock(k, bySite[k].title, bySite[k].list);
+      }).join("");
+      if (unassigned.length) html += groupBlock("__unassigned", "Unassigned", unassigned);
+      document.getElementById("groups").innerHTML =
+        html || '<div class="muted-line">No active workers found.</div>';
+    }
+
+    async function renderMoveLog() {
+      if (!MP.canMove) return;                      // office-only history
+      var el = document.getElementById("movelog");
+      try {
+        var log = await Dash.getTransferLog(50);
+        if (!log.length) { el.innerHTML = ""; return; }
+        var rows = log.map(function (t) {
+          return "<tr><td>" + Dash.klDateTime(t.moved_at) + "</td>" +
+                 "<td>" + escHtml(t.subject_type) + "</td>" +
+                 "<td><strong>" + escHtml(t.subject_name) + "</strong></td>" +
+                 "<td>" + escHtml(t.from_project) + " &rarr; " + escHtml(t.to_project) + "</td>" +
+                 "<td>" + escHtml(t.moved_by_name || t.source) + "</td></tr>";
+        }).join("");
+        el.innerHTML =
+          '<details class="zone"><summary><span class="zone-name">Recent moves</span>' +
+          '<span class="zone-count">' + log.length + " logged</span></summary>" +
+          '<div class="table-wrap"><table>' +
+          "<thead><tr><th>When</th><th>Type</th><th>Who/what</th><th>Move</th><th>By</th></tr></thead>" +
+          "<tbody>" + rows + "</tbody></table></div></details>";
+      } catch (e) { el.innerHTML = ""; }            // DB said no — panel stays absent
+    }
+
+    async function refresh() {
+      MP.rows = await Dash.getManpowerBySite();
+      render();
+      renderMoveLog();
+    }
+
+    window.onShellReady = async function () {
+      try {
+        var profile = await Dash.getMyProfile();
+        MP.canMove = !!(profile &&
+          (profile.designation === "management" || profile.designation === "office"));
+
+        var res = await Promise.all([Dash.getManpowerBySite(), Dash.getProjectDirectory()]);
+        MP.rows = res[0]; MP.projects = res[1];
+        render();
+        renderMoveLog();
+
+        document.getElementById("groups").addEventListener("click", async function (ev) {
+          var btn = ev.target.closest('button[data-action="move"]');
+          if (!btn) return;
+          ev.preventDefault();
+          var staffId = btn.getAttribute("data-staff");
+          var sel = document.querySelector('select[data-staff="' + staffId + '"]');
+          if (!sel || !sel.value) return;            // nothing picked
+          // remember open/closed groups across the re-render
+          document.querySelectorAll("details.zone[data-group]").forEach(function (d) {
+            MP.open[d.getAttribute("data-group")] = d.open;
+          });
+          try {
+            var r = await Dash.moveStaff(staffId, sel.value === "unassign" ? null : sel.value);
+            var tgt = MP.projects.find(function (p) { return p.project_id === sel.value; });
+            MP.err = "";
+            MP.okMsg = (r.full_name || "Worker") + " moved to " +
+              (tgt ? tgt.project_code + " — " + tgt.project_name : "unassigned");
+          } catch (e) {
+            MP.err = (e && e.message) || String(e);
+            MP.okMsg = "";
+          }
+          await refresh();
+        });
+      } catch (e) {
+        document.getElementById("error").innerHTML =
+          '<div class="banner banner-red">Could not load: ' + escHtml((e && e.message) || e) + "</div>";
+      }
+    };
+  </script>
+</body>
+</html>
