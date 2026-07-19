@@ -57,6 +57,34 @@
                                                      (stamps mobilised_date on a move)
    await Dash.getTransferLog(limit?)              -> recent moves, newest first
                                                      (management/office only)
+   await Dash.addStaff({fullName, role, companyCode, employeeCode?, projectId?,
+                        designation?, dateJoined?, contactNumber?,
+                        countryOrigin?, allowDuplicate?})
+                                           -> register a new worker. Throws
+                                              'duplicate_name' (active same-name
+                                              worker exists — retry with
+                                              allowDuplicate after confirming) or
+                                              'duplicate_employee_code'
+   await Dash.addMachine({machineCode, machineType, brand?, model?,
+                          registrationNo?, projectId?, serviceIntervalHours?})
+                                           -> register a new machine. Throws
+                                              'duplicate_machine_code'
+   await Dash.setStaffActive(staffId, active) -> mark a worker left (false) or
+                                              reactivate (true). Departure also
+                                              locks their phone out of the punch
+                                              app — intended.
+   await Dash.getStaffDetail(staffId)      -> one worker's editable facts for
+                                              the edit form (incl. contact/date
+                                              joined — management/office only;
+                                              whatsapp_name comes back read-only)
+   await Dash.updateStaff(staffId, {fullName?, role?, companyCode?, employeeCode?,
+                                    designation?, dateJoined?, contactNumber?,
+                                    countryOrigin?, allowDuplicate?})
+                                           -> partial update (omitted/blank field
+                                              = unchanged). Throws duplicate_name /
+                                              duplicate_employee_code like addStaff.
+   NOTE: adding/deactivating is for dashboard logins only — the bot's key is
+   deliberately refused (it must never create staff/machines).
 
    MONEY COMMANDS (management/office designations only — the DATABASE refuses
    everyone else with 'not_authorised'; pages must render these sections
@@ -270,6 +298,61 @@
     return q(sb.rpc("get_transfer_log", { p_limit: limit || 100 }));
   }
 
+  function addStaff(o) {
+    o = o || {};
+    return q(sb.rpc("add_staff", {
+      p_full_name: o.fullName,
+      p_role: o.role,
+      p_company_code: o.companyCode,
+      p_employee_code: o.employeeCode || null,
+      p_project_id: o.projectId || null,
+      p_designation: o.designation || "site",
+      p_date_joined: o.dateJoined || null,
+      p_contact_number: o.contactNumber || null,
+      p_country_origin: o.countryOrigin || null,
+      p_allow_duplicate: !!o.allowDuplicate
+    }));
+  }
+
+  function addMachine(o) {
+    o = o || {};
+    return q(sb.rpc("add_machine", {
+      p_machine_code: o.machineCode,
+      p_machine_type: o.machineType,
+      p_brand: o.brand || null,
+      p_model: o.model || null,
+      p_registration_no: o.registrationNo || null,
+      p_project_id: o.projectId || null,
+      p_service_interval_hours: (o.serviceIntervalHours === undefined ||
+        o.serviceIntervalHours === null || o.serviceIntervalHours === "")
+        ? null : Number(o.serviceIntervalHours)
+    }));
+  }
+
+  function setStaffActive(staffId, active) {
+    return q(sb.rpc("set_staff_active", { p_staff_id: staffId, p_active: !!active }));
+  }
+
+  function getStaffDetail(staffId) {
+    return q(sb.rpc("get_staff_detail", { p_staff_id: staffId }));
+  }
+
+  function updateStaff(staffId, o) {
+    o = o || {};
+    return q(sb.rpc("update_staff", {
+      p_staff_id: staffId,
+      p_full_name: o.fullName || null,
+      p_role: o.role || null,
+      p_company_code: o.companyCode || null,
+      p_employee_code: o.employeeCode || null,
+      p_designation: o.designation || null,
+      p_date_joined: o.dateJoined || null,
+      p_contact_number: o.contactNumber || null,
+      p_country_origin: o.countryOrigin || null,
+      p_allow_duplicate: !!o.allowDuplicate
+    }));
+  }
+
   // ---- claims (MONEY) --------------------------------------------------------
   // All three call designation-gated database functions (0035): the database
   // itself raises 'not_authorised' unless the signed-in staff row is
@@ -408,6 +491,11 @@
     moveStaff: moveStaff,
     moveMachine: moveMachine,
     getTransferLog: getTransferLog,
+    addStaff: addStaff,
+    addMachine: addMachine,
+    setStaffActive: setStaffActive,
+    getStaffDetail: getStaffDetail,
+    updateStaff: updateStaff,
 
     getClaimSummaries: getClaimSummaries,
     getClaimRegister: getClaimRegister,

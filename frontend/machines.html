@@ -62,7 +62,9 @@
     <div class="zone-tools" id="zone-tools" hidden>
       <button type="button" onclick="setAllZones(true)">Expand all</button>
       <button type="button" onclick="setAllZones(false)">Collapse all</button>
+      <button type="button" id="add-machine-btn" hidden>+ Add machine</button>
     </div>
+    <div id="add-machine"></div>
     <div id="sites"></div>
 
     <div id="error"></div>
@@ -465,6 +467,72 @@
       });
     }
 
+    // "+ Add machine" (management/office): inline form -> add_machine (0040).
+    // Duplicate codes are refused by the database with 'duplicate_machine_code'.
+    var MACHINE_TYPES = ["boring_rig", "crawler_crane", "mobile_crane", "excavator",
+                         "vibro_hammer", "lorry", "wheel_loader", "generator",
+                         "compressor", "concrete_pump", "forklift", "other"];
+
+    function wireAddMachine() {
+      if (!MOVE.can) return;
+      var btn = document.getElementById("add-machine-btn");
+      btn.hidden = false;
+      btn.addEventListener("click", function () {
+        var host = document.getElementById("add-machine");
+        if (host.innerHTML) { host.innerHTML = ""; return; }   // toggle
+        var typeOpts = MACHINE_TYPES.map(function (t) {
+          return '<option value="' + t + '">' + t.replace(/_/g, " ") + "</option>";
+        }).join("");
+        var siteOpts = '<option value="">— unassigned —</option>' +
+          MOVE.projects.filter(function (p) {
+            return (p.status === "active" || p.status === "completed") &&
+                   p.project_code.indexOf("TEST") !== 0;
+          }).map(function (p) {
+            return '<option value="' + p.project_id + '">' +
+                   escHtml(p.project_code + " — " + (p.project_name || "")) +
+                   (p.status === "completed" ? " (completed)" : "") + "</option>";
+          }).join("");
+        host.innerHTML = '<div class="claim-form">' +
+          "<strong>New machine</strong>" +
+          '<label>code <input type="text" id="am-code" size="10" placeholder="e.g. BR10"></label>' +
+          '<label>type <select id="am-type">' + typeOpts + "</select></label>" +
+          '<label>brand <input type="text" id="am-brand" size="10"></label>' +
+          '<label>model <input type="text" id="am-model" size="10"></label>' +
+          '<label>registration no <input type="text" id="am-reg" size="10"></label>' +
+          '<label>site <select id="am-site">' + siteOpts + "</select></label>" +
+          '<label>service interval (h) <input type="number" id="am-interval" min="0" step="50" placeholder="optional"></label>' +
+          '<button type="button" id="am-save">Add machine</button>' +
+          '<button type="button" id="am-cancel">Cancel</button>' +
+          "</div>";
+        document.getElementById("am-cancel").addEventListener("click", function () {
+          host.innerHTML = "";
+        });
+        document.getElementById("am-save").addEventListener("click", async function () {
+          var code = document.getElementById("am-code").value.trim();
+          if (!code) return;
+          try {
+            await Dash.addMachine({
+              machineCode: code,
+              machineType: document.getElementById("am-type").value,
+              brand: document.getElementById("am-brand").value || null,
+              model: document.getElementById("am-model").value || null,
+              registrationNo: document.getElementById("am-reg").value || null,
+              projectId: document.getElementById("am-site").value || null,
+              serviceIntervalHours: document.getElementById("am-interval").value
+            });
+            window.location.reload();               // appears under its site
+          } catch (e) {
+            var msg = (e && e.message) || String(e);
+            document.getElementById("error").innerHTML =
+              '<div class="banner banner-red">' +
+              (msg === "duplicate_machine_code"
+                ? "Machine code " + escHtml(code) + " already exists."
+                : "Could not add: " + escHtml(msg)) + "</div>";
+          }
+        });
+      });
+    }
+
     // move button inside a record card -> move_machine, then reload (the
     // machine reappears under its new site — self-evident feedback)
     function wireMachineMoves() {
@@ -529,6 +597,7 @@
         wireAttentionJumps();
         wireCardToggles();
         wireMachineMoves();
+        wireAddMachine();
       } catch (e) {
         document.getElementById("error").innerHTML =
           '<div class="banner banner-red">Could not load: ' + (e.message || e) + "</div>";
