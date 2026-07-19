@@ -227,12 +227,25 @@
                actionCell(r) + "</tr>";
       }).join("");
 
-      // site-mode header extras: supervisor, machines on site, crew-vs-plant
-      // hint (machine present but nobody with the trade to run it), drift count
-      var svPrefix = "", machineStr = "", badges = "";
+      // site-mode header extras: work-line scope tag (BP/SP/BP+SP, derived
+      // from the scope tables — sites carry no company by design), supervisor,
+      // crew company split when mixed, machines on site, crew-vs-plant hint,
+      // drift count
+      var svPrefix = "", machineStr = "", badges = "", split = "";
       if (!byRole && key !== "__unassigned") {
+        var dir = MP.dirByPid[list[0].current_project_id];
+        if (dir) {
+          var scopeT = dir.has_bored_scope && dir.has_sheet_scope ? "BP+SP"
+                     : dir.has_bored_scope ? "BP"
+                     : dir.has_sheet_scope ? "SP" : "";
+          if (scopeT) svPrefix += '<span class="badge badge-gray">' + scopeT + "</span> ";
+        }
+        var bpN = list.filter(function (r) { return r.company === "HF-BP"; }).length;
+        if (bpN && bpN < list.length) {
+          split = " · HF-BP " + bpN + " · Hai Fu " + (list.length - bpN);
+        }
         var sv = MP.supervisorsByPid[list[0].current_project_id];
-        if (sv) svPrefix = "SV " + escHtml(sv) + " · ";
+        if (sv) svPrefix += "SV " + escHtml(sv) + " · ";
         var mach = MP.machinesBySite[key] || [];
         if (mach.length) {
           machineStr = " · " + mach.map(function (m) { return escHtml(m.code); }).join(", ");
@@ -252,7 +265,7 @@
       return '<details class="zone" data-group="' + esc(key) + '"' + (isOpen ? " open" : "") + ">" +
              '<summary><span class="zone-name">' + escHtml(title) + "</span>" +
              '<span class="zone-count">' + svPrefix + list.length + " worker" + (list.length === 1 ? "" : "s") +
-             " · " + (byRole ? siteSummary(list) : roleSummary(list)) + machineStr + badges + "</span></summary>" +
+             split + " · " + (byRole ? siteSummary(list) : roleSummary(list)) + machineStr + badges + "</span></summary>" +
              '<div class="table-wrap"><table>' +
              "<thead><tr><th>Code</th><th>Name</th><th>" + (byRole ? "Site" : "Role") + "</th><th>Company</th>" +
              "<th>Last reported</th>" +
@@ -566,6 +579,8 @@
           Dash.getMachines()              // site headers: plant + crew-vs-plant hint
         ]);
         MP.rows = res[0]; MP.projects = res[1];
+        MP.dirByPid = {};
+        MP.projects.forEach(function (p) { MP.dirByPid[p.project_id] = p; });
         res[2].forEach(function (s) { MP.supervisorsByPid[s.project_id] = s.supervisors; });
         res[3].forEach(function (m) {
           if (!m.current_site) return;

@@ -116,6 +116,11 @@ table.claim-lines input.qty {
 }
 .hk-strip button.active { background: #b45309; border-color: #b45309; color: #fff; }
 td.drift { color: #b45309; font-weight: 600; white-space: nowrap; }
+.mc-form { margin: 6px 0 4px; }
+.claim-form label.mc-check { flex-direction: row; align-items: center; gap: 6px; }
+.part-row { display: flex; gap: 4px; align-items: center; margin: 2px 0; }
+.part-row input.part-qty { width: 58px; }
+.part-row button { padding: 1px 7px; }
 .filter-box {
   width: 100%; max-width: 340px; padding: 7px 12px;
   border: 1px solid #d1d5db; border-radius: 8px; font-size: 13.5px; background: #fff;

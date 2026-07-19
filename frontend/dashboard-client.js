@@ -83,8 +83,31 @@
                                            -> partial update (omitted/blank field
                                               = unchanged). Throws duplicate_name /
                                               duplicate_employee_code like addStaff.
-   NOTE: adding/deactivating is for dashboard logins only — the bot's key is
-   deliberately refused (it must never create staff/machines).
+   await Dash.updateMachine(machineId, {machineType?, brand?, model?,
+                            registrationNo?, serialNumber?, yearManufactured?,
+                            serviceIntervalHours?, status?, nextMoveDate?,
+                            clearNextMove?})
+                                           -> partial machine edit (blank =
+                                              unchanged; clearNextMove nulls the
+                                              planned move). machine_code is NOT
+                                              editable — bot matching key.
+   await Dash.addServiceRecord(machineId, {serviceDate, serviceType, description?,
+                               hourMeter?, parts?, costTotal?, vendor?, remarks?})
+                                           -> log a service/repair; machines
+                                              mirror columns update via trigger
+   await Dash.setMachineHourMeter(machineId, hours, date?)
+                                           -> manual hour-meter reading (writes
+                                              the daily log; machine must be
+                                              assigned to a site) — lights the
+                                              service-due engine
+   await Dash.getMachineUtilization()      -> per machine, last 30 days: days
+                                              operating/standby/breakdown, hours,
+                                              fuel
+   await Dash.getMachineProductivity()     -> per machine: tagged boring metres,
+                                              piles, last activity date
+   NOTE: adding/editing/deactivating and readings are for dashboard logins
+   only — the bot's key is deliberately refused (it reports through its own
+   tables; it never edits identity data).
 
    MONEY COMMANDS (management/office designations only — the DATABASE refuses
    everyone else with 'not_authorised'; pages must render these sections
@@ -337,6 +360,53 @@
     return q(sb.rpc("get_staff_detail", { p_staff_id: staffId }));
   }
 
+  function updateMachine(machineId, o) {
+    o = o || {};
+    return q(sb.rpc("update_machine", {
+      p_machine_id: machineId,
+      p_machine_type: o.machineType || null,
+      p_brand: o.brand || null,
+      p_model: o.model || null,
+      p_registration_no: o.registrationNo || null,
+      p_serial_number: o.serialNumber || null,
+      p_year_manufactured: numOrNull(o.yearManufactured),
+      p_service_interval_hours: numOrNull(o.serviceIntervalHours),
+      p_status: o.status || null,
+      p_next_move_date: o.nextMoveDate || null,
+      p_clear_next_move: !!o.clearNextMove
+    }));
+  }
+
+  function addServiceRecord(machineId, o) {
+    o = o || {};
+    return q(sb.rpc("add_service_record", {
+      p_machine_id: machineId,
+      p_service_date: o.serviceDate,
+      p_service_type: o.serviceType,
+      p_description: o.description || null,
+      p_hour_meter: numOrNull(o.hourMeter),
+      p_parts: (o.parts && o.parts.length) ? o.parts : null,
+      p_cost_total: numOrNull(o.costTotal),
+      p_vendor: o.vendor || null,
+      p_remarks: o.remarks || null,
+      p_performed_by_id: null
+    }));
+  }
+
+  function setMachineHourMeter(machineId, hours, date) {
+    return q(sb.rpc("set_machine_hour_meter", {
+      p_machine_id: machineId, p_hour_meter: Number(hours), p_reading_date: date || null
+    }));
+  }
+
+  function getMachineUtilization() {
+    return q(sb.from("v_machine_utilization_30d").select("*"));
+  }
+
+  function getMachineProductivity() {
+    return q(sb.from("v_machine_productivity").select("*"));
+  }
+
   function updateStaff(staffId, o) {
     o = o || {};
     return q(sb.rpc("update_staff", {
@@ -496,6 +566,11 @@
     setStaffActive: setStaffActive,
     getStaffDetail: getStaffDetail,
     updateStaff: updateStaff,
+    updateMachine: updateMachine,
+    addServiceRecord: addServiceRecord,
+    setMachineHourMeter: setMachineHourMeter,
+    getMachineUtilization: getMachineUtilization,
+    getMachineProductivity: getMachineProductivity,
 
     getClaimSummaries: getClaimSummaries,
     getClaimRegister: getClaimRegister,
