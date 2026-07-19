@@ -62,7 +62,9 @@
     <div class="zone-tools" id="zone-tools" hidden>
       <button type="button" onclick="setAllZones(true)">Expand all</button>
       <button type="button" onclick="setAllZones(false)">Collapse all</button>
+      <button type="button" id="add-machine-btn" hidden>+ Add machine</button>
     </div>
+    <div id="add-machine"></div>
     <div id="sites"></div>
 
     <div id="error"></div>
@@ -269,6 +271,7 @@
         var parts = partsText(r.parts);
         if (parts) bits.push("parts: " + escHtml(parts));
         if (r.vendor) bits.push("vendor: " + escHtml(r.vendor));
+        if (r.cost_total) bits.push("RM " + Number(r.cost_total).toFixed(2));
         if (r.performed_by_name) bits.push("by " + escHtml(r.performed_by_name));
         return '<div class="pc-line"><strong>' + dstr(r.service_date) + "</strong> " +
                '<span class="badge ' + cls + '">' + escHtml(r.service_type || "?") + "</span> " +
@@ -325,6 +328,85 @@
     // The database re-checks the caller and logs the move (0039) — this
     // control is convenience, never the guard.
     var MOVE = { can: false, projects: [] };
+    // 0044 operations data: 30d utilization + tagged productivity per machine,
+    // machine move history (transfer_log), machines by id for the edit form
+    var UTIL = {}, PROD = {}, MOVELOG = {}, MACHINES_BY_ID = {}, DIR_BY_CODE = {};
+    var MACHINE_STATUSES = ["active", "maintenance", "idle", "decommissioned"];
+
+    // parts entry = one row per part (name box + qty number box) — no format
+    // to remember, nothing to mis-parse; blank-name rows are simply skipped
+    function partRowHtml() {
+      return '<span class="part-row">' +
+             '<input type="text" class="part-name" size="16" placeholder="part name">' +
+             '<input type="number" class="part-qty" min="1" step="1" value="1" title="quantity">' +
+             '<button type="button" data-action="mc-part-del" title="remove this part">&times;</button>' +
+             "</span>";
+    }
+    function collectParts(host) {
+      var parts = [];
+      host.querySelectorAll(".part-row").forEach(function (row) {
+        var n = row.querySelector(".part-name").value.trim();
+        var q = Math.max(1, Math.round(Number(row.querySelector(".part-qty").value) || 1));
+        if (n) parts.push({ name: n, qty: q });
+      });
+      return parts.length ? parts : null;
+    }
+
+    function mcEditForm(m) {
+      var typeOpts = MACHINE_TYPES.map(function (t) {
+        return '<option value="' + t + '"' + (t === m.machine_type ? " selected" : "") + ">" +
+               t.replace(/_/g, " ") + "</option>";
+      }).join("");
+      var stOpts = MACHINE_STATUSES.map(function (s) {
+        return '<option value="' + s + '"' + (s === m.machine_status ? " selected" : "") + ">" + s + "</option>";
+      }).join("");
+      return '<div class="claim-form">' +
+        "<strong>Edit " + escHtml(m.machine_code) + "</strong>" +
+        '<label>type <select id="me-type">' + typeOpts + "</select></label>" +
+        '<label>brand <input id="me-brand" size="10" value="' + esc(m.brand || "") + '"></label>' +
+        '<label>model <input id="me-model" size="10" value="' + esc(m.model || "") + '"></label>' +
+        '<label>reg no <input id="me-reg" size="10" value="' + esc(m.registration_no || "") + '"></label>' +
+        '<label>serial <input id="me-serial" size="12" value="' + esc(m.serial_number || "") + '"></label>' +
+        '<label>year <input id="me-year" type="number" min="1980" max="2100" value="' + (m.year_manufactured || "") + '"></label>' +
+        '<label>service interval (h) <input id="me-interval" type="number" min="0" step="50" value="' + (m.service_interval_hours || "") + '"></label>' +
+        '<label>status <select id="me-status">' + stOpts + "</select></label>" +
+        '<label>next move <input id="me-nextmove" type="date" value="' + esc(m.next_move_date || "") + '"></label>' +
+        '<label class="mc-check"><input type="checkbox" id="me-clearmove"> clear next move</label>' +
+        '<button type="button" data-action="mc-edit-save" data-machine-id="' + m.machine_id + '">Save</button>' +
+        '<button type="button" data-action="mc-cancel" data-machine-id="' + m.machine_id + '">Cancel</button>' +
+        "</div>";
+    }
+
+    function mcServiceForm(m) {
+      return '<div class="claim-form">' +
+        "<strong>Log service — " + escHtml(m.machine_code) + "</strong>" +
+        '<label>date <input id="ms-date" type="date" value="' + Dash.todayKL() + '"></label>' +
+        '<label>type <select id="ms-type">' +
+          '<option value="routine">routine</option><option value="repair">repair</option>' +
+          '<option value="inspection">inspection</option><option value="other">other</option></select></label>' +
+        '<label>description <input id="ms-desc" size="26"></label>' +
+        '<label>hour meter <input id="ms-hm" type="number" min="0" placeholder="optional"></label>' +
+        '<label>parts used <span id="ms-parts-rows">' + partRowHtml() + "</span>" +
+        '<button type="button" data-action="mc-part-add" data-machine-id="' + m.machine_id + '">+ part</button></label>' +
+        '<label>cost RM <input id="ms-cost" type="number" min="0" step="0.01" placeholder="optional"></label>' +
+        '<label>vendor <input id="ms-vendor" size="12" placeholder="optional"></label>' +
+        '<label>remarks <input id="ms-remarks" size="16"></label>' +
+        '<button type="button" data-action="mc-service-save" data-machine-id="' + m.machine_id + '">Save service</button>' +
+        '<button type="button" data-action="mc-cancel" data-machine-id="' + m.machine_id + '">Cancel</button>' +
+        "</div>";
+    }
+
+    function mcHoursForm(m) {
+      return '<div class="claim-form">' +
+        "<strong>Hour meter — " + escHtml(m.machine_code) + "</strong>" +
+        '<label>reading (h) <input id="mh-hours" type="number" min="0" value="' +
+          (m.current_hour_meter === null || m.current_hour_meter === undefined ? "" : m.current_hour_meter) + '"></label>' +
+        '<label>date <input id="mh-date" type="date" value="' + Dash.todayKL() + '"></label>' +
+        '<button type="button" data-action="mc-hours-save" data-machine-id="' + m.machine_id + '">Save reading</button>' +
+        '<button type="button" data-action="mc-cancel" data-machine-id="' + m.machine_id + '">Cancel</button>' +
+        '<span class="muted-line">lights the service-due tracking (interval is already set)</span>' +
+        "</div>";
+    }
     function moveControl(m) {
       if (!MOVE.can) return "";
       var opts = ['<option value="">move to…</option>'].concat(
@@ -365,6 +447,9 @@
         '<div class="pc-line">Next move: ' + dstr(m.next_move_date) + "</div>" +
         moveControl(m) + "</div>";
 
+      var spend = 0;
+      (services || []).forEach(function (r) { spend += Number(r.cost_total) || 0; });
+
       var tracking =
         "<div><h3>Service tracking</h3>" +
         '<div class="pc-line">Hour meter: ' + numOr(m.current_hour_meter, "h") +
@@ -372,13 +457,58 @@
         '<div class="pc-line">Next service due: ' + numOr(m.next_service_due_hours, "h") +
         (m.hour_service_overdue ? ' <span class="badge badge-critical">overdue</span>' : "") + "</div>" +
         '<div class="pc-line">Last touched: ' + dstr(m.last_touched_date) +
-        ' <span class="muted">(any service or repair)</span></div></div>';
+        ' <span class="muted">(any service or repair)</span></div>' +
+        (spend ? '<div class="pc-line">Recorded spend: <strong>RM ' + spend.toFixed(2) + "</strong></div>" : "") +
+        "</div>";
+
+      // usage (0044 views): 30d utilization + tagged rig productivity
+      var util = UTIL[m.machine_id];
+      var prod = PROD[m.machine_id];
+      var usage =
+        "<div><h3>Usage (30 days)</h3>" +
+        (util && Number(util.days_reported) > 0
+          ? '<div class="pc-line">' + util.days_operating + " operating · " + util.days_standby +
+            " standby · " + util.days_breakdown + " breakdown" +
+            (Number(util.days_maintenance) ? " · " + util.days_maintenance + " maintenance" : "") +
+            ' <span class="muted">(' + util.days_reported + " reported days)</span></div>" +
+            ((Number(util.hours_operated) || Number(util.fuel_l))
+              ? '<div class="pc-line">' + util.hours_operated + " h operated · " +
+                Math.round(util.fuel_l) + " L diesel</div>"
+              : "")
+          : '<div class="pc-line muted-line">No reports in the last 30 days.</div>') +
+        (prod
+          ? '<div class="pc-line">Tagged boring: ' + prod.metres_bored + " m · " +
+            prod.piles_bored_on + " pile" + (Number(prod.piles_bored_on) === 1 ? "" : "s") +
+            " · last " + dstr(prod.last_activity_date) + "</div>"
+          : "") +
+        "</div>";
+
+      // movement history (transfer_log, fills as the office uses moves)
+      var moves = MOVELOG[m.machine_code] || [];
+      var movesHtml = moves.length
+        ? "<div><h3>Movement history</h3>" + moves.slice(0, 6).map(function (t) {
+            return '<div class="pc-line"><strong>' + Dash.klDateTime(t.moved_at) + "</strong> " +
+                   escHtml(t.from_project) + " &rarr; " + escHtml(t.to_project) +
+                   (t.remarks ? ' <span class="muted">(' + escHtml(t.remarks) + ")</span>" : "") +
+                   ' <span class="muted">by ' + escHtml(t.moved_by_name || t.source) + "</span></div>";
+          }).join("") + "</div>"
+        : "";
+
+      // office controls (0044): edit / log service / hour meter — DB re-checks
+      var ops = MOVE.can
+        ? '<div class="claim-actions" style="padding:6px 0 0">' +
+          '<button type="button" data-action="mc-edit" data-machine-id="' + m.machine_id + '">Edit machine…</button>' +
+          '<button type="button" data-action="mc-service" data-machine-id="' + m.machine_id + '">Log service…</button>' +
+          '<button type="button" data-action="mc-hours" data-machine-id="' + m.machine_id + '">Update hour meter…</button>' +
+          '</div><div class="mc-form" id="mcf-' + m.machine_id + '"></div>'
+        : "";
 
       return '<tr class="pile-card-row" hidden><td colspan="7"><div class="pile-card">' +
-             head +
+             head + ops +
              '<div class="pc-grid"><div><h3>Servicing history</h3>' + serviceListHtml(services) + "</div>" +
-             '<div class="pc-side">' + where + tracking + "</div></div>" +
+             '<div class="pc-side">' + where + tracking + usage + "</div></div>" +
              "<div><h3>Recent activity (14 days)</h3>" + activityListHtml(activity) + "</div>" +
+             movesHtml +
              "<div><h3>Track record</h3>" + issueListHtml(issues) + "</div>" +
              "</div></td></tr>";
     }
@@ -409,6 +539,14 @@
         var operating = list.filter(function (m) { return m.last_status === "operating"; }).length;
         var title = k === "Unassigned" ? "Unassigned"
                   : k + (list[0].current_site_name ? " — " + escHtml(list[0].current_site_name) : "");
+        // work-line scope tag (BP/SP/BP+SP) from the scope tables via the directory
+        var scopeTag = "";
+        var dir = DIR_BY_CODE[k];
+        if (dir) {
+          var t = dir.has_bored_scope && dir.has_sheet_scope ? "BP+SP"
+                : dir.has_bored_scope ? "BP" : dir.has_sheet_scope ? "SP" : "";
+          if (t) scopeTag = '<span class="badge badge-gray">' + t + "</span> ";
+        }
         var rows = list.map(function (m) {
           return '<tr class="machine-row" data-machine="' + esc(m.machine_code) + '" title="Click to open the full record">' +
             '<td><span class="row-caret">&#9656;</span><strong>' + escHtml(m.machine_code) + "</strong></td>" +
@@ -424,7 +562,7 @@
         }).join("");
         return '<details class="zone" open>' +
                '<summary><span class="zone-name">' + title + "</span>" +
-               '<span class="zone-count">' + list.length + " machine" + (list.length === 1 ? "" : "s") +
+               '<span class="zone-count">' + scopeTag + list.length + " machine" + (list.length === 1 ? "" : "s") +
                " · " + operating + " operating</span></summary>" +
                '<div class="table-wrap zone-table"><table>' + THEAD +
                "<tbody>" + rows + "</tbody></table></div>" +
@@ -465,6 +603,165 @@
       });
     }
 
+    // "+ Add machine" (management/office): inline form -> add_machine (0040).
+    // Duplicate codes are refused by the database with 'duplicate_machine_code'.
+    var MACHINE_TYPES = ["boring_rig", "crawler_crane", "mobile_crane", "excavator",
+                         "vibro_hammer", "lorry", "wheel_loader", "generator",
+                         "compressor", "concrete_pump", "forklift", "other"];
+
+    function wireAddMachine() {
+      if (!MOVE.can) return;
+      var btn = document.getElementById("add-machine-btn");
+      btn.hidden = false;
+      btn.addEventListener("click", function () {
+        var host = document.getElementById("add-machine");
+        if (host.innerHTML) { host.innerHTML = ""; return; }   // toggle
+        var typeOpts = MACHINE_TYPES.map(function (t) {
+          return '<option value="' + t + '">' + t.replace(/_/g, " ") + "</option>";
+        }).join("");
+        var siteOpts = '<option value="">— unassigned —</option>' +
+          MOVE.projects.filter(function (p) {
+            return (p.status === "active" || p.status === "completed") &&
+                   p.project_code.indexOf("TEST") !== 0;
+          }).map(function (p) {
+            return '<option value="' + p.project_id + '">' +
+                   escHtml(p.project_code + " — " + (p.project_name || "")) +
+                   (p.status === "completed" ? " (completed)" : "") + "</option>";
+          }).join("");
+        host.innerHTML = '<div class="claim-form">' +
+          "<strong>New machine</strong>" +
+          '<label>code <input type="text" id="am-code" size="10" placeholder="e.g. BR10"></label>' +
+          '<label>type <select id="am-type">' + typeOpts + "</select></label>" +
+          '<label>brand <input type="text" id="am-brand" size="10"></label>' +
+          '<label>model <input type="text" id="am-model" size="10"></label>' +
+          '<label>registration no <input type="text" id="am-reg" size="10"></label>' +
+          '<label>site <select id="am-site">' + siteOpts + "</select></label>" +
+          '<label>service interval (h) <input type="number" id="am-interval" min="0" step="50" placeholder="optional"></label>' +
+          '<button type="button" id="am-save">Add machine</button>' +
+          '<button type="button" id="am-cancel">Cancel</button>' +
+          "</div>";
+        document.getElementById("am-cancel").addEventListener("click", function () {
+          host.innerHTML = "";
+        });
+        document.getElementById("am-save").addEventListener("click", async function () {
+          var code = document.getElementById("am-code").value.trim();
+          if (!code) return;
+          try {
+            await Dash.addMachine({
+              machineCode: code,
+              machineType: document.getElementById("am-type").value,
+              brand: document.getElementById("am-brand").value || null,
+              model: document.getElementById("am-model").value || null,
+              registrationNo: document.getElementById("am-reg").value || null,
+              projectId: document.getElementById("am-site").value || null,
+              serviceIntervalHours: document.getElementById("am-interval").value
+            });
+            window.location.reload();               // appears under its site
+          } catch (e) {
+            var msg = (e && e.message) || String(e);
+            document.getElementById("error").innerHTML =
+              '<div class="banner banner-red">' +
+              (msg === "duplicate_machine_code"
+                ? "Machine code " + escHtml(code) + " already exists."
+                : "Could not add: " + escHtml(msg)) + "</div>";
+          }
+        });
+      });
+    }
+
+    // 0044 office controls in the record card: edit / log service / hour meter.
+    // Forms render into the card's mc-form host; saves reload the page.
+    function wireMachineOps() {
+      if (!MOVE.can) return;
+      document.getElementById("sites").addEventListener("click", async function (ev) {
+        var btn = ev.target.closest('button[data-action^="mc-"]');
+        if (!btn) return;
+        var act = btn.getAttribute("data-action");
+
+        // part-row controls carry no machine id — handle before the lookup
+        if (act === "mc-part-add") {
+          var rows = document.getElementById("ms-parts-rows");
+          if (rows) rows.insertAdjacentHTML("beforeend", partRowHtml());
+          return;
+        }
+        if (act === "mc-part-del") {
+          var row = btn.closest(".part-row");
+          if (row) row.remove();
+          return;
+        }
+
+        var id = btn.getAttribute("data-machine-id");
+        var m = MACHINES_BY_ID[id];
+        var host = document.getElementById("mcf-" + id);
+        if (!m || !host) return;
+
+        function fail(e) {
+          var msg = (e && e.message) || String(e);
+          if (msg === "machine_unassigned")
+            msg = "assign the machine to a site first — hour-meter readings write a daily log row, which needs a site";
+          document.getElementById("error").innerHTML =
+            '<div class="banner banner-red">Could not save: ' + escHtml(msg) + "</div>";
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        }
+
+        if (act === "mc-edit")    { host.innerHTML = mcEditForm(m); return; }
+        if (act === "mc-service") { host.innerHTML = mcServiceForm(m); return; }
+        if (act === "mc-hours")   { host.innerHTML = mcHoursForm(m); return; }
+        if (act === "mc-cancel")  { host.innerHTML = ""; return; }
+
+        if (act === "mc-edit-save") {
+          var newStatus = document.getElementById("me-status").value;
+          if (newStatus === "decommissioned" && m.machine_status !== "decommissioned" &&
+              !window.confirm("Decommission " + m.machine_code +
+                              "? It leaves the move targets and the active fleet.")) return;
+          try {
+            await Dash.updateMachine(id, {
+              machineType: document.getElementById("me-type").value,
+              brand: document.getElementById("me-brand").value || null,
+              model: document.getElementById("me-model").value || null,
+              registrationNo: document.getElementById("me-reg").value || null,
+              serialNumber: document.getElementById("me-serial").value || null,
+              yearManufactured: document.getElementById("me-year").value,
+              serviceIntervalHours: document.getElementById("me-interval").value,
+              status: newStatus,
+              nextMoveDate: document.getElementById("me-nextmove").value || null,
+              clearNextMove: document.getElementById("me-clearmove").checked
+            });
+            window.location.reload();
+          } catch (e) { fail(e); }
+          return;
+        }
+
+        if (act === "mc-service-save") {
+          try {
+            await Dash.addServiceRecord(id, {
+              serviceDate: document.getElementById("ms-date").value,
+              serviceType: document.getElementById("ms-type").value,
+              description: document.getElementById("ms-desc").value || null,
+              hourMeter: document.getElementById("ms-hm").value,
+              parts: collectParts(host),
+              costTotal: document.getElementById("ms-cost").value,
+              vendor: document.getElementById("ms-vendor").value || null,
+              remarks: document.getElementById("ms-remarks").value || null
+            });
+            window.location.reload();
+          } catch (e) { fail(e); }
+          return;
+        }
+
+        if (act === "mc-hours-save") {
+          var hv = document.getElementById("mh-hours").value;
+          if (hv === "") return;
+          try {
+            await Dash.setMachineHourMeter(id, hv,
+              document.getElementById("mh-date").value || null);
+            window.location.reload();
+          } catch (e) { fail(e); }
+          return;
+        }
+      });
+    }
+
     // move button inside a record card -> move_machine, then reload (the
     // machine reappears under its new site — self-evident feedback)
     function wireMachineMoves() {
@@ -489,16 +786,32 @@
         var results = await Promise.all([
           Dash.getMachines(),
           Dash.getIssues("all"),           // full history — Comment col wants resolved ones too
-          Dash.getMachineServiceHistory(), // record card: servicing history
+          Dash.getMachineServiceHistory(), // record card: servicing history (incl. cost since 0044)
           Dash.getMachineActivity(),       // record card: last 14 days of reports
-          Dash.getMyProfile(),             // move controls: management/office only
-          Dash.getProjectDirectory()       // move pickers: ALL sites (pulse is BP-only)
+          Dash.getMyProfile(),             // move/ops controls: management/office only
+          Dash.getProjectDirectory(),      // move pickers: ALL sites (pulse is BP-only)
+          Dash.getMachineUtilization(),    // card usage: 30d status-day counts
+          Dash.getMachineProductivity()    // card usage: tagged boring metres/piles
         ]);
         var machines = results[0];
         var profile = results[4];
         MOVE.can = !!(profile &&
           (profile.designation === "management" || profile.designation === "office"));
         MOVE.projects = results[5];
+        MOVE.projects.forEach(function (p) { DIR_BY_CODE[p.project_code] = p; });
+        results[6].forEach(function (u) { UTIL[u.machine_id] = u; });
+        results[7].forEach(function (p) { PROD[p.machine_id] = p; });
+        machines.forEach(function (m) { MACHINES_BY_ID[m.machine_id] = m; });
+
+        // movement history (gated read — silently absent for other logins)
+        if (MOVE.can) {
+          try {
+            (await Dash.getTransferLog(100)).forEach(function (t) {
+              if (t.subject_type !== "machine") return;
+              (MOVELOG[t.subject_name] = MOVELOG[t.subject_name] || []).push(t);
+            });
+          } catch (e) { /* no history panel */ }
+        }
 
         var serviceByMachine = {};
         results[2].forEach(function (r) {
@@ -529,6 +842,8 @@
         wireAttentionJumps();
         wireCardToggles();
         wireMachineMoves();
+        wireMachineOps();
+        wireAddMachine();
       } catch (e) {
         document.getElementById("error").innerHTML =
           '<div class="banner banner-red">Could not load: ' + (e.message || e) + "</div>";

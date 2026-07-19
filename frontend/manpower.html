@@ -12,21 +12,63 @@
 
   <main id="main">
 
-    <!-- ================= MANPOWER (whereabouts + office moves) =================
+    <!-- ================= MANPOWER (whereabouts + office self-service) =========
          Who is on which site, combined across HF-BP and Hai Fu — the same
          truth the WhatsApp summaries read (staff.current_project_id).
-         Any signed-in login can LOOK (name / role / company / site only —
-         the locked staff table stays locked; the view carries no IC/phone).
-         MOVING someone is management/office only, enforced by the database
-         (move_staff, 0039) — every applied move lands in transfer_log with
-         who moved it, shown in the Recent moves panel below. -->
+         Any signed-in login can LOOK (code / name / role / company / site
+         only — the locked staff table stays locked; no IC/phone in the view).
+         Management/office additionally: ADD a worker (0040 add_staff, with
+         duplicate-name/code guards), MOVE workers (0039 move_staff, logged
+         to transfer_log), MARK LEFT + reactivate (0040 set_staff_active —
+         departure also locks the phone out of the punch app, intended).
+         All of it database-enforced; the buttons are convenience. -->
     <div class="page-eyebrow">Manpower</div>
     <h1>Site manpower</h1>
     <p id="manpower-sub" class="page-caption"></p>
 
     <div id="error"></div>
+    <div id="housekeeping"></div>
+    <div class="mp-controls">
+      <span>Group:
+        <button type="button" data-mode="site" class="active">By site</button>
+        <button type="button" data-mode="role">By role</button>
+      </span>
+      <span>Company:
+        <button type="button" data-co="all" class="active">All</button>
+        <button type="button" data-co="HF-BP">HF-BP</button>
+        <button type="button" data-co="Hai Fu">Hai Fu</button>
+      </span>
+    </div>
+    <div class="filter-wrap">
+      <input type="search" id="mp-search" class="filter-box"
+             placeholder="Search name, employee code or site…" autocomplete="off">
+    </div>
+    <div class="pipe-note" style="margin:-6px 0 10px">
+      "Last reported" comes from the WhatsApp bot's attendance — the bot skips
+      sites and days, so no recent report does <strong>not</strong> mean absent.
+      An amber ⚠ means the bot recently placed the worker on a different site
+      than this roster — check, then use Move to correct whichever is wrong.
+    </div>
     <div id="groups"></div>
     <div id="movelog"></div>
+
+    <!-- shared type-to-filter country suggestions (add + edit forms);
+         free text still allowed for anything not listed -->
+    <datalist id="country-list">
+      <option value="Malaysia"></option>
+      <option value="Myanmar"></option>
+      <option value="Bangladesh"></option>
+      <option value="Indonesia"></option>
+      <option value="Nepal"></option>
+      <option value="India"></option>
+      <option value="Pakistan"></option>
+      <option value="Vietnam"></option>
+      <option value="Thailand"></option>
+      <option value="Philippines"></option>
+      <option value="Cambodia"></option>
+      <option value="Sri Lanka"></option>
+      <option value="China"></option>
+    </datalist>
 
   </main>
 
@@ -42,8 +84,64 @@
         .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     }
 
-    // page state: rows cached, open-groups + picker choices survive re-renders
-    var MP = { rows: [], projects: [], canMove: false, open: {}, err: "", okMsg: "" };
+    // payroll trades (staff_role_check values) — site trades first
+    var ROLES = ["general_worker", "boring_operator", "crane_operator", "excavator_operator",
+                 "vibro_operator", "welder", "rigger", "banksman", "fabricator", "driver",
+                 "mechanic", "site_supervisor", "project_manager", "coordinator", "surveyor",
+                 "safety_officer", "store_keeper", "admin", "management", "other"];
+    var COMPANIES = ["HF-BP", "Hai Fu"];
+    var LEFT_GROUP_MAX = 15;   // "Recently left" shows the most recent departures
+
+    // page state: rows cached, open-groups + form visibility + grouping mode
+    // and company filter all survive re-renders
+    var MP = { rows: [], projects: [], canMove: false, open: {}, showAdd: false,
+               editing: null, groupMode: "site", companyFilter: "all", err: "", okMsg: "",
+               hkFilter: null,               // 'joined' | 'code' | 'contact' | null
+               supervisorsByPid: {},         // project_id -> "Name, Name"
+               machinesBySite: {} };         // project_code -> [{code,type}]
+
+    // machine type -> the trade that runs it (crew-vs-plant hint)
+    var MACHINE_TRADE = {
+      boring_rig: "boring_operator",
+      crawler_crane: "crane_operator",
+      vibro_hammer: "vibro_operator"
+    };
+
+    function daysAgo(dateStr) {
+      if (!dateStr) return null;
+      return Math.round((new Date(Dash.todayKL()) - new Date(dateStr)) / 86400000);
+    }
+
+    // drift = the bot placed this worker on a DIFFERENT site within the last 7 days
+    function isDrift(r) {
+      if (!r.is_active || !r.last_reported_date) return false;
+      var d = daysAgo(r.last_reported_date);
+      if (d === null || d > 7) return false;
+      return String(r.last_reported_project_id || "") !== String(r.current_project_id || "");
+    }
+
+    function lastReportedCell(r) {
+      if (!r.last_reported_date) return '<td class="muted-line">—</td>';
+      var label = new Intl.DateTimeFormat("en-MY", { day: "2-digit", month: "short" })
+        .format(new Date(r.last_reported_date + "T00:00:00"));
+      var txt = label + " @ " + escHtml(r.last_reported_project_code || "?");
+      if (isDrift(r)) {
+        return '<td class="drift" title="The bot last reported this worker at ' +
+               esc(r.last_reported_project_code || "?") + " on " + esc(r.last_reported_date) +
+               ' — different from the assigned site. Check, then Move whichever is wrong.">' +
+               txt + " &#9888;</td>";
+      }
+      return '<td class="muted-line">' + txt + "</td>";
+    }
+
+    function activeRows() {
+      return MP.rows.filter(function (r) { return r.is_active; });
+    }
+    function recentlyLeft() {
+      return MP.rows.filter(function (r) { return !r.is_active; })
+        .sort(function (a, b) { return a.updated_at < b.updated_at ? 1 : -1; })
+        .slice(0, LEFT_GROUP_MAX);
+    }
 
     function roleSummary(list) {
       var counts = {};
@@ -54,7 +152,7 @@
     }
 
     function moveTargets() {
-      // active first, completed still selectable (test/hacking crews are
+      // active first-class, completed still selectable (test/hacking crews are
       // normal on completed sites); cancelled + TEST rows excluded
       return MP.projects.filter(function (p) {
         return (p.status === "active" || p.status === "completed") &&
@@ -62,65 +160,305 @@
       });
     }
 
-    function moveCell(staffId) {
-      if (!MP.canMove) return "";
-      var opts = ['<option value="">move to…</option>'] .concat(
-        moveTargets().map(function (p) {
-          // code AND name — the office knows sites by name, no cross-checking
-          return '<option value="' + p.project_id + '">' +
-                 escHtml(p.project_code + " — " + (p.project_name || "")) +
-                 (p.status === "completed" ? " (completed)" : "") + "</option>";
-        }),
-        ['<option value="unassign">— unassigned —</option>']
-      ).join("");
-      return '<td><span class="move-ctl"><select data-staff="' + staffId + '">' + opts + "</select>" +
-             '<button type="button" data-action="move" data-staff="' + staffId + '">Move</button></span></td>';
+    // shared site <option> list — code AND name (the office knows sites by name)
+    function siteOptions(withUnassign) {
+      return moveTargets().map(function (p) {
+        return '<option value="' + p.project_id + '">' +
+               escHtml(p.project_code + " — " + (p.project_name || "")) +
+               (p.status === "completed" ? " (completed)" : "") + "</option>";
+      }).join("") + (withUnassign ? '<option value="unassign">— unassigned —</option>' : "");
     }
 
-    function groupBlock(key, title, list) {
+    function actionCell(r) {
+      if (!MP.canMove) return "";
+      return '<td><span class="move-ctl">' +
+             '<select data-staff="' + r.staff_id + '"><option value="">move to…</option>' +
+             siteOptions(true) + "</select>" +
+             '<button type="button" data-action="move" data-staff="' + r.staff_id + '">Move</button>' +
+             '<button type="button" data-action="edit" data-staff="' + r.staff_id + '">edit</button>' +
+             '<button type="button" class="danger" data-action="mark-left" data-staff="' + r.staff_id +
+             '" data-name="' + esc(r.full_name) + '">left</button>' +
+             "</span></td>";
+    }
+
+    function rowSearchAttr(r) {
+      return esc(((r.full_name || "") + " " + (r.employee_code || "") + " " +
+                  (r.project_code || "") + " " + (r.project_name || "")).toLowerCase());
+    }
+
+    function siteLabel(r) {
+      return r.current_project_id
+        ? escHtml((r.project_code || "") + (r.project_name ? " — " + r.project_name : ""))
+        : "unassigned";
+    }
+
+    // per-site counts, for the by-role group headers
+    function siteSummary(list) {
+      var counts = {};
+      list.forEach(function (r) {
+        var k = r.project_code || "unassigned";
+        counts[k] = (counts[k] || 0) + 1;
+      });
+      return Object.keys(counts).sort().map(function (k) {
+        return counts[k] + " " + k;
+      }).join(" · ");
+    }
+
+    // one collapsible group. In "site" mode the third column is Role and the
+    // header summarises roles; in "role" mode the third column is Site and
+    // the header summarises sites.
+    // which housekeeping gaps a row has, for the strip's click-to-filter
+    function rowHkAttr(r) {
+      return ((r.has_date_joined ? "" : "joined ") +
+              (r.employee_code ? "" : "code ") +
+              (r.has_contact ? "" : "contact")).trim();
+    }
+
+    function groupBlock(key, title, list, mode) {
+      var byRole = mode === "role";
       var isOpen = MP.open[key] !== false;   // default open
       var rows = list.map(function (r) {
-        return "<tr><td><strong>" + escHtml(r.full_name) + "</strong></td>" +
-               "<td>" + escHtml(String(r.role || "").replace(/_/g, " ")) + "</td>" +
+        return '<tr data-search="' + rowSearchAttr(r) + '" data-hk="' + rowHkAttr(r) + '">' +
+               "<td>" + (r.employee_code ? escHtml(r.employee_code) : "—") + "</td>" +
+               "<td><strong>" + escHtml(r.full_name) + "</strong></td>" +
+               "<td>" + (byRole ? siteLabel(r) : escHtml(String(r.role || "").replace(/_/g, " "))) + "</td>" +
                "<td>" + escHtml(r.company) + "</td>" +
-               moveCell(r.staff_id) + "</tr>";
+               lastReportedCell(r) +
+               actionCell(r) + "</tr>";
       }).join("");
+
+      // site-mode header extras: work-line scope tag (BP/SP/BP+SP, derived
+      // from the scope tables — sites carry no company by design), supervisor,
+      // crew company split when mixed, machines on site, crew-vs-plant hint,
+      // drift count
+      var svPrefix = "", machineStr = "", badges = "", split = "";
+      if (!byRole && key !== "__unassigned") {
+        var dir = MP.dirByPid[list[0].current_project_id];
+        if (dir) {
+          var scopeT = dir.has_bored_scope && dir.has_sheet_scope ? "BP+SP"
+                     : dir.has_bored_scope ? "BP"
+                     : dir.has_sheet_scope ? "SP" : "";
+          if (scopeT) svPrefix += '<span class="badge badge-gray">' + scopeT + "</span> ";
+        }
+        var bpN = list.filter(function (r) { return r.company === "HF-BP"; }).length;
+        if (bpN && bpN < list.length) {
+          split = " · HF-BP " + bpN + " · Hai Fu " + (list.length - bpN);
+        }
+        var sv = MP.supervisorsByPid[list[0].current_project_id];
+        if (sv) svPrefix += "SV " + escHtml(sv) + " · ";
+        var mach = MP.machinesBySite[key] || [];
+        if (mach.length) {
+          machineStr = " · " + mach.map(function (m) { return escHtml(m.code); }).join(", ");
+          var missing = {};
+          mach.forEach(function (m) {
+            var trade = MACHINE_TRADE[m.type];
+            if (trade && !list.some(function (r) { return r.role === trade; })) missing[trade] = true;
+          });
+          Object.keys(missing).forEach(function (t) {
+            badges += ' <span class="badge badge-anomaly">no ' + t.replace(/_/g, " ") + "</span>";
+          });
+        }
+      }
+      var driftN = list.filter(isDrift).length;
+      if (driftN) badges += ' <span class="badge badge-anomaly">' + driftN + " drift</span>";
+
       return '<details class="zone" data-group="' + esc(key) + '"' + (isOpen ? " open" : "") + ">" +
              '<summary><span class="zone-name">' + escHtml(title) + "</span>" +
-             '<span class="zone-count">' + list.length + " worker" + (list.length === 1 ? "" : "s") +
-             " · " + roleSummary(list) + "</span></summary>" +
+             '<span class="zone-count">' + svPrefix + list.length + " worker" + (list.length === 1 ? "" : "s") +
+             split + " · " + (byRole ? siteSummary(list) : roleSummary(list)) + machineStr + badges + "</span></summary>" +
              '<div class="table-wrap"><table>' +
-             "<thead><tr><th>Name</th><th>Role</th><th>Company</th>" +
-             (MP.canMove ? "<th>Reassign</th>" : "") + "</tr></thead>" +
+             "<thead><tr><th>Code</th><th>Name</th><th>" + (byRole ? "Site" : "Role") + "</th><th>Company</th>" +
+             "<th>Last reported</th>" +
+             (MP.canMove ? "<th>Actions</th>" : "") + "</tr></thead>" +
              "<tbody>" + rows + "</tbody></table></div></details>";
     }
 
-    function render() {
-      var bySite = {}, unassigned = [];
-      MP.rows.forEach(function (r) {
-        if (!r.current_project_id) { unassigned.push(r); return; }
-        var k = r.project_code || "?";
-        (bySite[k] = bySite[k] || { title: r.project_code + " — " + (r.project_name || ""), list: [] })
-          .list.push(r);
-      });
+    function recentlyLeftBlock() {
+      var list = recentlyLeft();
+      if (!list.length || !MP.canMove) return "";   // office housekeeping view
+      var isOpen = MP.open.__left === true;         // default COLLAPSED
+      var rows = list.map(function (r) {
+        return '<tr data-search="' + rowSearchAttr(r) + '">' +
+               "<td>" + (r.employee_code ? escHtml(r.employee_code) : "—") + "</td>" +
+               "<td><strong>" + escHtml(r.full_name) + "</strong></td>" +
+               "<td>" + escHtml(String(r.role || "").replace(/_/g, " ")) + "</td>" +
+               "<td>" + escHtml(r.company) + "</td>" +
+               '<td><button type="button" data-action="reactivate" data-staff="' + r.staff_id +
+               '" data-name="' + esc(r.full_name) + '">reactivate</button></td></tr>';
+      }).join("");
+      return '<details class="zone" data-group="__left"' + (isOpen ? " open" : "") + ">" +
+             '<summary><span class="zone-name">Recently left</span>' +
+             '<span class="zone-count">' + list.length + " shown · reactivate = undo a mistake</span></summary>" +
+             '<div class="table-wrap"><table>' +
+             "<thead><tr><th>Code</th><th>Name</th><th>Role</th><th>Company</th><th></th></tr></thead>" +
+             "<tbody>" + rows + "</tbody></table></div></details>";
+    }
 
-      var hfbp = MP.rows.filter(function (r) { return r.company === "HF-BP"; }).length;
-      var haifu = MP.rows.length - hfbp;
+    function addWorkerForm() {
+      if (!MP.canMove) return "";
+      if (!MP.showAdd) {
+        return '<div class="claim-actions" style="padding:0 0 10px">' +
+               '<button type="button" data-action="add-form">+ Add worker</button></div>';
+      }
+      var roleOpts = ROLES.map(function (r) {
+        return '<option value="' + r + '">' + r.replace(/_/g, " ") + "</option>";
+      }).join("");
+      var coOpts = COMPANIES.map(function (c) {
+        return '<option value="' + c + '">' + c + "</option>";
+      }).join("");
+      var desOpts = DESIGNATIONS.map(function (x) {
+        return '<option value="' + x + '">' + x.replace(/_/g, " ") + "</option>";
+      }).join("");
+      return '<div class="claim-form">' +
+        "<strong>New worker</strong>" +
+        '<label>full name <input type="text" id="aw-name" size="24"></label>' +
+        '<label>employee code <input type="text" id="aw-code" size="9" placeholder="optional"></label>' +
+        '<label>role <select id="aw-role">' + roleOpts + "</select></label>" +
+        '<label>company <select id="aw-company">' + coOpts + "</select></label>" +
+        '<label>designation <select id="aw-designation">' + desOpts + "</select></label>" +
+        '<label>site <select id="aw-site"><option value="">— unassigned —</option>' +
+          siteOptions(false) + "</select></label>" +
+        '<label>date joined <input type="date" id="aw-joined" title="drives the annual-leave entitlement tier"></label>' +
+        '<label>contact <input type="text" id="aw-contact" size="12" placeholder="optional"></label>' +
+        '<label>origin <input type="text" id="aw-origin" size="12" list="country-list" placeholder="type to pick…"></label>' +
+        '<button type="button" data-action="add-save">Add worker</button>' +
+        '<button type="button" data-action="add-cancel">Cancel</button>' +
+        "</div>";
+    }
+
+    // EDIT: prefilled from get_staff_detail (management/office-gated read —
+    // contact/date-joined never travel through the open whereabouts view).
+    // Blank field = unchanged (partial-update semantics); clearing a value
+    // stays a session job. whatsapp_name shown read-only: it is the bot's
+    // sender-match key and is deliberately not editable here.
+    var DESIGNATIONS = ["site", "site_supervisor", "office", "management"];
+    function editWorkerForm() {
+      var d = MP.editing.d;
+      var roleOpts = ROLES.map(function (r) {
+        return '<option value="' + r + '"' + (r === d.role ? " selected" : "") + ">" +
+               r.replace(/_/g, " ") + "</option>";
+      }).join("");
+      var coOpts = COMPANIES.map(function (c) {
+        return '<option value="' + c + '"' + (c === d.company_code ? " selected" : "") + ">" + c + "</option>";
+      }).join("");
+      var desOpts = (d.designation ? "" : '<option value="" selected>(unchanged)</option>') +
+        DESIGNATIONS.map(function (x) {
+          return '<option value="' + x + '"' + (x === d.designation ? " selected" : "") + ">" +
+                 x.replace(/_/g, " ") + "</option>";
+        }).join("");
+      return '<div class="claim-form">' +
+        "<strong>Edit worker</strong>" +
+        '<label>full name <input type="text" id="ew-name" size="24" value="' + esc(d.full_name) + '"></label>' +
+        '<label>employee code <input type="text" id="ew-code" size="9" value="' + esc(d.employee_code || "") + '"></label>' +
+        '<label>role <select id="ew-role">' + roleOpts + "</select></label>" +
+        '<label>company <select id="ew-company">' + coOpts + "</select></label>" +
+        '<label>designation <select id="ew-designation">' + desOpts + "</select></label>" +
+        '<label>date joined <input type="date" id="ew-joined" value="' + esc(d.date_joined || "") + '"></label>' +
+        '<label>contact <input type="text" id="ew-contact" size="12" value="' + esc(d.contact_number || "") + '"></label>' +
+        '<label>origin <input type="text" id="ew-origin" size="12" list="country-list" value="' + esc(d.country_origin || "") + '"></label>' +
+        (d.whatsapp_name
+          ? '<span class="muted-line">WhatsApp: ' + escHtml(d.whatsapp_name) + " (bot match key — not editable here)</span>"
+          : "") +
+        '<button type="button" data-action="edit-save" data-staff="' + d.staff_id + '">Save changes</button>' +
+        '<button type="button" data-action="edit-cancel">Cancel</button>' +
+        "</div>";
+    }
+
+    function render() {
+      var act = activeRows();
+      var unassigned = act.filter(function (r) { return !r.current_project_id; });
+      var hfbp = act.filter(function (r) { return r.company === "HF-BP"; }).length;
+
       document.getElementById("manpower-sub").innerHTML =
-        MP.rows.length + " active workers · HF-BP " + hfbp + " · Hai Fu " + haifu +
+        act.length + " active workers · HF-BP " + hfbp + " · Hai Fu " + (act.length - hfbp) +
         " · " + unassigned.length + " unassigned" +
-        (MP.canMove ? "" : ' <span class="muted">(view only — moves are office/management)</span>');
+        (MP.canMove ? "" : ' <span class="muted">(view only — changes are office/management)</span>');
 
       document.getElementById("error").innerHTML =
-        (MP.err ? '<div class="banner banner-red">Could not move: ' + escHtml(MP.err) + "</div>" : "") +
+        (MP.err ? '<div class="banner banner-red">Could not save: ' + escHtml(MP.err) + "</div>" : "") +
         (MP.okMsg ? '<div class="banner banner-amber">' + escHtml(MP.okMsg) + "</div>" : "");
 
-      var html = Object.keys(bySite).sort().map(function (k) {
-        return groupBlock(k, bySite[k].title, bySite[k].list);
-      }).join("");
-      if (unassigned.length) html += groupBlock("__unassigned", "Unassigned", unassigned);
+      // company chips narrow the lists (the headline totals above stay global)
+      var shown = MP.companyFilter === "all" ? act
+        : act.filter(function (r) { return r.company === MP.companyFilter; });
+
+      var html = MP.editing ? editWorkerForm() : addWorkerForm();
+      if (MP.groupMode === "role") {
+        var byRole = {};
+        shown.forEach(function (r) {
+          var k = r.role || "other";
+          (byRole[k] = byRole[k] || []).push(r);
+        });
+        html += Object.keys(byRole).sort(function (a, b) {
+          var ia = ROLES.indexOf(a), ib = ROLES.indexOf(b);
+          return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+        }).map(function (k) {
+          return groupBlock("role:" + k, k.replace(/_/g, " "), byRole[k], "role");
+        }).join("");
+      } else {
+        var bySite = {};
+        var shownUnassigned = shown.filter(function (r) { return !r.current_project_id; });
+        shown.forEach(function (r) {
+          if (!r.current_project_id) return;
+          var k = r.project_code || "?";
+          (bySite[k] = bySite[k] || { title: r.project_code + " — " + (r.project_name || ""), list: [] })
+            .list.push(r);
+        });
+        html += Object.keys(bySite).sort().map(function (k) {
+          return groupBlock(k, bySite[k].title, bySite[k].list, "site");
+        }).join("");
+        if (shownUnassigned.length) html += groupBlock("__unassigned", "Unassigned", shownUnassigned, "site");
+      }
+      html += recentlyLeftBlock();
       document.getElementById("groups").innerHTML =
         html || '<div class="muted-line">No active workers found.</div>';
+      renderHousekeeping();
+      applyFilter();
+    }
+
+    // type-to-filter + housekeeping filter: hides non-matching rows and empty
+    // groups — a lens, not a recount (group headers keep their true totals)
+    function applyFilter() {
+      var qstr = (document.getElementById("mp-search").value || "").trim().toLowerCase();
+      var hk = MP.hkFilter;
+      document.querySelectorAll("#groups details.zone").forEach(function (det) {
+        var any = false;
+        det.querySelectorAll("tbody tr").forEach(function (tr) {
+          var hit = (!qstr || (tr.getAttribute("data-search") || "").indexOf(qstr) !== -1) &&
+                    (!hk || (tr.getAttribute("data-hk") || "").indexOf(hk) !== -1);
+          tr.style.display = hit ? "" : "none";
+          if (hit) any = true;
+        });
+        det.style.display = any ? "" : "none";
+        if ((qstr || hk) && any) det.open = true;
+      });
+    }
+
+    // office work queue: counts of missing facts, click -> filter to those
+    // workers, fix each via the edit form
+    function renderHousekeeping() {
+      var el = document.getElementById("housekeeping");
+      if (!MP.canMove) { el.innerHTML = ""; return; }
+      var act = activeRows();
+      var items = [
+        ["joined", act.filter(function (r) { return !r.has_date_joined; }).length,
+         "missing date joined", "needed for the annual-leave entitlement tier"],
+        ["code", act.filter(function (r) { return !r.employee_code; }).length,
+         "missing employee code", "payroll reference"],
+        ["contact", act.filter(function (r) { return !r.has_contact; }).length,
+         "missing contact", "phone number"]
+      ].filter(function (i) { return i[1] > 0; });
+      if (!items.length) { el.innerHTML = ""; return; }
+      el.innerHTML = '<div class="hk-strip"><span>Housekeeping:</span>' +
+        items.map(function (i) {
+          return '<button type="button" data-hk-btn="' + i[0] + '"' +
+                 (MP.hkFilter === i[0] ? ' class="active"' : "") +
+                 ' title="' + i[3] + ' — click to list them, fix via edit">' +
+                 i[1] + " " + i[2] + "</button>";
+        }).join("") +
+        (MP.hkFilter
+          ? '<span class="muted-line">showing only workers with that gap — click again to clear</span>'
+          : "") + "</div>";
     }
 
     async function renderMoveLog() {
@@ -133,7 +471,8 @@
           return "<tr><td>" + Dash.klDateTime(t.moved_at) + "</td>" +
                  "<td>" + escHtml(t.subject_type) + "</td>" +
                  "<td><strong>" + escHtml(t.subject_name) + "</strong></td>" +
-                 "<td>" + escHtml(t.from_project) + " &rarr; " + escHtml(t.to_project) + "</td>" +
+                 "<td>" + escHtml(t.from_project) + " &rarr; " + escHtml(t.to_project) +
+                 (t.remarks ? ' <span class="muted">(' + escHtml(t.remarks) + ")</span>" : "") + "</td>" +
                  "<td>" + escHtml(t.moved_by_name || t.source) + "</td></tr>";
         }).join("");
         el.innerHTML =
@@ -151,39 +490,196 @@
       renderMoveLog();
     }
 
+    function rememberOpenGroups() {
+      document.querySelectorAll("#groups details.zone[data-group]").forEach(function (d) {
+        MP.open[d.getAttribute("data-group")] = d.open;
+      });
+    }
+
+    async function actAddWorker() {
+      var payload = {
+        fullName: document.getElementById("aw-name").value,
+        role: document.getElementById("aw-role").value,
+        companyCode: document.getElementById("aw-company").value,
+        employeeCode: document.getElementById("aw-code").value || null,
+        designation: document.getElementById("aw-designation").value,
+        projectId: document.getElementById("aw-site").value || null,
+        dateJoined: document.getElementById("aw-joined").value || null,
+        contactNumber: document.getElementById("aw-contact").value || null,
+        countryOrigin: document.getElementById("aw-origin").value || null
+      };
+      if (!String(payload.fullName || "").trim()) { MP.err = "full name is required"; render(); return; }
+      try {
+        var r = await Dash.addStaff(payload);
+        MP.err = ""; MP.showAdd = false;
+        MP.okMsg = r.full_name + " added (" + (r.to_project_code || "unassigned") + ")";
+      } catch (e) {
+        var msg = (e && e.message) || String(e);
+        if (msg === "duplicate_name" &&
+            window.confirm("A worker with this exact name already exists and is active.\nAdd anyway?")) {
+          payload.allowDuplicate = true;
+          try {
+            var r2 = await Dash.addStaff(payload);
+            MP.err = ""; MP.showAdd = false;
+            MP.okMsg = r2.full_name + " added (" + (r2.to_project_code || "unassigned") + ")";
+          } catch (e2) { MP.err = (e2 && e2.message) || String(e2); }
+        } else if (msg === "duplicate_employee_code") {
+          MP.err = "that employee code is already in use by an active worker";
+        } else if (msg !== "duplicate_name") {
+          MP.err = msg;
+        }
+      }
+      await refresh();
+    }
+
+    async function actEditSave(staffId) {
+      var payload = {
+        fullName: document.getElementById("ew-name").value,
+        role: document.getElementById("ew-role").value,
+        companyCode: document.getElementById("ew-company").value,
+        employeeCode: document.getElementById("ew-code").value || null,
+        designation: document.getElementById("ew-designation").value || null,
+        dateJoined: document.getElementById("ew-joined").value || null,
+        contactNumber: document.getElementById("ew-contact").value || null,
+        countryOrigin: document.getElementById("ew-origin").value || null
+      };
+      try {
+        var r = await Dash.updateStaff(staffId, payload);
+        MP.err = ""; MP.editing = null;
+        MP.okMsg = r.full_name + " updated";
+      } catch (e) {
+        var msg = (e && e.message) || String(e);
+        if (msg === "duplicate_name" &&
+            window.confirm("Another active worker already has this exact name.\nSave anyway?")) {
+          payload.allowDuplicate = true;
+          try {
+            var r2 = await Dash.updateStaff(staffId, payload);
+            MP.err = ""; MP.editing = null;
+            MP.okMsg = r2.full_name + " updated";
+          } catch (e2) { MP.err = (e2 && e2.message) || String(e2); }
+        } else if (msg === "duplicate_employee_code") {
+          MP.err = "that employee code is already in use by another active worker";
+        } else if (msg !== "duplicate_name") {
+          MP.err = msg;
+        }
+      }
+      await refresh();
+    }
+
     window.onShellReady = async function () {
       try {
         var profile = await Dash.getMyProfile();
         MP.canMove = !!(profile &&
           (profile.designation === "management" || profile.designation === "office"));
 
-        var res = await Promise.all([Dash.getManpowerBySite(), Dash.getProjectDirectory()]);
+        var res = await Promise.all([
+          Dash.getManpowerBySite(),
+          Dash.getProjectDirectory(),
+          Dash.getProjectSupervisors(),   // site headers: SV name
+          Dash.getMachines()              // site headers: plant + crew-vs-plant hint
+        ]);
         MP.rows = res[0]; MP.projects = res[1];
+        MP.dirByPid = {};
+        MP.projects.forEach(function (p) { MP.dirByPid[p.project_id] = p; });
+        res[2].forEach(function (s) { MP.supervisorsByPid[s.project_id] = s.supervisors; });
+        res[3].forEach(function (m) {
+          if (!m.current_site) return;
+          (MP.machinesBySite[m.current_site] = MP.machinesBySite[m.current_site] || [])
+            .push({ code: m.machine_code, type: m.machine_type });
+        });
         render();
         renderMoveLog();
 
+        document.getElementById("mp-search").addEventListener("input", applyFilter);
+
+        document.getElementById("housekeeping").addEventListener("click", function (ev) {
+          var b = ev.target.closest("button[data-hk-btn]");
+          if (!b) return;
+          var k = b.getAttribute("data-hk-btn");
+          MP.hkFilter = MP.hkFilter === k ? null : k;   // toggle
+          renderHousekeeping();
+          applyFilter();
+        });
+
+        // group-mode + company chips: set state, restyle, re-render
+        document.querySelector(".mp-controls").addEventListener("click", function (ev) {
+          var b = ev.target.closest("button");
+          if (!b) return;
+          var wrap = b.parentElement;
+          if (b.getAttribute("data-mode")) {
+            MP.groupMode = b.getAttribute("data-mode");
+            MP.open = {};                     // grouping changed — fresh open states
+          } else if (b.getAttribute("data-co")) {
+            MP.companyFilter = b.getAttribute("data-co");
+          } else return;
+          wrap.querySelectorAll("button").forEach(function (x) { x.classList.remove("active"); });
+          b.classList.add("active");
+          render();
+        });
+
         document.getElementById("groups").addEventListener("click", async function (ev) {
-          var btn = ev.target.closest('button[data-action="move"]');
+          var btn = ev.target.closest("button[data-action]");
           if (!btn) return;
           ev.preventDefault();
+          var act = btn.getAttribute("data-action");
           var staffId = btn.getAttribute("data-staff");
-          var sel = document.querySelector('select[data-staff="' + staffId + '"]');
-          if (!sel || !sel.value) return;            // nothing picked
-          // remember open/closed groups across the re-render
-          document.querySelectorAll("details.zone[data-group]").forEach(function (d) {
-            MP.open[d.getAttribute("data-group")] = d.open;
-          });
-          try {
-            var r = await Dash.moveStaff(staffId, sel.value === "unassign" ? null : sel.value);
-            var tgt = MP.projects.find(function (p) { return p.project_id === sel.value; });
-            MP.err = "";
-            MP.okMsg = (r.full_name || "Worker") + " moved to " +
-              (tgt ? tgt.project_code + " — " + tgt.project_name : "unassigned");
-          } catch (e) {
-            MP.err = (e && e.message) || String(e);
-            MP.okMsg = "";
+          var name = btn.getAttribute("data-name");
+
+          if (act === "add-form")   { MP.showAdd = true; MP.editing = null; MP.okMsg = ""; rememberOpenGroups(); render(); return; }
+          if (act === "add-cancel") { MP.showAdd = false; rememberOpenGroups(); render(); return; }
+          if (act === "add-save")   { rememberOpenGroups(); await actAddWorker(); return; }
+
+          if (act === "edit") {
+            rememberOpenGroups();
+            try {
+              var d = await Dash.getStaffDetail(staffId);
+              MP.editing = { staffId: staffId, d: d };
+              MP.showAdd = false; MP.okMsg = ""; MP.err = "";
+              render();
+              window.scrollTo({ top: 0, behavior: "smooth" });   // the form opens at the top
+            } catch (e) { MP.err = (e && e.message) || String(e); render(); }
+            return;
           }
-          await refresh();
+          if (act === "edit-cancel") { MP.editing = null; rememberOpenGroups(); render(); return; }
+          if (act === "edit-save")   { rememberOpenGroups(); await actEditSave(staffId); return; }
+
+          if (act === "move") {
+            var sel = document.querySelector('select[data-staff="' + staffId + '"]');
+            if (!sel || !sel.value) return;
+            rememberOpenGroups();
+            try {
+              var r = await Dash.moveStaff(staffId, sel.value === "unassign" ? null : sel.value);
+              var tgt = MP.projects.find(function (p) { return p.project_id === sel.value; });
+              MP.err = "";
+              MP.okMsg = (r.full_name || "Worker") + " moved to " +
+                (tgt ? tgt.project_code + " — " + tgt.project_name : "unassigned");
+            } catch (e) { MP.err = (e && e.message) || String(e); MP.okMsg = ""; }
+            await refresh();
+            return;
+          }
+
+          if (act === "mark-left") {
+            if (!window.confirm("Mark " + name + " as left?\nTheir punch-app phone will be locked out. " +
+                                "Undo from the Recently left group if this is a mistake.")) return;
+            rememberOpenGroups();
+            try {
+              await Dash.setStaffActive(staffId, false);
+              MP.err = ""; MP.okMsg = name + " marked as left";
+            } catch (e) { MP.err = (e && e.message) || String(e); MP.okMsg = ""; }
+            await refresh();
+            return;
+          }
+
+          if (act === "reactivate") {
+            if (!window.confirm("Reactivate " + name + "?")) return;
+            rememberOpenGroups();
+            try {
+              await Dash.setStaffActive(staffId, true);
+              MP.err = ""; MP.okMsg = name + " reactivated (back on their previous site — move if needed)";
+            } catch (e) { MP.err = (e && e.message) || String(e); MP.okMsg = ""; }
+            await refresh();
+            return;
+          }
         });
       } catch (e) {
         document.getElementById("error").innerHTML =
