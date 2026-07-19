@@ -109,6 +109,27 @@
    only — the bot's key is deliberately refused (it reports through its own
    tables; it never edits identity data).
 
+   ISSUE COMMANDS (writes = management/office, database-enforced; the status
+   audit trail is enforced by construction — updates go through issue_updates
+   and a trigger propagates status + stamps resolved_date)
+   -----------------------------------------------------------------------------
+   await Dash.getIssueUpdates()            -> every issue's full update trail
+                                              (newest first, with updater name)
+   await Dash.addIssueUpdate(issueId, {comment, newStatus?, effectiveDate?})
+                                           -> add a progress note and/or change
+                                              status (in_progress/resolved/
+                                              closed/open=reopen). effectiveDate
+                                              (YYYY-MM-DD) = when it was REALLY
+                                              fixed — stamps resolved_date
+   await Dash.setIssueMeta(issueId, {priority?, category?, assignedToId?,
+                                     clearAssignee?})
+                                           -> triage; the change is also written
+                                              into the trail automatically
+   await Dash.addIssue({projectId, title, description?, category?, priority?,
+                        machineId?, assignedToId?})
+                                           -> office-raised issue; numbering is
+                                              max+1 (the sequence is unreliable)
+
    MONEY COMMANDS (management/office designations only — the DATABASE refuses
    everyone else with 'not_authorised'; pages must render these sections
    silently absent when the call throws, never an error banner)
@@ -407,6 +428,58 @@
     return q(sb.from("v_machine_productivity").select("*"));
   }
 
+  // ---- issue operations (0046) — status changes ALWAYS via issue_updates ----
+  function getIssueUpdates() {
+    return q(sb.from("v_issue_updates").select("*"));
+  }
+
+  function addIssueUpdate(issueId, o) {
+    o = o || {};
+    return q(sb.rpc("add_issue_update", {
+      p_issue_id: issueId,
+      p_comment: o.comment || null,
+      p_new_status: o.newStatus || null,
+      // date-only input -> noon Malaysia time (the skill's resolved-date convention)
+      p_effective_at: o.effectiveDate ? o.effectiveDate + "T12:00:00+08:00" : null
+    }));
+  }
+
+  function setIssueMeta(issueId, o) {
+    o = o || {};
+    return q(sb.rpc("set_issue_meta", {
+      p_issue_id: issueId,
+      p_priority: o.priority || null,
+      p_category: o.category || null,
+      p_assigned_to_id: o.assignedToId || null,
+      p_clear_assignee: !!o.clearAssignee,
+      p_machine_id: o.machineId || null,
+      p_clear_machine: !!o.clearMachine,
+      p_pile_id: o.pileId || null,          // must belong to the issue's project (DB-guarded)
+      p_clear_pile: !!o.clearPile
+    }));
+  }
+
+  function getAllPiles() {
+    // lightweight pile directory for project-scoped pickers
+    return q(sb.from("v_pile_register")
+      .select("pile_id,project_id,project_code,pile_mark_no")
+      .order("pile_mark_no"));
+  }
+
+  function addIssue(o) {
+    o = o || {};
+    return q(sb.rpc("add_issue", {
+      p_project_id: o.projectId,
+      p_title: o.title,
+      p_description: o.description || null,
+      p_category: o.category || null,
+      p_priority: o.priority || null,
+      p_machine_id: o.machineId || null,
+      p_pile_id: o.pileId || null,
+      p_assigned_to_id: o.assignedToId || null
+    }));
+  }
+
   function updateStaff(staffId, o) {
     o = o || {};
     return q(sb.rpc("update_staff", {
@@ -571,6 +644,11 @@
     setMachineHourMeter: setMachineHourMeter,
     getMachineUtilization: getMachineUtilization,
     getMachineProductivity: getMachineProductivity,
+    getIssueUpdates: getIssueUpdates,
+    addIssueUpdate: addIssueUpdate,
+    setIssueMeta: setIssueMeta,
+    addIssue: addIssue,
+    getAllPiles: getAllPiles,
 
     getClaimSummaries: getClaimSummaries,
     getClaimRegister: getClaimRegister,

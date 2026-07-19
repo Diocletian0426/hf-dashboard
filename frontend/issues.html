@@ -11,24 +11,33 @@
   <header id="nav"></header>
 
   <main id="main">
+    <!-- ================= ISSUES (work queue — round of 2026-07-20) =========
+         Reported from the sites via the WhatsApp bot AND raised by the
+         office. Any signed-in login reads; ACTING (notes, resolve/reopen,
+         triage, raise) is management/office, database-enforced (0046).
+         The status audit trail is enforced by construction: every status
+         change goes through issue_updates; a trigger propagates it and
+         stamps resolved_date from the update's own date — which is why the
+         "when was it actually fixed" field exists on the resolve form. -->
     <h1>Site issues</h1>
-    <p class="page-caption">Reported from the sites via the WhatsApp bot. Most urgent first.</p>
+    <p id="issues-sub" class="page-caption"></p>
 
-    <div class="filters" id="filters"></div>
+    <div id="error"></div>
+    <div class="mp-controls" id="controls"></div>
+    <div id="raise-host"></div>
 
     <div class="table-wrap">
       <table>
         <thead>
           <tr>
             <th class="num">#</th><th>Project</th><th>Title</th><th>Category</th>
-            <th>Priority</th><th>Status</th><th>Assigned to</th>
+            <th>Priority</th><th>Status</th><th>PIC</th>
             <th class="num">Days open</th><th>Latest action</th><th>Machine</th>
           </tr>
         </thead>
         <tbody id="rows"><tr><td colspan="10" class="empty">Loading…</td></tr></tbody>
       </table>
     </div>
-    <div id="error"></div>
   </main>
 
   <script src="vendor/supabase.js"></script>
@@ -37,46 +46,417 @@
   <script src="shell.js"></script>
 
   <script>
-    var FILTERS = [
-      ["open",     "Open + in progress"],
-      ["resolved", "Resolved"],
-      ["closed",   "Closed"],
-      ["all",      "All"]
-    ];
+    function esc(s) { return String(s === null || s === undefined ? "" : s).replace(/"/g, "&quot;"); }
+    function escHtml(s) {
+      return String(s === null || s === undefined ? "" : s)
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+    function dstr(d) {
+      if (!d) return "—";
+      return new Intl.DateTimeFormat("en-MY", { day: "2-digit", month: "short", year: "numeric" })
+        .format(new Date(d + "T00:00:00"));
+    }
+    function daysSince(dateStr) {
+      if (!dateStr) return null;
+      return Math.round((new Date(Dash.todayKL()) - new Date(String(dateStr).slice(0, 10))) / 86400000);
+    }
+
+    var STALE_DAYS = 7;   // same rule as the project hub's attention panel
+    var CATEGORIES = ["equipment", "material", "manpower", "quality", "safety", "design", "weather", "other"];
+    var PRIORITIES = ["critical", "high", "medium", "low"];
+
+    var IS = {
+      rows: [], trail: {}, projects: [], staff: [], machines: [], pilesByProject: {},
+      canAct: false, open: {}, showRaise: false,
+      status: "open", project: "all", stale: false, nopic: false,
+      pic: "all", priority: "all", category: "all", minDays: null,
+      err: "", ok: ""
+    };
+
+    function lastActivityDate(i) {
+      return (i.latest_action_date ? String(i.latest_action_date).slice(0, 10) : null) || i.raised_date;
+    }
+    function isOpenStatus(i) { return i.status === "open" || i.status === "in_progress"; }
+    function isStale(i) {
+      if (!isOpenStatus(i)) return false;
+      var d = daysSince(lastActivityDate(i));
+      return d !== null && d >= STALE_DAYS;
+    }
+
+    function visibleRows() {
+      return IS.rows.filter(function (i) {
+        if (IS.status === "open")        { if (!isOpenStatus(i)) return false; }
+        else if (IS.status !== "all")    { if (i.status !== IS.status) return false; }
+        if (IS.project !== "all" && i.project_code !== IS.project) return false;
+        if (IS.stale && !isStale(i)) return false;
+        if (IS.nopic && i.assigned_to_name_resolved) return false;
+        if (IS.pic !== "all") {
+          if (IS.pic === "__none" ? !!i.assigned_to_name_resolved
+                                  : i.assigned_to_name_resolved !== IS.pic) return false;
+        }
+        if (IS.priority !== "all" && i.priority !== IS.priority) return false;
+        if (IS.category !== "all" && i.category !== IS.category) return false;
+        if (IS.minDays !== null && !(Number(i.days_open) >= IS.minDays)) return false;
+        return true;
+      });
+    }
+
+    // ---- controls (status chips + project filter + work-queue chips) ----
+    function renderControls() {
+      var openRows = IS.rows.filter(isOpenStatus);
+      var staleN = openRows.filter(isStale).length;
+      var nopicN = openRows.filter(function (i) { return !i.assigned_to_name_resolved; }).length;
+
+      var statusBtns = [["open", "Open + in progress"], ["resolved", "Resolved"],
+                        ["closed", "Closed"], ["all", "All"]]
+        .map(function (f) {
+          return '<button type="button" data-status="' + f[0] + '"' +
+                 (IS.status === f[0] ? ' class="active"' : "") + ">" + f[1] + "</button>";
+        }).join("");
+
+      var projOpts = ['<option value="all">all projects</option>'].concat(
+        IS.projects.filter(function (p) {
+          return IS.rows.some(function (i) { return i.project_code === p.project_code; });
+        }).map(function (p) {
+          return '<option value="' + esc(p.project_code) + '"' +
+                 (IS.project === p.project_code ? " selected" : "") + ">" +
+                 escHtml(p.project_code + " — " + (p.project_name || "")) + "</option>";
+        })).join("");
+
+      // PIC options = names actually appearing on issues (plus "unassigned")
+      var picNames = {};
+      IS.rows.forEach(function (i) {
+        if (i.assigned_to_name_resolved) picNames[i.assigned_to_name_resolved] = true;
+      });
+      var picOpts = ['<option value="all">any PIC</option>',
+                     '<option value="__none"' + (IS.pic === "__none" ? " selected" : "") + ">— unassigned —</option>"]
+        .concat(Object.keys(picNames).sort().map(function (n) {
+          return '<option value="' + esc(n) + '"' + (IS.pic === n ? " selected" : "") + ">" + escHtml(n) + "</option>";
+        })).join("");
+      var priOpts = ['<option value="all">any priority</option>'].concat(PRIORITIES.map(function (p) {
+        return '<option value="' + p + '"' + (IS.priority === p ? " selected" : "") + ">" + p + "</option>";
+      })).join("");
+      var catOpts = ['<option value="all">any category</option>'].concat(CATEGORIES.map(function (c) {
+        return '<option value="' + c + '"' + (IS.category === c ? " selected" : "") + ">" + c + "</option>";
+      })).join("");
+
+      document.getElementById("controls").innerHTML =
+        "<span>" + statusBtns + "</span>" +
+        '<span><select id="is-project">' + projOpts + "</select>" +
+        '<select id="is-pic">' + picOpts + "</select>" +
+        '<select id="is-priority">' + priOpts + "</select>" +
+        '<select id="is-category">' + catOpts + "</select>" +
+        '<label class="mc-check">open ≥ <input type="number" id="is-mindays" min="0" ' +
+          'style="width:56px" value="' + (IS.minDays === null ? "" : IS.minDays) + '"> days</label></span>' +
+        "<span>" +
+        '<button type="button" data-chip="stale"' + (IS.stale ? ' class="active"' : "") +
+          ' title="open issues with no update for ' + STALE_DAYS + '+ days">' + staleN + " stale</button>" +
+        '<button type="button" data-chip="nopic"' + (IS.nopic ? ' class="active"' : "") +
+          ' title="open issues nobody owns">' + nopicN + " no PIC</button>" +
+        "</span>" +
+        (IS.canAct
+          ? '<span><button type="button" data-action="raise-form">+ Raise issue</button></span>'
+          : "");
+
+      document.getElementById("issues-sub").innerHTML =
+        openRows.length + " open · " + staleN + " stale " + STALE_DAYS + "d+ · " + nopicN + " without PIC" +
+        (IS.canAct ? "" : ' <span class="muted">(view only — actions are office/management)</span>');
+    }
+
+    // ---- raise-issue form ----
+    function raiseForm() {
+      if (!IS.showRaise) return "";
+      var projOpts = IS.projects.filter(function (p) {
+        return (p.status === "active" || p.status === "completed") &&
+               p.project_code.indexOf("TEST") !== 0;
+      }).map(function (p) {
+        return '<option value="' + p.project_id + '">' +
+               escHtml(p.project_code + " — " + (p.project_name || "")) + "</option>";
+      }).join("");
+      var catOpts = CATEGORIES.map(function (c) {
+        return '<option value="' + c + '">' + c + "</option>";
+      }).join("");
+      var priOpts = PRIORITIES.map(function (p) {
+        return '<option value="' + p + '"' + (p === "medium" ? " selected" : "") + ">" + p + "</option>";
+      }).join("");
+      var picOpts = ['<option value="">— no PIC yet —</option>'].concat(
+        IS.staff.map(function (s) {
+          return '<option value="' + s.staff_id + '">' + escHtml(s.full_name) + "</option>";
+        })).join("");
+      var machOpts = ['<option value="">— none —</option>'].concat(
+        IS.machines.map(function (m) {
+          return '<option value="' + m.machine_id + '">' + escHtml(m.machine_code) + "</option>";
+        })).join("");
+      return '<div class="claim-form">' +
+        "<strong>Raise issue</strong>" +
+        '<label>project <select id="ri-project">' + projOpts + "</select></label>" +
+        '<label>title <input type="text" id="ri-title" size="28"></label>' +
+        '<label>description <input type="text" id="ri-desc" size="30"></label>' +
+        '<label>category <select id="ri-category">' + catOpts + "</select></label>" +
+        '<label>priority <select id="ri-priority">' + priOpts + "</select></label>" +
+        '<label>machine <select id="ri-machine">' + machOpts + "</select></label>" +
+        '<label>PIC <select id="ri-pic">' + picOpts + "</select></label>" +
+        '<button type="button" data-action="raise-save">Raise</button>' +
+        '<button type="button" data-action="raise-cancel">Cancel</button>' +
+        "</div>";
+    }
+
+    // ---- detail row: trail + action forms ----
+    function trailHtml(issueId) {
+      var list = IS.trail[issueId] || [];
+      if (!list.length) return '<div class="muted-line">No updates recorded yet.</div>';
+      return list.map(function (u) {
+        return '<div class="pc-line"><strong>' + Dash.klDateTime(u.created_at) + "</strong> " +
+               (u.new_status
+                 ? '<span class="badge badge-' + escHtml(u.new_status) + '">' + escHtml(u.new_status) + "</span> "
+                 : "") +
+               escHtml(u.comment || "") +
+               (u.updated_by_name ? ' <span class="muted">— ' + escHtml(u.updated_by_name) + "</span>" : "") +
+               "</div>";
+      }).join("");
+    }
+
+    function actionBox(i) {
+      if (!IS.canAct) return "";
+      var picOpts = ['<option value="">— keep current —</option>', '<option value="__clear">— clear PIC —</option>']
+        .concat(IS.staff.map(function (s) {
+          return '<option value="' + s.staff_id + '">' + escHtml(s.full_name) + "</option>";
+        })).join("");
+      var catOpts = ['<option value="">— keep —</option>'].concat(CATEGORIES.map(function (c) {
+        return '<option value="' + c + '"' + (c === i.category ? " selected" : "") + ">" + c + "</option>";
+      })).join("");
+      var priOpts = ['<option value="">— keep —</option>'].concat(PRIORITIES.map(function (p) {
+        return '<option value="' + p + '"' + (p === i.priority ? " selected" : "") + ">" + p + "</option>";
+      })).join("");
+      // retro-links (0047): machine, and piles OF THIS ISSUE'S PROJECT only —
+      // the database independently refuses a pile from another project
+      var machOpts = ['<option value="">— keep' + (i.machine_code ? " (" + escHtml(i.machine_code) + ")" : "") + " —</option>",
+                      '<option value="__clear">— clear machine link —</option>']
+        .concat(IS.machines.map(function (m) {
+          return '<option value="' + m.machine_id + '">' + escHtml(m.machine_code) + "</option>";
+        })).join("");
+      var piles = IS.pilesByProject[i.project_code] || [];
+      var pileOpts = ['<option value="">— keep' + (i.affected_pile_mark ? " (" + escHtml(i.affected_pile_mark) + ")" : "") + " —</option>",
+                      '<option value="__clear">— clear pile link —</option>']
+        .concat(piles.map(function (p) {
+          return '<option value="' + p.pile_id + '">' + escHtml(p.pile_mark_no) + "</option>";
+        })).join("");
+      return '<div class="claim-form">' +
+        "<strong>Add update</strong>" +
+        '<label>note <input type="text" id="iu-comment" size="34" placeholder="what happened / what was done"></label>' +
+        '<label>status <select id="iu-status">' +
+          '<option value="">no change</option>' +
+          '<option value="in_progress">in progress</option>' +
+          '<option value="resolved">resolved</option>' +
+          '<option value="closed">closed</option>' +
+          '<option value="open">reopen</option></select></label>' +
+        '<label>when it was actually done <input type="date" id="iu-date" value="' + Dash.todayKL() +
+          '" title="stamps the real resolved date — backdate if it was fixed earlier"></label>' +
+        '<button type="button" data-action="update-save" data-issue="' + i.issue_id + '">Save update</button>' +
+        "</div>" +
+        '<div class="claim-form">' +
+        "<strong>Triage</strong>" +
+        '<label>priority <select id="im-priority">' + priOpts + "</select></label>" +
+        '<label>category <select id="im-category">' + catOpts + "</select></label>" +
+        '<label>PIC <select id="im-pic">' + picOpts + "</select></label>" +
+        '<label>machine <select id="im-machine">' + machOpts + "</select></label>" +
+        '<label>pile <select id="im-pile"' + (piles.length ? "" : " disabled title=\"no piles registered for this project\"") + ">" +
+          pileOpts + "</select></label>" +
+        '<button type="button" data-action="meta-save" data-issue="' + i.issue_id + '">Apply</button>' +
+        "</div>";
+    }
+
+    function detailRow(i) {
+      var isOpen = !!IS.open[i.issue_id];
+      if (!isOpen) return '<tr class="claim-lines-row" style="display:none"><td colspan="10"></td></tr>';
+      var meta = [];
+      if (i.raised_by_name_resolved) meta.push("raised by " + escHtml(i.raised_by_name_resolved));
+      meta.push("raised " + dstr(i.raised_date));
+      if (i.resolved_date) meta.push("resolved " + dstr(i.resolved_date));
+      if (i.affected_pile_mark) meta.push("pile " + escHtml(i.affected_pile_mark));
+      return '<tr class="claim-lines-row"><td colspan="10">' +
+        '<div style="padding:8px 12px">' +
+        (i.description ? '<div class="pc-line wrap">' + escHtml(i.description) + "</div>" : "") +
+        '<div class="pc-meta">' + meta.join(" · ") + "</div>" +
+        "<h3>Update trail</h3>" + trailHtml(i.issue_id) +
+        actionBox(i) +
+        "</div></td></tr>";
+    }
+
+    function render() {
+      renderControls();
+      document.getElementById("raise-host").innerHTML = raiseForm();
+      document.getElementById("error").innerHTML =
+        (IS.err ? '<div class="banner banner-red">Could not save: ' + escHtml(IS.err) + "</div>" : "") +
+        (IS.ok ? '<div class="banner banner-amber">' + escHtml(IS.ok) + "</div>" : "");
+
+      var rows = visibleRows();
+      var tbody = document.getElementById("rows");
+      if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="10" class="empty">No issues for this filter.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = rows.map(function (i) {
+        var stale = isStale(i);
+        var staleD = stale ? daysSince(lastActivityDate(i)) : null;
+        return '<tr class="claim-row" data-issue="' + i.issue_id + '" title="Click to open the trail">' +
+          '<td class="num"><span class="claim-caret">' + (IS.open[i.issue_id] ? "&#9662;" : "&#9656;") +
+            "</span> <strong>" + (i.issue_number || "") + "</strong></td>" +
+          "<td>" + (i.project_code || "") + "</td>" +
+          '<td class="wrap">' + escHtml(i.title || "") + "</td>" +
+          "<td>" + (i.category || "") + "</td>" +
+          '<td><span class="badge badge-' + (i.priority || "low") + '">' + (i.priority || "") + "</span></td>" +
+          '<td><span class="badge badge-' + (i.status || "gray") + '">' + (i.status || "") + "</span></td>" +
+          "<td>" + (i.assigned_to_name_resolved || "—") + "</td>" +
+          '<td class="num' + (i.days_open > 14 ? " neg" : "") + '">' +
+            (i.days_open === null || i.days_open === undefined ? "" : i.days_open) + "</td>" +
+          '<td class="wrap">' + escHtml(i.latest_action || "—") +
+            (stale ? ' <span class="badge badge-anomaly">no update ' + staleD + "d</span>" : "") + "</td>" +
+          "<td>" + (i.machine_code || "") + "</td>" +
+        "</tr>" + detailRow(i);
+      }).join("");
+    }
+
+    async function refresh() {
+      var res = await Promise.all([Dash.getIssues("all"), Dash.getIssueUpdates()]);
+      IS.rows = res[0];
+      IS.trail = {};
+      res[1].forEach(function (u) {
+        (IS.trail[u.issue_id] = IS.trail[u.issue_id] || []).push(u);
+      });
+      render();
+    }
 
     window.onShellReady = async function () {
-      var status = new URLSearchParams(location.search).get("status") || "open";
-
-      document.getElementById("filters").innerHTML = FILTERS.map(function (f) {
-        var current = f[0] === status;
-        return current
-          ? '<span class="badge badge-in_progress">' + f[1] + "</span>"
-          : '<a href="issues.html?status=' + f[0] + '">' + f[1] + "</a>";
-      }).join(" · ");
-
-      var tbody = document.getElementById("rows");
       try {
-        var rows = await Dash.getIssues(status);
-        if (!rows.length) { tbody.innerHTML = '<tr><td colspan="10" class="empty">No issues for this filter.</td></tr>'; return; }
+        // deep links from other pages keep working (issues.html?status=resolved)
+        var urlStatus = new URLSearchParams(location.search).get("status");
+        if (urlStatus && ["open", "resolved", "closed", "all"].indexOf(urlStatus) !== -1) {
+          IS.status = urlStatus;
+        }
 
-        tbody.innerHTML = rows.map(function (i) {
-          return "<tr>" +
-            '<td class="num">' + (i.issue_number || "") + "</td>" +
-            "<td>" + (i.project_code || "") + "</td>" +
-            '<td class="wrap" title="' + String(i.description || "").replace(/"/g, "&quot;") + '">' + (i.title || "") + "</td>" +
-            "<td>" + (i.category || "") + "</td>" +
-            '<td><span class="badge badge-' + (i.priority || "low") + '">' + (i.priority || "") + "</span></td>" +
-            '<td><span class="badge badge-' + (i.status || "gray") + '">' + (i.status || "") + "</span></td>" +
-            "<td>" + (i.assigned_to_name_resolved || "—") + "</td>" +
-            '<td class="num' + (i.days_open > 14 ? " neg" : "") + '">' + (i.days_open === null || i.days_open === undefined ? "" : i.days_open) + "</td>" +
-            '<td class="wrap">' + (i.latest_action || "—") + "</td>" +
-            "<td>" + (i.machine_code || "") + "</td>" +
-          "</tr>";
-        }).join("");
+        var profile = await Dash.getMyProfile();
+        IS.canAct = !!(profile &&
+          (profile.designation === "management" || profile.designation === "office"));
+
+        var res = await Promise.all([
+          Dash.getIssues("all"),
+          Dash.getIssueUpdates(),
+          Dash.getProjectDirectory(),
+          Dash.getManpowerBySite(),
+          Dash.getMachines(),
+          Dash.getAllPiles()
+        ]);
+        IS.rows = res[0];
+        res[1].forEach(function (u) {
+          (IS.trail[u.issue_id] = IS.trail[u.issue_id] || []).push(u);
+        });
+        IS.projects = res[2];
+        IS.staff = res[3].filter(function (s) { return s.is_active; })
+          .sort(function (a, b) { return a.full_name.localeCompare(b.full_name); });
+        IS.machines = res[4];
+        res[5].forEach(function (p) {
+          (IS.pilesByProject[p.project_code] = IS.pilesByProject[p.project_code] || []).push(p);
+        });
+        render();
+
+        document.getElementById("controls").addEventListener("click", function (ev) {
+          var b = ev.target.closest("button");
+          if (!b) return;
+          if (b.getAttribute("data-status")) { IS.status = b.getAttribute("data-status"); render(); }
+          else if (b.getAttribute("data-chip") === "stale") { IS.stale = !IS.stale; render(); }
+          else if (b.getAttribute("data-chip") === "nopic") { IS.nopic = !IS.nopic; render(); }
+          else if (b.getAttribute("data-action") === "raise-form") {
+            IS.showRaise = true; IS.ok = ""; render();
+          }
+        });
+        document.getElementById("controls").addEventListener("change", function (ev) {
+          if (ev.target.id === "is-project")       { IS.project = ev.target.value; render(); }
+          else if (ev.target.id === "is-pic")      { IS.pic = ev.target.value; render(); }
+          else if (ev.target.id === "is-priority") { IS.priority = ev.target.value; render(); }
+          else if (ev.target.id === "is-category") { IS.category = ev.target.value; render(); }
+          else if (ev.target.id === "is-mindays")  {
+            IS.minDays = ev.target.value === "" ? null : Math.max(0, Number(ev.target.value));
+            render();
+          }
+        });
+
+        document.getElementById("raise-host").addEventListener("click", async function (ev) {
+          var b = ev.target.closest("button[data-action]");
+          if (!b) return;
+          if (b.getAttribute("data-action") === "raise-cancel") { IS.showRaise = false; render(); return; }
+          if (b.getAttribute("data-action") !== "raise-save") return;
+          var title = document.getElementById("ri-title").value.trim();
+          if (!title) { IS.err = "title is required"; render(); return; }
+          try {
+            var r = await Dash.addIssue({
+              projectId: document.getElementById("ri-project").value,
+              title: title,
+              description: document.getElementById("ri-desc").value || null,
+              category: document.getElementById("ri-category").value,
+              priority: document.getElementById("ri-priority").value,
+              machineId: document.getElementById("ri-machine").value || null,
+              assignedToId: document.getElementById("ri-pic").value || null
+            });
+            IS.err = ""; IS.showRaise = false;
+            IS.ok = "Issue #" + r.issue_number + " raised";
+          } catch (e) { IS.err = (e && e.message) || String(e); IS.ok = ""; }
+          await refresh();
+        });
+
+        document.getElementById("rows").addEventListener("click", async function (ev) {
+          var btn = ev.target.closest("button[data-action]");
+          if (btn) {
+            var issueId = btn.getAttribute("data-issue");
+            if (btn.getAttribute("data-action") === "update-save") {
+              var comment = document.getElementById("iu-comment").value.trim();
+              var newStatus = document.getElementById("iu-status").value || null;
+              if (!comment && !newStatus) return;
+              try {
+                var r1 = await Dash.addIssueUpdate(issueId, {
+                  comment: comment || null,
+                  newStatus: newStatus,
+                  effectiveDate: document.getElementById("iu-date").value || null
+                });
+                IS.err = "";
+                IS.ok = "#" + r1.issue_number + " updated" + (newStatus ? " → " + newStatus : "");
+              } catch (e) { IS.err = (e && e.message) || String(e); IS.ok = ""; }
+              await refresh();
+              return;
+            }
+            if (btn.getAttribute("data-action") === "meta-save") {
+              var pic = document.getElementById("im-pic").value;
+              var mach = document.getElementById("im-machine").value;
+              var pile = document.getElementById("im-pile").value;
+              try {
+                var r2 = await Dash.setIssueMeta(issueId, {
+                  priority: document.getElementById("im-priority").value || null,
+                  category: document.getElementById("im-category").value || null,
+                  assignedToId: (pic && pic !== "__clear") ? pic : null,
+                  clearAssignee: pic === "__clear",
+                  machineId: (mach && mach !== "__clear") ? mach : null,
+                  clearMachine: mach === "__clear",
+                  pileId: (pile && pile !== "__clear") ? pile : null,
+                  clearPile: pile === "__clear"
+                });
+                IS.err = "";
+                IS.ok = r2.no_change ? "No changes to apply" : "#" + r2.issue_number + " triaged";
+              } catch (e) { IS.err = (e && e.message) || String(e); IS.ok = ""; }
+              await refresh();
+              return;
+            }
+            return;
+          }
+          var row = ev.target.closest("tr.claim-row");
+          if (!row) return;
+          var id = row.getAttribute("data-issue");
+          IS.open[id] = !IS.open[id];
+          render();
+        });
       } catch (e) {
-        tbody.innerHTML = "";
+        document.getElementById("rows").innerHTML = "";
         document.getElementById("error").innerHTML =
-          '<div class="banner banner-red">Could not load: ' + (e.message || e) + "</div>";
+          '<div class="banner banner-red">Could not load: ' + escHtml((e && e.message) || e) + "</div>";
       }
     };
   </script>
