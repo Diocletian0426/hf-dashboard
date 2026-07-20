@@ -57,6 +57,29 @@
                                                      (stamps mobilised_date on a move)
    await Dash.getTransferLog(limit?)              -> recent moves, newest first
                                                      (management/office only)
+   await Dash.getMovementPlans()           -> every movement plan (staff AND
+                                              machine, all statuses, earliest
+                                              planned date first). Pages show
+                                              the status='planned' rows; a
+                                              planned row whose date is past =
+                                              overdue (amber). Any signed-in
+                                              login may read (whereabouts).
+   await Dash.addMovementPlan({staffId? | machineId?, plannedDate,
+                               toProjectId?, remarks?})
+                                           -> record an INTENDED move (exactly
+                                              one of staffId/machineId;
+                                              toProjectId null = mob out /
+                                              demob to unassigned — yard trips
+                                              use the HF-YARD-001 project).
+                                              Plans NEVER auto-apply on their
+                                              date — the office executes them.
+   await Dash.executeMovementPlan(planId)  -> the move really happened: applies
+                                              it through moveStaff/moveMachine
+                                              rules (same validation, transfer
+                                              log, mobilised_date stamp) and
+                                              links the resulting transfer row
+   await Dash.cancelMovementPlan(planId)   -> planned -> cancelled. Executed
+                                              plans are immutable history.
    await Dash.addStaff({fullName, role, companyCode, employeeCode?, projectId?,
                         designation?, dateJoined?, contactNumber?,
                         countryOrigin?, allowDuplicate?})
@@ -340,6 +363,31 @@
 
   function getTransferLog(limit) {
     return q(sb.rpc("get_transfer_log", { p_limit: limit || 100 }));
+  }
+
+  // ---- movement planning (0048) — intended moves; NEVER auto-applied --------
+  function getMovementPlans() {
+    return q(sb.from("v_movement_plans").select("*")
+      .order("planned_date").order("created_at"));
+  }
+
+  function addMovementPlan(o) {
+    o = o || {};
+    return q(sb.rpc("add_movement_plan", {
+      p_staff_id: o.staffId || null,
+      p_machine_id: o.machineId || null,
+      p_planned_date: o.plannedDate,
+      p_to_project_id: o.toProjectId || null,
+      p_remarks: o.remarks || null
+    }));
+  }
+
+  function cancelMovementPlan(planId) {
+    return q(sb.rpc("cancel_movement_plan", { p_plan_id: planId }));
+  }
+
+  function executeMovementPlan(planId) {
+    return q(sb.rpc("execute_movement_plan", { p_plan_id: planId }));
   }
 
   function addStaff(o) {
@@ -634,6 +682,10 @@
     moveStaff: moveStaff,
     moveMachine: moveMachine,
     getTransferLog: getTransferLog,
+    getMovementPlans: getMovementPlans,
+    addMovementPlan: addMovementPlan,
+    cancelMovementPlan: cancelMovementPlan,
+    executeMovementPlan: executeMovementPlan,
     addStaff: addStaff,
     addMachine: addMachine,
     setStaffActive: setStaffActive,

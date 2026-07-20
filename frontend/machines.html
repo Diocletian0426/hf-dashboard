@@ -38,11 +38,21 @@
                                 (chip tooltip lists them)
            3) Service overdue — hour meter past next_service_due_hours
                                 (dormant until the bot feeds hour meters)
-           4) Move date passed— next_move_date is today or earlier
-                                (dormant until the bot maintains move dates)
+           4) Move overdue    — a movement plan's date has passed but the
+                                office hasn't pressed Execute yet (0048 —
+                                replaces the old dormant next_move_date rule;
+                                the legacy column itself stays, bot contract)
          Chips will jump to the machine's row once the by-site tables
          (element 3) exist — until then clicking is a harmless no-op. -->
     <div id="attention"></div>
+
+    <!-- ================= UPCOMING MOVES (0048) =================
+         Every PLANNED machine move by date (movement_plans). Plans NEVER
+         apply themselves — the office presses Execute when the move really
+         happened; a plan whose date passed unexecuted shows amber here and
+         in needs-attention. Plans are created from each machine's record
+         card ("Plan move…"). Execute/Cancel = management/office only. -->
+    <div id="upcoming"></div>
 
     <!-- ================= MACHINES BY SITE (element 3) =================
          One collapsible block per site (same details/summary pattern as the
@@ -184,19 +194,22 @@
           return attnChip(m.machine_code, m.machine_code + over);
         });
 
-      // 4) planned move date reached (dormant until the bot maintains it)
-      var today = Dash.todayKL();
-      var moveDue = machines.filter(function (m) {
-        return m.next_move_date && m.next_move_date <= today;
-      }).map(function (m) {
-        return attnChip(m.machine_code, m.machine_code + " · move due " + m.next_move_date);
+      // 4) planned move overdue — the plan's date passed but nobody pressed
+      //    Execute (0048; replaces the old dormant next_move_date rule)
+      var moveDue = MACHINE_PLANS.filter(function (p) {
+        return daysSince(p.planned_date) > 0;
+      }).map(function (p) {
+        var days = daysSince(p.planned_date);
+        return attnChip(p.machine_code,
+          p.machine_code + " → " + (p.to_project_code || "unassigned") +
+          " planned " + p.planned_date + " — " + days + " day" + (days === 1 ? "" : "s") + " ago");
       });
 
       var sections = [];
       if (broken.length)     sections.push(attnRow("Breakdown", broken));
       if (withIssues.length) sections.push(attnRow("Open issues", withIssues));
       if (serviceDue.length) sections.push(attnRow("Service overdue", serviceDue));
-      if (moveDue.length)    sections.push(attnRow("Move date passed", moveDue));
+      if (moveDue.length)    sections.push(attnRow("Move overdue", moveDue));
 
       var total = broken.length + withIssues.length + serviceDue.length + moveDue.length;
       var body = total === 0
@@ -331,6 +344,8 @@
     // 0044 operations data: 30d utilization + tagged productivity per machine,
     // machine move history (transfer_log), machines by id for the edit form
     var UTIL = {}, PROD = {}, MOVELOG = {}, MACHINES_BY_ID = {}, DIR_BY_CODE = {};
+    // 0048 movement planning: this page's PLANNED machine plans (list + by id)
+    var MACHINE_PLANS = [], PLANS_BY_MACHINE = {};
     var MACHINE_STATUSES = ["active", "maintenance", "idle", "decommissioned"];
 
     // parts entry = one row per part (name box + qty number box) — no format
@@ -426,6 +441,96 @@
              "</span></div>";
     }
 
+    // ---- movement planning (0048) ------------------------------------------
+    // Plans are INTENTIONS — they never move anything by themselves. Execute
+    // = "the lorry actually went": it moves the machine through the same
+    // validated path as the Move button and links the transfer_log row.
+    function planButtons(p) {
+      if (!MOVE.can) return "";
+      var label = (p.machine_code || p.full_name || "") + " → " + (p.to_project_code || "unassigned");
+      return ' <span class="move-ctl">' +
+             '<button type="button" data-action="mp-execute" data-plan-id="' + p.plan_id +
+             '" data-label="' + esc(label) + '">Execute now</button>' +
+             '<button type="button" data-action="mp-cancel" data-plan-id="' + p.plan_id +
+             '" data-label="' + esc(label) + '">Cancel</button></span>';
+    }
+
+    // this machine's planned moves inside the record card, plus "Plan move…"
+    function plannedMovesHtml(m) {
+      var plans = PLANS_BY_MACHINE[m.machine_id] || [];
+      var lines = plans.map(function (p) {
+        var days = daysSince(p.planned_date);
+        var late = days !== null && days > 0;
+        var dest = p.to_project_code
+          ? escHtml(p.to_project_code + (p.to_project_name ? " — " + p.to_project_name : ""))
+          : "unassigned (mob out)";
+        return '<div class="pc-line"><span class="' + (late ? "stale-warn" : "") + '">' +
+               dstr(p.planned_date) +
+               (late ? " — planned " + days + " day" + (days === 1 ? "" : "s") + " ago" : "") +
+               "</span> &rarr; " + dest +
+               (p.remarks ? ' <span class="muted">(' + escHtml(p.remarks) + ")</span>" : "") +
+               planButtons(p) + "</div>";
+      }).join("");
+      var control = MOVE.can
+        ? '<div class="pc-line"><button type="button" data-action="mp-plan" data-machine-id="' +
+          m.machine_id + '">Plan move…</button></div>' +
+          '<div id="mpf-' + m.machine_id + '"></div>'
+        : "";
+      if (!lines && !control) return "";
+      return (lines
+        ? '<div class="pc-line" style="margin-top:4px"><strong>Planned moves</strong></div>' + lines
+        : "") + control;
+    }
+
+    // mini form: date · destination (same picker filter as Move) · remarks
+    function planFormHtml(m) {
+      var opts = ['<option value="">destination…</option>'].concat(
+        MOVE.projects.filter(function (p) {
+          return (p.status === "active" || p.status === "completed") &&
+                 p.project_code.indexOf("TEST") !== 0;
+        }).map(function (p) {
+          return '<option value="' + p.project_id + '">' +
+                 escHtml(p.project_code + " — " + (p.project_name || "")) +
+                 (p.status === "completed" ? " (completed)" : "") + "</option>";
+        }),
+        ['<option value="unassign">— mob out / unassigned —</option>']).join("");
+      return '<div class="claim-form">' +
+        "<strong>Plan move — " + escHtml(m.machine_code) + "</strong>" +
+        '<label>when <input id="mp-date-' + m.machine_id + '" type="date" value="' + Dash.todayKL() + '"></label>' +
+        '<label>to <select id="mp-dest-' + m.machine_id + '">' + opts + "</select></label>" +
+        '<label>remarks <input id="mp-remarks-' + m.machine_id + '" size="16" placeholder="optional"></label>' +
+        '<button type="button" data-action="mp-save" data-machine-id="' + m.machine_id + '">Save plan</button>' +
+        '<button type="button" data-action="mp-form-cancel" data-machine-id="' + m.machine_id + '">Cancel</button>' +
+        "</div>";
+    }
+
+    // ================= UPCOMING MOVES (0048) =================
+    // every planned machine move, earliest first; overdue rows amber
+    function upcomingMovesZone() {
+      if (!MACHINE_PLANS.length) return "";
+      var overdue = 0;
+      var rows = MACHINE_PLANS.map(function (p) {
+        var days = daysSince(p.planned_date);
+        var late = days !== null && days > 0;
+        if (late) overdue++;
+        var dest = p.to_project_code
+          ? escHtml(p.to_project_code + (p.to_project_name ? " — " + p.to_project_name : ""))
+          : "unassigned (mob out)";
+        return '<div class="pc-line"><strong>' + escHtml(p.machine_code || "") + "</strong>" +
+               " &rarr; " + dest +
+               ' · <span class="' + (late ? "stale-warn" : "muted") + '">planned ' + dstr(p.planned_date) +
+               (late ? " — " + days + " day" + (days === 1 ? "" : "s") + " ago" : "") + "</span>" +
+               (p.remarks ? ' <span class="muted">(' + escHtml(p.remarks) + ")</span>" : "") +
+               (p.created_by_name ? ' <span class="muted">by ' + escHtml(p.created_by_name) + "</span>" : "") +
+               planButtons(p) + "</div>";
+      }).join("");
+      return '<details class="zone" open>' +
+             '<summary><span class="zone-name">Upcoming moves</span>' +
+             '<span class="zone-count">' + MACHINE_PLANS.length + " planned" +
+             (overdue ? " · " + overdue + " overdue" : "") + "</span></summary>" +
+             '<div class="chase-body">' + rows + "</div></details>";
+    }
+
     function machineCard(m, services, activity, issues) {
       var chips = [];
       if (m.registration_no) chips.push("Reg " + escHtml(m.registration_no));
@@ -445,7 +550,7 @@
           : "unassigned") + "</div>" +
         '<div class="pc-line">Mobilised: ' + dstr(m.mobilised_date) + "</div>" +
         '<div class="pc-line">Next move: ' + dstr(m.next_move_date) + "</div>" +
-        moveControl(m) + "</div>";
+        moveControl(m) + plannedMovesHtml(m) + "</div>";
 
       var spend = 0;
       (services || []).forEach(function (r) { spend += Number(r.cost_total) || 0; });
@@ -781,6 +886,65 @@
       });
     }
 
+    // movement-plan buttons live in the record cards AND the Upcoming moves
+    // panel — one delegated listener on <main> covers both. The database
+    // re-checks the caller on every call; buttons are convenience only.
+    function wireMovementPlans() {
+      document.getElementById("main").addEventListener("click", async function (ev) {
+        var btn = ev.target.closest('button[data-action^="mp-"]');
+        if (!btn) return;
+        var act = btn.getAttribute("data-action");
+
+        function fail(e) {
+          document.getElementById("error").innerHTML =
+            '<div class="banner banner-red">Could not save: ' + escHtml((e && e.message) || e) + "</div>";
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        }
+
+        if (act === "mp-plan" || act === "mp-form-cancel") {
+          var id = btn.getAttribute("data-machine-id");
+          var m = MACHINES_BY_ID[id];
+          var host = document.getElementById("mpf-" + id);
+          if (!m || !host) return;
+          host.innerHTML = (act === "mp-plan" && !host.innerHTML) ? planFormHtml(m) : "";
+          return;
+        }
+
+        if (act === "mp-save") {
+          var mid = btn.getAttribute("data-machine-id");
+          var date = document.getElementById("mp-date-" + mid).value;
+          var dest = document.getElementById("mp-dest-" + mid).value;
+          if (!date || !dest) return;               // destination must be chosen
+          try {
+            await Dash.addMovementPlan({
+              machineId: mid,
+              plannedDate: date,
+              toProjectId: dest === "unassign" ? null : dest,
+              remarks: document.getElementById("mp-remarks-" + mid).value || null
+            });
+            window.location.reload();
+          } catch (e) { fail(e); }
+          return;
+        }
+
+        var planId = btn.getAttribute("data-plan-id");
+        var label = btn.getAttribute("data-label") || "this move";
+        if (act === "mp-execute") {
+          if (!window.confirm("Execute now — " + label +
+              "? The machine moves immediately (this applies the real move).")) return;
+          try { await Dash.executeMovementPlan(planId); window.location.reload(); }
+          catch (e) { fail(e); }
+          return;
+        }
+        if (act === "mp-cancel") {
+          if (!window.confirm("Cancel the planned move " + label + "?")) return;
+          try { await Dash.cancelMovementPlan(planId); window.location.reload(); }
+          catch (e) { fail(e); }
+          return;
+        }
+      });
+    }
+
     window.onShellReady = async function () {
       try {
         var results = await Promise.all([
@@ -791,7 +955,8 @@
           Dash.getMyProfile(),             // move/ops controls: management/office only
           Dash.getProjectDirectory(),      // move pickers: ALL sites (pulse is BP-only)
           Dash.getMachineUtilization(),    // card usage: 30d status-day counts
-          Dash.getMachineProductivity()    // card usage: tagged boring metres/piles
+          Dash.getMachineProductivity(),   // card usage: tagged boring metres/piles
+          Dash.getMovementPlans()          // 0048: planned moves (never auto-applied)
         ]);
         var machines = results[0];
         var profile = results[4];
@@ -802,6 +967,14 @@
         results[6].forEach(function (u) { UTIL[u.machine_id] = u; });
         results[7].forEach(function (p) { PROD[p.machine_id] = p; });
         machines.forEach(function (m) { MACHINES_BY_ID[m.machine_id] = m; });
+
+        // 0048: this page only shows the machine plans still PLANNED —
+        // executed/cancelled ones are history (movement log has the applied)
+        results[8].forEach(function (p) {
+          if (p.subject_type !== "machine" || p.status !== "planned") return;
+          MACHINE_PLANS.push(p);
+          (PLANS_BY_MACHINE[p.machine_id] = PLANS_BY_MACHINE[p.machine_id] || []).push(p);
+        });
 
         // movement history (gated read — silently absent for other logins)
         if (MOVE.can) {
@@ -836,6 +1009,7 @@
 
         document.getElementById("fleet-strip").innerHTML = fleetStrip(machines);
         document.getElementById("attention").innerHTML = needsAttention(machines, openIssuesByMachine);
+        document.getElementById("upcoming").innerHTML = upcomingMovesZone();
         document.getElementById("sites").innerHTML =
           siteTables(machines, allIssuesByMachine, serviceByMachine, activityByMachine);
         document.getElementById("zone-tools").hidden = false;
@@ -844,6 +1018,7 @@
         wireMachineMoves();
         wireMachineOps();
         wireAddMachine();
+        wireMovementPlans();
       } catch (e) {
         document.getElementById("error").innerHTML =
           '<div class="banner banner-red">Could not load: ' + (e.message || e) + "</div>";

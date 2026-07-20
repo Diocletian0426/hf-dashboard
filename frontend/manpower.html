@@ -20,7 +20,10 @@
          Management/office additionally: ADD a worker (0040 add_staff, with
          duplicate-name/code guards), MOVE workers (0039 move_staff, logged
          to transfer_log), MARK LEFT + reactivate (0040 set_staff_active —
-         departure also locks the phone out of the punch app, intended).
+         departure also locks the phone out of the punch app, intended),
+         and PLAN moves (0048 movement_plans — an intention, when/where/why;
+         nothing moves until the office presses Execute in "Upcoming moves",
+         which applies it through the same validated move path and logs it).
          All of it database-enforced; the buttons are convenience. -->
     <div class="page-eyebrow">Manpower</div>
     <h1>Site manpower</h1>
@@ -96,7 +99,8 @@
     // page state: rows cached, open-groups + form visibility + grouping mode
     // and company filter all survive re-renders
     var MP = { rows: [], projects: [], canMove: false, open: {}, showAdd: false,
-               editing: null, groupMode: "site", companyFilter: "all", err: "", okMsg: "",
+               editing: null, planning: null, plans: [],   // 0048 movement planning
+               groupMode: "site", companyFilter: "all", err: "", okMsg: "",
                hkFilter: null,               // 'joined' | 'code' | 'contact' | null
                roleFilter: "all", siteFilter: "all", driftOnly: false,
                supervisorsByPid: {},         // project_id -> "Name, Name"
@@ -178,6 +182,8 @@
              siteOptions(true) + "</select>" +
              '<button type="button" data-action="move" data-staff="' + r.staff_id + '">Move</button>' +
              '<button type="button" data-action="edit" data-staff="' + r.staff_id + '">edit</button>' +
+             '<button type="button" data-action="plan" data-staff="' + r.staff_id +
+             '" data-name="' + esc(r.full_name) + '" title="record a FUTURE move — nothing changes until Execute">plan</button>' +
              '<button type="button" class="danger" data-action="mark-left" data-staff="' + r.staff_id +
              '" data-name="' + esc(r.full_name) + '">left</button>' +
              "</span></td>";
@@ -325,6 +331,52 @@
              "<tbody>" + rows + "</tbody></table></div></details>";
     }
 
+    // ================= UPCOMING MOVES (0048) =================
+    // every PLANNED staff move, earliest first. Overdue (date passed, not
+    // executed) shows amber — reality updates the roster, never the calendar.
+    function upcomingMovesBlock() {
+      if (!MP.plans.length) return "";
+      var isOpen = MP.open.__plans !== false;       // default open — it's a to-do list
+      var overdue = 0;
+      var rows = MP.plans.map(function (p) {
+        var days = daysAgo(p.planned_date);
+        var late = days !== null && days > 0;
+        if (late) overdue++;
+        var dest = p.to_project_code
+          ? escHtml(p.to_project_code + (p.to_project_name ? " — " + p.to_project_name : ""))
+          : "unassigned (mob out)";
+        var when = new Intl.DateTimeFormat("en-MY", { day: "2-digit", month: "short" })
+          .format(new Date(p.planned_date + "T00:00:00"));
+        var label = (p.full_name || "") + " → " + (p.to_project_code || "unassigned");
+        return '<tr data-search="' +
+               esc(((p.full_name || "") + " " + (p.to_project_code || "") + " " +
+                    (p.to_project_name || "")).toLowerCase()) + '">' +
+               "<td><strong>" + escHtml(p.full_name) + "</strong></td>" +
+               "<td>&rarr; " + dest +
+               (p.remarks ? ' <span class="muted">(' + escHtml(p.remarks) + ")</span>" : "") + "</td>" +
+               '<td class="' + (late ? "drift" : "muted-line") + '">' + when +
+               (late ? " — " + days + " day" + (days === 1 ? "" : "s") + " ago" : "") + "</td>" +
+               "<td>" + escHtml(p.created_by_name || "") + "</td>" +
+               (MP.canMove
+                 ? '<td><span class="move-ctl">' +
+                   '<button type="button" data-action="plan-execute" data-plan="' + p.plan_id +
+                   '" data-label="' + esc(label) + '">Execute now</button>' +
+                   '<button type="button" data-action="plan-cancel" data-plan="' + p.plan_id +
+                   '" data-label="' + esc(label) + '">Cancel</button></span></td>'
+                 : "") +
+               "</tr>";
+      }).join("");
+      return '<details class="zone" data-group="__plans"' + (isOpen ? " open" : "") + ">" +
+             '<summary><span class="zone-name">Upcoming moves</span>' +
+             '<span class="zone-count">' + MP.plans.length + " planned" +
+             (overdue ? " · " + overdue + " overdue" : "") +
+             " · plans never move anyone — Execute does</span></summary>" +
+             '<div class="table-wrap"><table>' +
+             "<thead><tr><th>Who</th><th>Move</th><th>Planned</th><th>By</th>" +
+             (MP.canMove ? "<th></th>" : "") + "</tr></thead>" +
+             "<tbody>" + rows + "</tbody></table></div></details>";
+    }
+
     function addWorkerForm() {
       if (!MP.canMove) return "";
       if (!MP.showAdd) {
@@ -395,6 +447,23 @@
         "</div>";
     }
 
+    // PLAN a move (0048): records an INTENTION — when / where / why. Nothing
+    // moves until the office presses Execute in "Upcoming moves" (plans never
+    // auto-apply on their date). Destination "mob out" = leave site, unassigned.
+    function planWorkerForm() {
+      return '<div class="claim-form">' +
+        "<strong>Plan move — " + escHtml(MP.planning.name) + "</strong>" +
+        '<label>when <input type="date" id="pw-date" value="' + Dash.todayKL() + '"></label>' +
+        '<label>to <select id="pw-site"><option value="">destination…</option>' +
+          siteOptions(false) +
+          '<option value="unassign">— mob out / unassigned —</option></select></label>' +
+        '<label>remarks <input type="text" id="pw-remarks" size="18" placeholder="optional"></label>' +
+        '<button type="button" data-action="plan-save">Save plan</button>' +
+        '<button type="button" data-action="plan-form-cancel">Cancel</button>' +
+        '<span class="muted-line">nothing moves now — Execute it in Upcoming moves when it really happens</span>' +
+        "</div>";
+    }
+
     function render() {
       var act = activeRows();
       var unassigned = act.filter(function (r) { return !r.current_project_id; });
@@ -413,7 +482,9 @@
       var shown = MP.companyFilter === "all" ? act
         : act.filter(function (r) { return r.company === MP.companyFilter; });
 
-      var html = MP.editing ? editWorkerForm() : addWorkerForm();
+      var html = MP.editing ? editWorkerForm()
+               : MP.planning ? planWorkerForm()
+               : addWorkerForm();
       if (MP.groupMode === "role") {
         var byRole = {};
         shown.forEach(function (r) {
@@ -440,6 +511,7 @@
         }).join("");
         if (shownUnassigned.length) html += groupBlock("__unassigned", "Unassigned", shownUnassigned, "site");
       }
+      html += upcomingMovesBlock();     // 0048: the office's move to-do list
       html += recentlyLeftBlock();
       document.getElementById("groups").innerHTML =
         html || '<div class="muted-line">No active workers found.</div>';
@@ -521,8 +593,17 @@
       } catch (e) { el.innerHTML = ""; }            // DB said no — panel stays absent
     }
 
+    // keep only the PLANNED staff plans (executed/cancelled = history)
+    function setPlans(all) {
+      MP.plans = (all || []).filter(function (p) {
+        return p.subject_type === "staff" && p.status === "planned";
+      });
+    }
+
     async function refresh() {
-      MP.rows = await Dash.getManpowerBySite();
+      var res = await Promise.all([Dash.getManpowerBySite(), Dash.getMovementPlans()]);
+      MP.rows = res[0];
+      setPlans(res[1]);
       render();
       renderMoveLog();
     }
@@ -613,9 +694,11 @@
           Dash.getManpowerBySite(),
           Dash.getProjectDirectory(),
           Dash.getProjectSupervisors(),   // site headers: SV name
-          Dash.getMachines()              // site headers: plant + crew-vs-plant hint
+          Dash.getMachines(),             // site headers: plant + crew-vs-plant hint
+          Dash.getMovementPlans()         // 0048: planned moves (never auto-applied)
         ]);
         MP.rows = res[0]; MP.projects = res[1];
+        setPlans(res[4]);
         MP.dirByPid = {};
         MP.projects.forEach(function (p) { MP.dirByPid[p.project_id] = p; });
         res[2].forEach(function (s) { MP.supervisorsByPid[s.project_id] = s.supervisors; });
@@ -691,6 +774,62 @@
           }
           if (act === "edit-cancel") { MP.editing = null; rememberOpenGroups(); render(); return; }
           if (act === "edit-save")   { rememberOpenGroups(); await actEditSave(staffId); return; }
+
+          // 0048 movement planning: plan (top form) / execute / cancel.
+          // The database re-checks the caller on every call.
+          if (act === "plan") {
+            rememberOpenGroups();
+            MP.planning = { staffId: staffId, name: name || "" };
+            MP.showAdd = false; MP.editing = null; MP.okMsg = ""; MP.err = "";
+            render();
+            window.scrollTo({ top: 0, behavior: "smooth" });   // the form opens at the top
+            return;
+          }
+          if (act === "plan-form-cancel") { MP.planning = null; rememberOpenGroups(); render(); return; }
+          if (act === "plan-save") {
+            var pdate = document.getElementById("pw-date").value;
+            var psite = document.getElementById("pw-site").value;
+            if (!pdate || !psite) return;           // destination must be chosen
+            rememberOpenGroups();
+            try {
+              await Dash.addMovementPlan({
+                staffId: MP.planning.staffId,
+                plannedDate: pdate,
+                toProjectId: psite === "unassign" ? null : psite,
+                remarks: document.getElementById("pw-remarks").value || null
+              });
+              var ptgt = MP.projects.find(function (p) { return p.project_id === psite; });
+              MP.err = "";
+              MP.okMsg = "Move planned: " + MP.planning.name + " → " +
+                (ptgt ? ptgt.project_code : "unassigned") + " on " + pdate +
+                " — execute it in Upcoming moves when it happens";
+              MP.planning = null;
+            } catch (e) { MP.err = (e && e.message) || String(e); MP.okMsg = ""; }
+            await refresh();
+            return;
+          }
+          if (act === "plan-execute") {
+            if (!window.confirm("Execute now — " + (btn.getAttribute("data-label") || "this move") +
+                                "? The worker moves immediately (this applies the real move).")) return;
+            rememberOpenGroups();
+            try {
+              await Dash.executeMovementPlan(btn.getAttribute("data-plan"));
+              MP.err = ""; MP.okMsg = "Move executed — roster updated";
+            } catch (e) { MP.err = (e && e.message) || String(e); MP.okMsg = ""; }
+            await refresh();
+            return;
+          }
+          if (act === "plan-cancel") {
+            if (!window.confirm("Cancel the planned move " +
+                                (btn.getAttribute("data-label") || "") + "?")) return;
+            rememberOpenGroups();
+            try {
+              await Dash.cancelMovementPlan(btn.getAttribute("data-plan"));
+              MP.err = ""; MP.okMsg = "Plan cancelled";
+            } catch (e) { MP.err = (e && e.message) || String(e); MP.okMsg = ""; }
+            await refresh();
+            return;
+          }
 
           if (act === "move") {
             var sel = document.querySelector('select[data-staff="' + staffId + '"]');
