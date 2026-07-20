@@ -42,6 +42,14 @@
                                 office hasn't pressed Execute yet (0048 —
                                 replaces the old dormant next_move_date rule;
                                 the legacy column itself stays, bot contract)
+           5) State vs history — drift watchdog (0050): the machine's current
+                                site (or mobilised date) disagrees with its
+                                LATEST movement-history row. History edits
+                                never touch state BY DESIGN, so when the two
+                                records disagree, one of them is lying — this
+                                makes it visible instead of silent. Only
+                                office/management see it (history is a gated
+                                read); machines with no history are skipped.
          Chips will jump to the machine's row once the by-site tables
          (element 3) exist — until then clicking is a harmless no-op. -->
     <div id="attention"></div>
@@ -205,13 +213,37 @@
           " planned " + p.planned_date + " — " + days + " day" + (days === 1 ? "" : "s") + " ago");
       });
 
+      // 5) drift watchdog (0050) — current state vs the LATEST history row.
+      //    History edits never touch state by design; this rule makes any
+      //    disagreement between the two records visible instead of silent.
+      //    MOVELOG is office-only (gated read) and newest-first, so [0] is
+      //    the machine's latest move; machines with no history are skipped.
+      var stateDrift = [];
+      machines.forEach(function (m) {
+        var t = (MOVELOG[m.machine_code] || [])[0];
+        if (!t) return;
+        var cur = m.current_site || "unassigned";
+        if (cur !== t.to_project) {
+          stateDrift.push(attnChip(m.machine_code,
+            m.machine_code + " · at " + cur + ", history says " + t.to_project,
+            "Current site and the latest history row disagree — a raw update bypassed the move functions, or the history was edited past the truth. Fix whichever record is wrong (Move for the roster, edit/delete for the history)."));
+        } else if (m.current_site && m.mobilised_date && t.effective_date &&
+                   m.mobilised_date !== t.effective_date) {
+          stateDrift.push(attnChip(m.machine_code,
+            m.machine_code + " · mobilised " + m.mobilised_date + ", history " + t.effective_date,
+            "Same site, different dates — if you corrected one date, correct the other too (Edit machine → mobilised, or edit the history row's date)."));
+        }
+      });
+
       var sections = [];
       if (broken.length)     sections.push(attnRow("Breakdown", broken));
       if (withIssues.length) sections.push(attnRow("Open issues", withIssues));
       if (serviceDue.length) sections.push(attnRow("Service overdue", serviceDue));
       if (moveDue.length)    sections.push(attnRow("Move overdue", moveDue));
+      if (stateDrift.length) sections.push(attnRow("State vs history", stateDrift));
 
-      var total = broken.length + withIssues.length + serviceDue.length + moveDue.length;
+      var total = broken.length + withIssues.length + serviceDue.length + moveDue.length +
+                  stateDrift.length;
       var body = total === 0
         ? '<div class="muted-line">&#10003; Nothing needs attention.</div>'
         : sections.join("");
@@ -1112,10 +1144,13 @@
           (PLANS_BY_MACHINE[p.machine_id] = PLANS_BY_MACHINE[p.machine_id] || []).push(p);
         });
 
-        // movement history (gated read — silently absent for other logins)
+        // movement history (gated read — silently absent for other logins).
+        // 500 = the feed's cap: the drift watchdog compares each machine
+        // against its LATEST row, so the fetch must reach every machine's
+        // newest move even as backfill grows the log.
         if (MOVE.can) {
           try {
-            (await Dash.getTransferLog(100)).forEach(function (t) {
+            (await Dash.getTransferLog(500)).forEach(function (t) {
               if (t.subject_type !== "machine") return;
               (MOVELOG[t.subject_name] = MOVELOG[t.subject_name] || []).push(t);
             });
