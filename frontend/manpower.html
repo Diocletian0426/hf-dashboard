@@ -20,7 +20,10 @@
          Management/office additionally: ADD a worker (0040 add_staff, with
          duplicate-name/code guards), MOVE workers (0039 move_staff, logged
          to transfer_log), MARK LEFT + reactivate (0040 set_staff_active —
-         departure also locks the phone out of the punch app, intended).
+         departure also locks the phone out of the punch app, intended),
+         and PLAN moves (0048 movement_plans — an intention, when/where/why;
+         nothing moves until the office presses Execute in "Upcoming moves",
+         which applies it through the same validated move path and logs it).
          All of it database-enforced; the buttons are convenience. -->
     <div class="page-eyebrow">Manpower</div>
     <h1>Site manpower</h1>
@@ -96,7 +99,10 @@
     // page state: rows cached, open-groups + form visibility + grouping mode
     // and company filter all survive re-renders
     var MP = { rows: [], projects: [], canMove: false, open: {}, showAdd: false,
-               editing: null, groupMode: "site", companyFilter: "all", err: "", okMsg: "",
+               editing: null, planning: null, plans: [],   // 0048 movement planning
+               cardOpen: null, cardCache: {},              // worker record card (0051)
+               translog: [], histByStaff: {},              // transfer feed, keyed by staff_id
+               groupMode: "site", companyFilter: "all", err: "", okMsg: "",
                hkFilter: null,               // 'joined' | 'code' | 'contact' | null
                roleFilter: "all", siteFilter: "all", driftOnly: false,
                supervisorsByPid: {},         // project_id -> "Name, Name"
@@ -176,8 +182,14 @@
       return '<td><span class="move-ctl">' +
              '<select data-staff="' + r.staff_id + '"><option value="">move to…</option>' +
              siteOptions(true) + "</select>" +
+             '<input type="text" data-staff-remarks="' + r.staff_id + '" size="8" placeholder="remarks"' +
+             ' title="optional — lands in the move log (say &quot;data correction&quot; when fixing old records)">' +
+             '<input type="date" data-staff-date="' + r.staff_id + '" value="' + Dash.todayKL() +
+             '" title="when the move really happened — backdate for catch-up moves">' +
              '<button type="button" data-action="move" data-staff="' + r.staff_id + '">Move</button>' +
              '<button type="button" data-action="edit" data-staff="' + r.staff_id + '">edit</button>' +
+             '<button type="button" data-action="plan" data-staff="' + r.staff_id +
+             '" data-name="' + esc(r.full_name) + '" title="record a FUTURE move — nothing changes until Execute">plan</button>' +
              '<button type="button" class="danger" data-action="mark-left" data-staff="' + r.staff_id +
              '" data-name="' + esc(r.full_name) + '">left</button>' +
              "</span></td>";
@@ -247,15 +259,20 @@
       var byRole = mode === "role";
       var isOpen = MP.open[key] !== false;   // default open
       var rows = list.map(function (r) {
-        return '<tr data-search="' + rowSearchAttr(r) + '" data-hk="' + rowHkAttr(r) +
+        var tr = '<tr data-staffrow="' + r.staff_id + '" data-search="' + rowSearchAttr(r) +
+               '" data-hk="' + rowHkAttr(r) +
                '" data-role="' + esc(r.role || "") + '" data-site="' + esc(r.project_code || "__none") +
-               '" data-drift="' + (isDrift(r) ? "1" : "") + '">' +
+               '" data-drift="' + (isDrift(r) ? "1" : "") + '"' +
+               (MP.canMove ? ' style="cursor:pointer" title="Click for the worker record"' : "") + ">" +
                "<td>" + (r.employee_code ? escHtml(r.employee_code) : "—") + "</td>" +
                "<td><strong>" + escHtml(r.full_name) + "</strong></td>" +
                "<td>" + (byRole ? siteLabel(r) : escHtml(String(r.role || "").replace(/_/g, " "))) + "</td>" +
                "<td>" + escHtml(r.company) + "</td>" +
                lastReportedCell(r) +
                actionCell(r) + "</tr>";
+        // record card sits right under its worker row (0051, office only)
+        if (MP.canMove && MP.cardOpen === r.staff_id) tr += workerCard(r);
+        return tr;
       }).join("");
 
       // site-mode header extras: work-line scope tag (BP/SP/BP+SP, derived
@@ -322,6 +339,52 @@
              '<span class="zone-count">' + list.length + " shown · reactivate = undo a mistake</span></summary>" +
              '<div class="table-wrap"><table>' +
              "<thead><tr><th>Code</th><th>Name</th><th>Role</th><th>Company</th><th></th></tr></thead>" +
+             "<tbody>" + rows + "</tbody></table></div></details>";
+    }
+
+    // ================= UPCOMING MOVES (0048) =================
+    // every PLANNED staff move, earliest first. Overdue (date passed, not
+    // executed) shows amber — reality updates the roster, never the calendar.
+    function upcomingMovesBlock() {
+      if (!MP.plans.length) return "";
+      var isOpen = MP.open.__plans !== false;       // default open — it's a to-do list
+      var overdue = 0;
+      var rows = MP.plans.map(function (p) {
+        var days = daysAgo(p.planned_date);
+        var late = days !== null && days > 0;
+        if (late) overdue++;
+        var dest = p.to_project_code
+          ? escHtml(p.to_project_code + (p.to_project_name ? " — " + p.to_project_name : ""))
+          : "unassigned (mob out)";
+        var when = new Intl.DateTimeFormat("en-MY", { day: "2-digit", month: "short" })
+          .format(new Date(p.planned_date + "T00:00:00"));
+        var label = (p.full_name || "") + " → " + (p.to_project_code || "unassigned");
+        return '<tr data-search="' +
+               esc(((p.full_name || "") + " " + (p.to_project_code || "") + " " +
+                    (p.to_project_name || "")).toLowerCase()) + '">' +
+               "<td><strong>" + escHtml(p.full_name) + "</strong></td>" +
+               "<td>&rarr; " + dest +
+               (p.remarks ? ' <span class="muted">(' + escHtml(p.remarks) + ")</span>" : "") + "</td>" +
+               '<td class="' + (late ? "drift" : "muted-line") + '">' + when +
+               (late ? " — " + days + " day" + (days === 1 ? "" : "s") + " ago" : "") + "</td>" +
+               "<td>" + escHtml(p.created_by_name || "") + "</td>" +
+               (MP.canMove
+                 ? '<td><span class="move-ctl">' +
+                   '<button type="button" data-action="plan-execute" data-plan="' + p.plan_id +
+                   '" data-label="' + esc(label) + '">Execute now</button>' +
+                   '<button type="button" data-action="plan-cancel" data-plan="' + p.plan_id +
+                   '" data-label="' + esc(label) + '">Cancel</button></span></td>'
+                 : "") +
+               "</tr>";
+      }).join("");
+      return '<details class="zone" data-group="__plans"' + (isOpen ? " open" : "") + ">" +
+             '<summary><span class="zone-name">Upcoming moves</span>' +
+             '<span class="zone-count">' + MP.plans.length + " planned" +
+             (overdue ? " · " + overdue + " overdue" : "") +
+             " · plans never move anyone — Execute does</span></summary>" +
+             '<div class="table-wrap"><table>' +
+             "<thead><tr><th>Who</th><th>Move</th><th>Planned</th><th>By</th>" +
+             (MP.canMove ? "<th></th>" : "") + "</tr></thead>" +
              "<tbody>" + rows + "</tbody></table></div></details>";
     }
 
@@ -395,6 +458,116 @@
         "</div>";
     }
 
+    // PLAN a move (0048): records an INTENTION — when / where / why. Nothing
+    // moves until the office presses Execute in "Upcoming moves" (plans never
+    // auto-apply on their date). Destination "mob out" = leave site, unassigned.
+    function planWorkerForm() {
+      return '<div class="claim-form">' +
+        "<strong>Plan move — " + escHtml(MP.planning.name) + "</strong>" +
+        '<label>when <input type="date" id="pw-date" value="' + Dash.todayKL() + '"></label>' +
+        '<label>to <select id="pw-site"><option value="">destination…</option>' +
+          siteOptions(false) +
+          '<option value="unassign">— mob out / unassigned —</option></select></label>' +
+        '<label>remarks <input type="text" id="pw-remarks" size="18" placeholder="optional"></label>' +
+        '<button type="button" data-action="plan-save">Save plan</button>' +
+        '<button type="button" data-action="plan-form-cancel">Cancel</button>' +
+        '<span class="muted-line">nothing moves now — Execute it in Upcoming moves when it really happens</span>' +
+        "</div>";
+    }
+
+    // ================= WORKER RECORD CARD (0051) =================
+    // Office/management only: identity facts come from the gated
+    // get_staff_detail read (fetched once per worker, cached) and history
+    // from the gated feed — other logins never get a card (their row already
+    // shows everything they may see). History edits here follow the house
+    // rule: they fix the RECORD only; the roster changes via Move.
+    function whEditForm(sid, transferId, date, remarks) {
+      return '<div class="claim-form">' +
+        "<strong>Fix history row</strong>" +
+        '<label>happened on <input type="date" id="wh-date-' + sid + '" value="' + esc(date) + '"></label>' +
+        '<label>remarks <input type="text" id="wh-remarks-' + sid + '" size="16" value="' + esc(remarks) + '"></label>' +
+        '<button type="button" data-action="wh-edit-save" data-transfer="' + transferId +
+        '" data-staffcard="' + sid + '">Save</button>' +
+        '<button type="button" data-action="wh-form-cancel" data-staffcard="' + sid + '">Cancel</button>' +
+        '<span class="muted-line">wrong sites? delete the row and add a past move (Recent moves panel)</span>' +
+        "</div>";
+    }
+
+    function workerCard(r) {
+      var d = MP.cardCache[r.staff_id] || {};
+      var chips = [];
+      if (r.employee_code) chips.push("Code " + escHtml(r.employee_code));
+      if (d.date_joined) chips.push("Joined " + mlDate(d.date_joined));
+      if (d.contact_number) chips.push("Contact " + escHtml(d.contact_number));
+      if (d.country_origin) chips.push("Origin " + escHtml(d.country_origin));
+      if (d.whatsapp_name) chips.push("WhatsApp " + escHtml(d.whatsapp_name));
+
+      var head =
+        '<div class="pc-head"><strong>' + escHtml(r.full_name) + "</strong> " +
+        escHtml(String(r.role || "").replace(/_/g, " ")) + " · " + escHtml(r.company) +
+        (d.designation ? ' <span class="badge badge-gray">' + escHtml(d.designation) + "</span>" : "") +
+        (chips.length ? ' <span class="pc-chips">' + chips.join(" · ") + "</span>" : "") + "</div>";
+
+      var where =
+        "<div><h3>Whereabouts</h3>" +
+        '<div class="pc-line">Site: ' + siteLabel(r) + "</div>" +
+        (r.last_reported_date
+          ? '<div class="pc-line">Last reported: ' + mlDate(r.last_reported_date) + " @ " +
+            escHtml(r.last_reported_project_code || "?") +
+            (isDrift(r) ? ' <span class="badge badge-anomaly">differs from roster</span>' : "") + "</div>"
+          : '<div class="pc-line muted-line">No bot attendance recorded (the bot skips sites and days).</div>') +
+        "</div>";
+
+      var plans = MP.plans.filter(function (p) { return p.staff_id === r.staff_id; });
+      var plansHtml = plans.map(function (p) {
+        var days = daysAgo(p.planned_date);
+        var late = days !== null && days > 0;
+        var dest = p.to_project_code
+          ? escHtml(p.to_project_code + (p.to_project_name ? " — " + p.to_project_name : ""))
+          : "unassigned (mob out)";
+        var label = (p.full_name || "") + " → " + (p.to_project_code || "unassigned");
+        return '<div class="pc-line"><span class="' + (late ? "stale-warn" : "") + '">' +
+               mlDate(p.planned_date) +
+               (late ? " — planned " + days + " day" + (days === 1 ? "" : "s") + " ago" : "") +
+               "</span> &rarr; " + dest +
+               (p.remarks ? ' <span class="muted">(' + escHtml(p.remarks) + ")</span>" : "") +
+               ' <span class="move-ctl">' +
+               '<button type="button" data-action="plan-execute" data-plan="' + p.plan_id +
+               '" data-label="' + esc(label) + '">Execute now</button>' +
+               '<button type="button" data-action="plan-cancel" data-plan="' + p.plan_id +
+               '" data-label="' + esc(label) + '">Cancel</button></span></div>';
+      }).join("");
+      var plansBlock = "<div><h3>Planned moves</h3>" +
+        (plansHtml || '<div class="muted-line">None — use the row&#39;s plan button.</div>') + "</div>";
+
+      var hist = MP.histByStaff[r.staff_id] || [];
+      var histHtml = hist.slice(0, 8).map(function (t) {
+        return '<div class="pc-line"><strong title="entered ' + esc(Dash.klDateTime(t.moved_at)) + '">' +
+               mlDate(t.effective_date) + "</strong> " +
+               escHtml(t.from_project) + " &rarr; " + escHtml(t.to_project) +
+               (t.source === "backfill" ? ' <span class="badge badge-gray">backfill</span>' : "") +
+               (t.remarks ? ' <span class="muted">(' + escHtml(t.remarks) + ")</span>" : "") +
+               ' <span class="muted">by ' + escHtml(t.moved_by_name || t.source) + "</span>" +
+               ' <span class="move-ctl">' +
+               '<button type="button" data-action="wh-edit" data-transfer="' + t.transfer_id +
+               '" data-staffcard="' + r.staff_id + '" data-date="' + esc(t.effective_date) +
+               '" data-remarks="' + esc(t.remarks || "") + '">edit</button>' +
+               '<button type="button" class="danger" data-action="wh-del" data-transfer="' +
+               t.transfer_id + '">delete</button></span>' +
+               "</div>";
+      }).join("");
+      if (hist.length > 8) {
+        histHtml += '<div class="pc-meta">+ ' + (hist.length - 8) + " older move(s) recorded</div>";
+      }
+
+      return '<tr class="pile-card-row"><td colspan="6"><div class="pile-card">' + head +
+             '<div class="pc-grid"><div><h3>Movement history</h3>' +
+             (histHtml || '<div class="muted-line">No moves recorded yet — backfill via the Recent moves panel.</div>') +
+             '<div id="wcf-' + r.staff_id + '"></div></div>' +
+             '<div class="pc-side">' + where + plansBlock + "</div></div>" +
+             "</div></td></tr>";
+    }
+
     function render() {
       var act = activeRows();
       var unassigned = act.filter(function (r) { return !r.current_project_id; });
@@ -413,7 +586,9 @@
       var shown = MP.companyFilter === "all" ? act
         : act.filter(function (r) { return r.company === MP.companyFilter; });
 
-      var html = MP.editing ? editWorkerForm() : addWorkerForm();
+      var html = MP.editing ? editWorkerForm()
+               : MP.planning ? planWorkerForm()
+               : addWorkerForm();
       if (MP.groupMode === "role") {
         var byRole = {};
         shown.forEach(function (r) {
@@ -440,6 +615,7 @@
         }).join("");
         if (shownUnassigned.length) html += groupBlock("__unassigned", "Unassigned", shownUnassigned, "site");
       }
+      html += upcomingMovesBlock();     // 0048: the office's move to-do list
       html += recentlyLeftBlock();
       document.getElementById("groups").innerHTML =
         html || '<div class="muted-line">No active workers found.</div>';
@@ -498,31 +674,109 @@
           : "") + "</div>";
     }
 
-    async function renderMoveLog() {
+    // Recent moves = transfer_log, maintainable since 0050: the When column is
+    // the EFFECTIVE date (when it really happened; entry time in the tooltip),
+    // rows are editable/deletable, and old worker history can be backfilled
+    // ("Add past move…" — machines backfill from their own record card).
+    function mlDate(d) {
+      if (!d) return "—";
+      return new Intl.DateTimeFormat("en-MY", { day: "2-digit", month: "short", year: "numeric" })
+        .format(new Date(d + "T00:00:00"));
+    }
+
+    function mlEditForm(transferId, date, remarks) {
+      return '<div class="claim-form">' +
+        "<strong>Fix history row</strong>" +
+        '<label>happened on <input type="date" id="mle-date" value="' + esc(date) + '"></label>' +
+        '<label>remarks <input type="text" id="mle-remarks" size="16" value="' + esc(remarks) + '"></label>' +
+        '<button type="button" data-action="th-edit-save" data-transfer="' + transferId + '">Save</button>' +
+        '<button type="button" data-action="th-form-cancel">Cancel</button>' +
+        '<span class="muted-line">wrong sites? delete the row and add a past move instead</span>' +
+        "</div>";
+    }
+
+    function mlAddForm() {
+      var workers = MP.rows.slice().sort(function (a, b) {
+        return String(a.full_name).localeCompare(String(b.full_name));
+      }).map(function (r) {
+        return '<option value="' + r.staff_id + '">' + escHtml(r.full_name) +
+               (r.is_active ? "" : " (left)") + "</option>";
+      }).join("");
+      return '<div class="claim-form">' +
+        "<strong>Add past move (worker)</strong>" +
+        '<label>worker <select id="mla-worker"><option value="">choose…</option>' + workers + "</select></label>" +
+        '<label>from <select id="mla-from"><option value="">— unassigned —</option>' +
+          siteOptions(false) + "</select></label>" +
+        '<label>to <select id="mla-to"><option value="">— unassigned —</option>' +
+          siteOptions(false) + "</select></label>" +
+        '<label>happened on <input type="date" id="mla-date"></label>' +
+        '<label>remarks <input type="text" id="mla-remarks" size="14" placeholder="optional"></label>' +
+        '<button type="button" data-action="th-add-save">Add to history</button>' +
+        '<button type="button" data-action="th-form-cancel">Cancel</button>' +
+        '<span class="muted-line">history only — the current site is NOT changed (use Move for that)</span>' +
+        "</div>";
+    }
+
+    // one gated fetch feeds BOTH the Recent moves panel and the worker record
+    // cards; keyed by staff_id (0051 feed) because full names can duplicate
+    async function loadTranslog() {
+      if (!MP.canMove) return;
+      try { MP.translog = await Dash.getTransferLog(500); }
+      catch (e) { MP.translog = []; }               // DB said no — panels stay absent
+      MP.histByStaff = {};
+      MP.translog.forEach(function (t) {
+        if (t.subject_type !== "staff" || !t.staff_id) return;
+        (MP.histByStaff[t.staff_id] = MP.histByStaff[t.staff_id] || []).push(t);
+      });
+    }
+
+    function renderMoveLog() {
       if (!MP.canMove) return;                      // office-only history
       var el = document.getElementById("movelog");
       try {
-        var log = await Dash.getTransferLog(50);
-        if (!log.length) { el.innerHTML = ""; return; }
+        var log = (MP.translog || []).slice(0, 50); // panel shows the newest 50
         var rows = log.map(function (t) {
-          return "<tr><td>" + Dash.klDateTime(t.moved_at) + "</td>" +
+          return '<tr><td title="entered ' + esc(Dash.klDateTime(t.moved_at)) + '">' +
+                 mlDate(t.effective_date) + "</td>" +
                  "<td>" + escHtml(t.subject_type) + "</td>" +
                  "<td><strong>" + escHtml(t.subject_name) + "</strong></td>" +
                  "<td>" + escHtml(t.from_project) + " &rarr; " + escHtml(t.to_project) +
+                 (t.source === "backfill" ? ' <span class="badge badge-gray">backfill</span>' : "") +
                  (t.remarks ? ' <span class="muted">(' + escHtml(t.remarks) + ")</span>" : "") + "</td>" +
-                 "<td>" + escHtml(t.moved_by_name || t.source) + "</td></tr>";
+                 "<td>" + escHtml(t.moved_by_name || t.source) + "</td>" +
+                 '<td><span class="move-ctl">' +
+                 '<button type="button" data-action="th-edit" data-transfer="' + t.transfer_id +
+                 '" data-date="' + esc(t.effective_date) + '" data-remarks="' + esc(t.remarks || "") + '">edit</button>' +
+                 '<button type="button" class="danger" data-action="th-del" data-transfer="' +
+                 t.transfer_id + '">delete</button>' +
+                 "</span></td></tr>";
         }).join("");
         el.innerHTML =
           '<details class="zone"><summary><span class="zone-name">Recent moves</span>' +
-          '<span class="zone-count">' + log.length + " logged</span></summary>" +
+          '<span class="zone-count">' + log.length + " logged · dates = when it happened</span></summary>" +
+          '<div class="claim-actions" style="padding:6px 0 0">' +
+          '<button type="button" data-action="th-add">Add past move…</button></div>' +
+          '<div id="movelog-form"></div>' +
           '<div class="table-wrap"><table>' +
-          "<thead><tr><th>When</th><th>Type</th><th>Who/what</th><th>Move</th><th>By</th></tr></thead>" +
-          "<tbody>" + rows + "</tbody></table></div></details>";
+          "<thead><tr><th>When</th><th>Type</th><th>Who/what</th><th>Move</th><th>By</th><th></th></tr></thead>" +
+          "<tbody>" + (rows ||
+            '<tr><td colspan="6" class="muted-line">No moves logged yet — backfill old history with the button above.</td></tr>') +
+          "</tbody></table></div></details>";
       } catch (e) { el.innerHTML = ""; }            // DB said no — panel stays absent
     }
 
+    // keep only the PLANNED staff plans (executed/cancelled = history)
+    function setPlans(all) {
+      MP.plans = (all || []).filter(function (p) {
+        return p.subject_type === "staff" && p.status === "planned";
+      });
+    }
+
     async function refresh() {
-      MP.rows = await Dash.getManpowerBySite();
+      var res = await Promise.all([Dash.getManpowerBySite(), Dash.getMovementPlans(),
+                                   loadTranslog()]);
+      MP.rows = res[0];
+      setPlans(res[1]);
       render();
       renderMoveLog();
     }
@@ -613,9 +867,12 @@
           Dash.getManpowerBySite(),
           Dash.getProjectDirectory(),
           Dash.getProjectSupervisors(),   // site headers: SV name
-          Dash.getMachines()              // site headers: plant + crew-vs-plant hint
+          Dash.getMachines(),             // site headers: plant + crew-vs-plant hint
+          Dash.getMovementPlans(),        // 0048: planned moves (never auto-applied)
+          loadTranslog()                  // 0051: history feed (panel + worker cards)
         ]);
         MP.rows = res[0]; MP.projects = res[1];
+        setPlans(res[4]);
         MP.dirByPid = {};
         MP.projects.forEach(function (p) { MP.dirByPid[p.project_id] = p; });
         res[2].forEach(function (s) { MP.supervisorsByPid[s.project_id] = s.supervisors; });
@@ -628,6 +885,67 @@
         renderMoveLog();
 
         document.getElementById("mp-search").addEventListener("input", applyFilter);
+
+        // history-maintenance buttons inside the Recent moves panel (0050) —
+        // delegated on the static #movelog container, survives re-renders
+        document.getElementById("movelog").addEventListener("click", async function (ev) {
+          var btn = ev.target.closest('button[data-action^="th-"]');
+          if (!btn) return;
+          var act = btn.getAttribute("data-action");
+          var hostEl = document.getElementById("movelog-form");
+
+          if (act === "th-add") {
+            if (hostEl) hostEl.innerHTML = hostEl.innerHTML ? "" : mlAddForm();
+            return;
+          }
+          if (act === "th-edit") {
+            if (hostEl) hostEl.innerHTML = mlEditForm(btn.getAttribute("data-transfer"),
+              btn.getAttribute("data-date"), btn.getAttribute("data-remarks"));
+            return;
+          }
+          if (act === "th-form-cancel") { if (hostEl) hostEl.innerHTML = ""; return; }
+
+          if (act === "th-edit-save") {
+            rememberOpenGroups();
+            try {
+              await Dash.updateTransfer(btn.getAttribute("data-transfer"), {
+                effectiveDate: document.getElementById("mle-date").value || null,
+                remarks: document.getElementById("mle-remarks").value || null
+              });
+              MP.err = ""; MP.okMsg = "History row updated";
+            } catch (e) { MP.err = (e && e.message) || String(e); MP.okMsg = ""; }
+            await loadTranslog(); render(); renderMoveLog();
+            return;
+          }
+          if (act === "th-del") {
+            if (!window.confirm("Delete this history row? This cannot be undone.")) return;
+            rememberOpenGroups();
+            try {
+              await Dash.deleteTransfer(btn.getAttribute("data-transfer"));
+              MP.err = ""; MP.okMsg = "History row deleted";
+            } catch (e) { MP.err = (e && e.message) || String(e); MP.okMsg = ""; }
+            await loadTranslog(); render(); renderMoveLog();
+            return;
+          }
+          if (act === "th-add-save") {
+            var w = document.getElementById("mla-worker").value;
+            var d = document.getElementById("mla-date").value;
+            if (!w || !d) return;                   // worker + date are required
+            rememberOpenGroups();
+            try {
+              await Dash.addPastMove({
+                staffId: w,
+                fromProjectId: document.getElementById("mla-from").value || null,
+                toProjectId: document.getElementById("mla-to").value || null,
+                effectiveDate: d,
+                remarks: document.getElementById("mla-remarks").value || null
+              });
+              MP.err = ""; MP.okMsg = "Past move added to history (current site untouched)";
+            } catch (e) { MP.err = (e && e.message) || String(e); MP.okMsg = ""; }
+            await loadTranslog(); render(); renderMoveLog();
+            return;
+          }
+        });
 
         document.getElementById("housekeeping").addEventListener("click", function (ev) {
           var b = ev.target.closest("button[data-hk-btn]");
@@ -668,7 +986,24 @@
 
         document.getElementById("groups").addEventListener("click", async function (ev) {
           var btn = ev.target.closest("button[data-action]");
-          if (!btn) return;
+          if (!btn) {
+            // no button hit -> maybe a worker-row click: toggle the record
+            // card (office only; controls inside the row stay theirs)
+            if (!MP.canMove) return;
+            if (ev.target.closest("button, select, input, a")) return;
+            var trEl = ev.target.closest("tr[data-staffrow]");
+            if (!trEl) return;
+            var sid = trEl.getAttribute("data-staffrow");
+            rememberOpenGroups();
+            if (MP.cardOpen === sid) { MP.cardOpen = null; render(); return; }
+            MP.cardOpen = sid;
+            if (!MP.cardCache[sid]) {
+              try { MP.cardCache[sid] = await Dash.getStaffDetail(sid); }
+              catch (e) { MP.cardCache[sid] = {}; }   // gated read said no — open facts only
+            }
+            render();
+            return;
+          }
           ev.preventDefault();
           var act = btn.getAttribute("data-action");
           var staffId = btn.getAttribute("data-staff");
@@ -692,12 +1027,110 @@
           if (act === "edit-cancel") { MP.editing = null; rememberOpenGroups(); render(); return; }
           if (act === "edit-save")   { rememberOpenGroups(); await actEditSave(staffId); return; }
 
+          // 0048 movement planning: plan (top form) / execute / cancel.
+          // The database re-checks the caller on every call.
+          if (act === "plan") {
+            rememberOpenGroups();
+            MP.planning = { staffId: staffId, name: name || "" };
+            MP.showAdd = false; MP.editing = null; MP.okMsg = ""; MP.err = "";
+            render();
+            window.scrollTo({ top: 0, behavior: "smooth" });   // the form opens at the top
+            return;
+          }
+          if (act === "plan-form-cancel") { MP.planning = null; rememberOpenGroups(); render(); return; }
+          if (act === "plan-save") {
+            var pdate = document.getElementById("pw-date").value;
+            var psite = document.getElementById("pw-site").value;
+            if (!pdate || !psite) return;           // destination must be chosen
+            rememberOpenGroups();
+            try {
+              await Dash.addMovementPlan({
+                staffId: MP.planning.staffId,
+                plannedDate: pdate,
+                toProjectId: psite === "unassign" ? null : psite,
+                remarks: document.getElementById("pw-remarks").value || null
+              });
+              var ptgt = MP.projects.find(function (p) { return p.project_id === psite; });
+              MP.err = "";
+              MP.okMsg = "Move planned: " + MP.planning.name + " → " +
+                (ptgt ? ptgt.project_code : "unassigned") + " on " + pdate +
+                " — execute it in Upcoming moves when it happens";
+              MP.planning = null;
+            } catch (e) { MP.err = (e && e.message) || String(e); MP.okMsg = ""; }
+            await refresh();
+            return;
+          }
+          if (act === "plan-execute") {
+            if (!window.confirm("Execute now — " + (btn.getAttribute("data-label") || "this move") +
+                                "? The worker moves immediately (this applies the real move).")) return;
+            rememberOpenGroups();
+            try {
+              await Dash.executeMovementPlan(btn.getAttribute("data-plan"));
+              MP.err = ""; MP.okMsg = "Move executed — roster updated";
+            } catch (e) { MP.err = (e && e.message) || String(e); MP.okMsg = ""; }
+            await refresh();
+            return;
+          }
+          if (act === "plan-cancel") {
+            if (!window.confirm("Cancel the planned move " +
+                                (btn.getAttribute("data-label") || "") + "?")) return;
+            rememberOpenGroups();
+            try {
+              await Dash.cancelMovementPlan(btn.getAttribute("data-plan"));
+              MP.err = ""; MP.okMsg = "Plan cancelled";
+            } catch (e) { MP.err = (e && e.message) || String(e); MP.okMsg = ""; }
+            await refresh();
+            return;
+          }
+
+          // worker-card history maintenance (0051) — fixes the RECORD only;
+          // the roster never changes from here (house rule)
+          if (act === "wh-edit") {
+            var whHost = document.getElementById("wcf-" + btn.getAttribute("data-staffcard"));
+            if (whHost) whHost.innerHTML = whEditForm(btn.getAttribute("data-staffcard"),
+              btn.getAttribute("data-transfer"), btn.getAttribute("data-date"),
+              btn.getAttribute("data-remarks"));
+            return;
+          }
+          if (act === "wh-form-cancel") {
+            var whHost2 = document.getElementById("wcf-" + btn.getAttribute("data-staffcard"));
+            if (whHost2) whHost2.innerHTML = "";
+            return;
+          }
+          if (act === "wh-edit-save") {
+            var whSid = btn.getAttribute("data-staffcard");
+            rememberOpenGroups();
+            try {
+              await Dash.updateTransfer(btn.getAttribute("data-transfer"), {
+                effectiveDate: document.getElementById("wh-date-" + whSid).value || null,
+                remarks: document.getElementById("wh-remarks-" + whSid).value || null
+              });
+              MP.err = ""; MP.okMsg = "History row updated";
+            } catch (e) { MP.err = (e && e.message) || String(e); MP.okMsg = ""; }
+            await refresh();
+            return;
+          }
+          if (act === "wh-del") {
+            if (!window.confirm("Delete this history row? This cannot be undone.")) return;
+            rememberOpenGroups();
+            try {
+              await Dash.deleteTransfer(btn.getAttribute("data-transfer"));
+              MP.err = ""; MP.okMsg = "History row deleted";
+            } catch (e) { MP.err = (e && e.message) || String(e); MP.okMsg = ""; }
+            await refresh();
+            return;
+          }
+
           if (act === "move") {
             var sel = document.querySelector('select[data-staff="' + staffId + '"]');
             if (!sel || !sel.value) return;
+            var remEl = document.querySelector('input[data-staff-remarks="' + staffId + '"]');
+            var dateEl = document.querySelector('input[data-staff-date="' + staffId + '"]');
             rememberOpenGroups();
             try {
-              var r = await Dash.moveStaff(staffId, sel.value === "unassign" ? null : sel.value);
+              var r = await Dash.moveStaff(staffId, sel.value === "unassign" ? null : sel.value,
+                remEl && remEl.value ? remEl.value : null,
+                dateEl && dateEl.value ? dateEl.value : null);
               var tgt = MP.projects.find(function (p) { return p.project_id === sel.value; });
               MP.err = "";
               MP.okMsg = (r.full_name || "Worker") + " moved to " +
