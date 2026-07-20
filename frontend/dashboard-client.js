@@ -50,9 +50,13 @@
    MANPOWER WRITE COMMANDS (management/office only — database-enforced; each
    returns { ok, ... } or throws with .message = the database's error code)
    -----------------------------------------------------------------------------
-   await Dash.moveStaff(staffId, projectId|null, remarks?)   -> reassign a worker
-                                                     (null = unassigned); every applied
-                                                     move lands in transfer_log
+   await Dash.moveStaff(staffId, projectId|null, remarks?, effectiveDate?)
+                                                  -> reassign a worker (null =
+                                                     unassigned); every applied move
+                                                     lands in transfer_log with
+                                                     effectiveDate as the "happened
+                                                     on" date (omitted = today —
+                                                     backdate for catch-up moves)
    await Dash.moveMachine(machineId, projectId|null, remarks?, effectiveDate?)
                                                   -> same for machines. Stamps
                                                      mobilised_date = effectiveDate
@@ -61,8 +65,25 @@
                                                      corrections) or today when
                                                      omitted. The transfer log keeps
                                                      its own entry timestamp.
-   await Dash.getTransferLog(limit?)              -> recent moves, newest first
-                                                     (management/office only)
+   await Dash.getTransferLog(limit?)              -> the movement history, ordered by
+                                                     effective_date (when it really
+                                                     happened; moved_at = entry time),
+                                                     management/office only
+   await Dash.updateTransfer(transferId, {effectiveDate?, remarks?})
+                                           -> fix a history row's date/remarks
+                                              (omitted = unchanged). Wrong sites?
+                                              delete the row + addPastMove instead.
+   await Dash.deleteTransfer(transferId)   -> remove a mistaken history row (any
+                                              plan linked to it stays executed,
+                                              just unlinked)
+   await Dash.addPastMove({staffId? | machineId?, fromProjectId?, toProjectId?,
+                           effectiveDate, remarks?})
+                                           -> backfill pre-dashboard history
+                                              (exactly one subject; null project =
+                                              unassigned side). HISTORY ONLY — the
+                                              current site / mobilised date are NOT
+                                              touched; use moveStaff/moveMachine
+                                              for the current stint.
    await Dash.getMovementPlans()           -> every movement plan (staff AND
                                               machine, all statuses, earliest
                                               planned date first). Pages show
@@ -359,9 +380,11 @@
     return q(sb.from("v_project_directory").select("*").order("project_code"));
   }
 
-  function moveStaff(staffId, projectId, remarks) {
+  function moveStaff(staffId, projectId, remarks, effectiveDate) {
     return q(sb.rpc("move_staff", {
-      p_staff_id: staffId, p_project_id: projectId || null, p_remarks: remarks || null
+      p_staff_id: staffId, p_project_id: projectId || null,
+      p_remarks: remarks || null,
+      p_effective_date: effectiveDate || null   // null = today (KL)
     }));
   }
 
@@ -375,6 +398,32 @@
 
   function getTransferLog(limit) {
     return q(sb.rpc("get_transfer_log", { p_limit: limit || 100 }));
+  }
+
+  // ---- transfer history maintenance (0050) — the office owns its history ----
+  function updateTransfer(transferId, o) {
+    o = o || {};
+    return q(sb.rpc("update_transfer", {
+      p_transfer_id: transferId,
+      p_effective_date: o.effectiveDate || null,   // null = unchanged
+      p_remarks: o.remarks || null                 // null = unchanged
+    }));
+  }
+
+  function deleteTransfer(transferId) {
+    return q(sb.rpc("delete_transfer", { p_transfer_id: transferId }));
+  }
+
+  function addPastMove(o) {
+    o = o || {};
+    return q(sb.rpc("add_past_move", {
+      p_staff_id: o.staffId || null,
+      p_machine_id: o.machineId || null,
+      p_from_project_id: o.fromProjectId || null,
+      p_to_project_id: o.toProjectId || null,
+      p_effective_date: o.effectiveDate,
+      p_remarks: o.remarks || null
+    }));
   }
 
   // ---- movement planning (0048) — intended moves; NEVER auto-applied --------
@@ -694,6 +743,9 @@
     moveStaff: moveStaff,
     moveMachine: moveMachine,
     getTransferLog: getTransferLog,
+    updateTransfer: updateTransfer,
+    deleteTransfer: deleteTransfer,
+    addPastMove: addPastMove,
     getMovementPlans: getMovementPlans,
     addMovementPlan: addMovementPlan,
     cancelMovementPlan: cancelMovementPlan,

@@ -508,6 +508,77 @@
         "</div>";
     }
 
+    // ---- movement history maintenance (0050) --------------------------------
+    // The log shows WHEN it really happened (effective_date; entry time in the
+    // tooltip). The office maintains its own history: fix a row's date/remarks,
+    // delete a wrong row, or backfill a pre-dashboard move — backfill NEVER
+    // touches the current site (that's what Move is for).
+    function movementHistoryHtml(m) {
+      var moves = MOVELOG[m.machine_code] || [];
+      var lines = moves.slice(0, 6).map(function (t) {
+        return '<div class="pc-line"><strong title="entered ' + esc(Dash.klDateTime(t.moved_at)) + '">' +
+               dstr(t.effective_date) + "</strong> " +
+               escHtml(t.from_project) + " &rarr; " + escHtml(t.to_project) +
+               (t.source === "backfill" ? ' <span class="badge badge-gray">backfill</span>' : "") +
+               (t.remarks ? ' <span class="muted">(' + escHtml(t.remarks) + ")</span>" : "") +
+               ' <span class="muted">by ' + escHtml(t.moved_by_name || t.source) + "</span>" +
+               (MOVE.can
+                 ? ' <span class="move-ctl">' +
+                   '<button type="button" data-action="th-edit" data-transfer-id="' + t.transfer_id +
+                   '" data-machine-id="' + m.machine_id + '" data-date="' + esc(t.effective_date) +
+                   '" data-remarks="' + esc(t.remarks || "") + '">edit</button>' +
+                   '<button type="button" class="danger" data-action="th-del" data-transfer-id="' +
+                   t.transfer_id + '">delete</button></span>'
+                 : "") +
+               "</div>";
+      }).join("");
+      if (moves.length > 6) {
+        lines += '<div class="pc-meta">+ ' + (moves.length - 6) + " older move(s) recorded</div>";
+      }
+      if (!lines && !MOVE.can) return "";
+      var control = MOVE.can
+        ? '<div class="pc-line"><button type="button" data-action="th-add" data-machine-id="' +
+          m.machine_id + '">Add past move…</button></div>' +
+          '<div id="thf-' + m.machine_id + '"></div>'
+        : "";
+      return "<div><h3>Movement history</h3>" +
+             (lines || '<div class="muted-line">No moves recorded yet.</div>') + control + "</div>";
+    }
+
+    function thEditForm(machineId, transferId, date, remarks) {
+      return '<div class="claim-form">' +
+        "<strong>Fix history row</strong>" +
+        '<label>happened on <input id="th-date-' + machineId + '" type="date" value="' + esc(date) + '"></label>' +
+        '<label>remarks <input id="th-remarks-' + machineId + '" size="16" value="' + esc(remarks) + '"></label>' +
+        '<button type="button" data-action="th-edit-save" data-transfer-id="' + transferId +
+        '" data-machine-id="' + machineId + '">Save</button>' +
+        '<button type="button" data-action="th-form-cancel" data-machine-id="' + machineId + '">Cancel</button>' +
+        '<span class="muted-line">wrong sites? delete the row and add a past move instead</span>' +
+        "</div>";
+    }
+
+    function thAddForm(m) {
+      var opts = MOVE.projects.filter(function (p) {
+        return (p.status === "active" || p.status === "completed") &&
+               p.project_code.indexOf("TEST") !== 0;
+      }).map(function (p) {
+        return '<option value="' + p.project_id + '">' +
+               escHtml(p.project_code + " — " + (p.project_name || "")) + "</option>";
+      }).join("");
+      return '<div class="claim-form">' +
+        "<strong>Add past move — " + escHtml(m.machine_code) + "</strong>" +
+        '<label>from <select id="tha-from-' + m.machine_id + '"><option value="">— unassigned —</option>' +
+          opts + "</select></label>" +
+        '<label>to <select id="tha-to-' + m.machine_id + '"><option value="">— unassigned —</option>' +
+          opts + "</select></label>" +
+        '<label>happened on <input id="tha-date-' + m.machine_id + '" type="date"></label>' +
+        '<label>remarks <input id="tha-remarks-' + m.machine_id + '" size="14" placeholder="optional"></label>' +
+        '<button type="button" data-action="th-add-save" data-machine-id="' + m.machine_id + '">Add to history</button>' +
+        '<button type="button" data-action="th-form-cancel" data-machine-id="' + m.machine_id + '">Cancel</button>' +
+        '<span class="muted-line">history only — the current site is NOT changed (use Move for that)</span>' +
+        "</div>";
+    }
+
     // ================= UPCOMING MOVES (0048) =================
     // every planned machine move, earliest first; overdue rows amber
     function upcomingMovesZone() {
@@ -592,16 +663,8 @@
           : "") +
         "</div>";
 
-      // movement history (transfer_log, fills as the office uses moves)
-      var moves = MOVELOG[m.machine_code] || [];
-      var movesHtml = moves.length
-        ? "<div><h3>Movement history</h3>" + moves.slice(0, 6).map(function (t) {
-            return '<div class="pc-line"><strong>' + Dash.klDateTime(t.moved_at) + "</strong> " +
-                   escHtml(t.from_project) + " &rarr; " + escHtml(t.to_project) +
-                   (t.remarks ? ' <span class="muted">(' + escHtml(t.remarks) + ")</span>" : "") +
-                   ' <span class="muted">by ' + escHtml(t.moved_by_name || t.source) + "</span></div>";
-          }).join("") + "</div>"
-        : "";
+      // movement history (transfer_log; maintainable since 0050)
+      var movesHtml = movementHistoryHtml(m);
 
       // office controls (0044): edit / log service / hour meter — DB re-checks
       var ops = MOVE.can
@@ -955,6 +1018,69 @@
       });
     }
 
+    // transfer-history maintenance buttons (0050) — edit/delete/backfill rows
+    // in the record cards. The database re-checks the caller on every call.
+    function wireTransferHistory() {
+      document.getElementById("main").addEventListener("click", async function (ev) {
+        var btn = ev.target.closest('button[data-action^="th-"]');
+        if (!btn) return;
+        var act = btn.getAttribute("data-action");
+        var mid = btn.getAttribute("data-machine-id");
+        var host = mid ? document.getElementById("thf-" + mid) : null;
+
+        function fail(e) {
+          document.getElementById("error").innerHTML =
+            '<div class="banner banner-red">Could not save: ' + escHtml((e && e.message) || e) + "</div>";
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        }
+
+        if (act === "th-add") {
+          if (!host) return;
+          host.innerHTML = host.innerHTML ? "" : thAddForm(MACHINES_BY_ID[mid]);
+          return;
+        }
+        if (act === "th-edit") {
+          if (!host) return;
+          host.innerHTML = thEditForm(mid, btn.getAttribute("data-transfer-id"),
+            btn.getAttribute("data-date"), btn.getAttribute("data-remarks"));
+          return;
+        }
+        if (act === "th-form-cancel") { if (host) host.innerHTML = ""; return; }
+
+        if (act === "th-edit-save") {
+          try {
+            await Dash.updateTransfer(btn.getAttribute("data-transfer-id"), {
+              effectiveDate: document.getElementById("th-date-" + mid).value || null,
+              remarks: document.getElementById("th-remarks-" + mid).value || null
+            });
+            window.location.reload();
+          } catch (e) { fail(e); }
+          return;
+        }
+        if (act === "th-del") {
+          if (!window.confirm("Delete this history row? This cannot be undone.")) return;
+          try { await Dash.deleteTransfer(btn.getAttribute("data-transfer-id")); window.location.reload(); }
+          catch (e) { fail(e); }
+          return;
+        }
+        if (act === "th-add-save") {
+          var d = document.getElementById("tha-date-" + mid).value;
+          if (!d) return;                            // "happened on" is required
+          try {
+            await Dash.addPastMove({
+              machineId: mid,
+              fromProjectId: document.getElementById("tha-from-" + mid).value || null,
+              toProjectId: document.getElementById("tha-to-" + mid).value || null,
+              effectiveDate: d,
+              remarks: document.getElementById("tha-remarks-" + mid).value || null
+            });
+            window.location.reload();
+          } catch (e) { fail(e); }
+          return;
+        }
+      });
+    }
+
     window.onShellReady = async function () {
       try {
         var results = await Promise.all([
@@ -1029,6 +1155,7 @@
         wireMachineOps();
         wireAddMachine();
         wireMovementPlans();
+        wireTransferHistory();
       } catch (e) {
         document.getElementById("error").innerHTML =
           '<div class="banner banner-red">Could not load: ' + (e.message || e) + "</div>";

@@ -182,6 +182,8 @@
              siteOptions(true) + "</select>" +
              '<input type="text" data-staff-remarks="' + r.staff_id + '" size="8" placeholder="remarks"' +
              ' title="optional — lands in the move log (say &quot;data correction&quot; when fixing old records)">' +
+             '<input type="date" data-staff-date="' + r.staff_id + '" value="' + Dash.todayKL() +
+             '" title="when the move really happened — backdate for catch-up moves">' +
              '<button type="button" data-action="move" data-staff="' + r.staff_id + '">Move</button>' +
              '<button type="button" data-action="edit" data-staff="' + r.staff_id + '">edit</button>' +
              '<button type="button" data-action="plan" data-staff="' + r.staff_id +
@@ -572,26 +574,81 @@
           : "") + "</div>";
     }
 
+    // Recent moves = transfer_log, maintainable since 0050: the When column is
+    // the EFFECTIVE date (when it really happened; entry time in the tooltip),
+    // rows are editable/deletable, and old worker history can be backfilled
+    // ("Add past move…" — machines backfill from their own record card).
+    function mlDate(d) {
+      if (!d) return "—";
+      return new Intl.DateTimeFormat("en-MY", { day: "2-digit", month: "short", year: "numeric" })
+        .format(new Date(d + "T00:00:00"));
+    }
+
+    function mlEditForm(transferId, date, remarks) {
+      return '<div class="claim-form">' +
+        "<strong>Fix history row</strong>" +
+        '<label>happened on <input type="date" id="mle-date" value="' + esc(date) + '"></label>' +
+        '<label>remarks <input type="text" id="mle-remarks" size="16" value="' + esc(remarks) + '"></label>' +
+        '<button type="button" data-action="th-edit-save" data-transfer="' + transferId + '">Save</button>' +
+        '<button type="button" data-action="th-form-cancel">Cancel</button>' +
+        '<span class="muted-line">wrong sites? delete the row and add a past move instead</span>' +
+        "</div>";
+    }
+
+    function mlAddForm() {
+      var workers = MP.rows.slice().sort(function (a, b) {
+        return String(a.full_name).localeCompare(String(b.full_name));
+      }).map(function (r) {
+        return '<option value="' + r.staff_id + '">' + escHtml(r.full_name) +
+               (r.is_active ? "" : " (left)") + "</option>";
+      }).join("");
+      return '<div class="claim-form">' +
+        "<strong>Add past move (worker)</strong>" +
+        '<label>worker <select id="mla-worker"><option value="">choose…</option>' + workers + "</select></label>" +
+        '<label>from <select id="mla-from"><option value="">— unassigned —</option>' +
+          siteOptions(false) + "</select></label>" +
+        '<label>to <select id="mla-to"><option value="">— unassigned —</option>' +
+          siteOptions(false) + "</select></label>" +
+        '<label>happened on <input type="date" id="mla-date"></label>' +
+        '<label>remarks <input type="text" id="mla-remarks" size="14" placeholder="optional"></label>' +
+        '<button type="button" data-action="th-add-save">Add to history</button>' +
+        '<button type="button" data-action="th-form-cancel">Cancel</button>' +
+        '<span class="muted-line">history only — the current site is NOT changed (use Move for that)</span>' +
+        "</div>";
+    }
+
     async function renderMoveLog() {
       if (!MP.canMove) return;                      // office-only history
       var el = document.getElementById("movelog");
       try {
         var log = await Dash.getTransferLog(50);
-        if (!log.length) { el.innerHTML = ""; return; }
         var rows = log.map(function (t) {
-          return "<tr><td>" + Dash.klDateTime(t.moved_at) + "</td>" +
+          return '<tr><td title="entered ' + esc(Dash.klDateTime(t.moved_at)) + '">' +
+                 mlDate(t.effective_date) + "</td>" +
                  "<td>" + escHtml(t.subject_type) + "</td>" +
                  "<td><strong>" + escHtml(t.subject_name) + "</strong></td>" +
                  "<td>" + escHtml(t.from_project) + " &rarr; " + escHtml(t.to_project) +
+                 (t.source === "backfill" ? ' <span class="badge badge-gray">backfill</span>' : "") +
                  (t.remarks ? ' <span class="muted">(' + escHtml(t.remarks) + ")</span>" : "") + "</td>" +
-                 "<td>" + escHtml(t.moved_by_name || t.source) + "</td></tr>";
+                 "<td>" + escHtml(t.moved_by_name || t.source) + "</td>" +
+                 '<td><span class="move-ctl">' +
+                 '<button type="button" data-action="th-edit" data-transfer="' + t.transfer_id +
+                 '" data-date="' + esc(t.effective_date) + '" data-remarks="' + esc(t.remarks || "") + '">edit</button>' +
+                 '<button type="button" class="danger" data-action="th-del" data-transfer="' +
+                 t.transfer_id + '">delete</button>' +
+                 "</span></td></tr>";
         }).join("");
         el.innerHTML =
           '<details class="zone"><summary><span class="zone-name">Recent moves</span>' +
-          '<span class="zone-count">' + log.length + " logged</span></summary>" +
+          '<span class="zone-count">' + log.length + " logged · dates = when it happened</span></summary>" +
+          '<div class="claim-actions" style="padding:6px 0 0">' +
+          '<button type="button" data-action="th-add">Add past move…</button></div>' +
+          '<div id="movelog-form"></div>' +
           '<div class="table-wrap"><table>' +
-          "<thead><tr><th>When</th><th>Type</th><th>Who/what</th><th>Move</th><th>By</th></tr></thead>" +
-          "<tbody>" + rows + "</tbody></table></div></details>";
+          "<thead><tr><th>When</th><th>Type</th><th>Who/what</th><th>Move</th><th>By</th><th></th></tr></thead>" +
+          "<tbody>" + (rows ||
+            '<tr><td colspan="6" class="muted-line">No moves logged yet — backfill old history with the button above.</td></tr>') +
+          "</tbody></table></div></details>";
       } catch (e) { el.innerHTML = ""; }            // DB said no — panel stays absent
     }
 
@@ -713,6 +770,67 @@
         renderMoveLog();
 
         document.getElementById("mp-search").addEventListener("input", applyFilter);
+
+        // history-maintenance buttons inside the Recent moves panel (0050) —
+        // delegated on the static #movelog container, survives re-renders
+        document.getElementById("movelog").addEventListener("click", async function (ev) {
+          var btn = ev.target.closest('button[data-action^="th-"]');
+          if (!btn) return;
+          var act = btn.getAttribute("data-action");
+          var hostEl = document.getElementById("movelog-form");
+
+          if (act === "th-add") {
+            if (hostEl) hostEl.innerHTML = hostEl.innerHTML ? "" : mlAddForm();
+            return;
+          }
+          if (act === "th-edit") {
+            if (hostEl) hostEl.innerHTML = mlEditForm(btn.getAttribute("data-transfer"),
+              btn.getAttribute("data-date"), btn.getAttribute("data-remarks"));
+            return;
+          }
+          if (act === "th-form-cancel") { if (hostEl) hostEl.innerHTML = ""; return; }
+
+          if (act === "th-edit-save") {
+            rememberOpenGroups();
+            try {
+              await Dash.updateTransfer(btn.getAttribute("data-transfer"), {
+                effectiveDate: document.getElementById("mle-date").value || null,
+                remarks: document.getElementById("mle-remarks").value || null
+              });
+              MP.err = ""; MP.okMsg = "History row updated";
+            } catch (e) { MP.err = (e && e.message) || String(e); MP.okMsg = ""; }
+            render(); renderMoveLog();
+            return;
+          }
+          if (act === "th-del") {
+            if (!window.confirm("Delete this history row? This cannot be undone.")) return;
+            rememberOpenGroups();
+            try {
+              await Dash.deleteTransfer(btn.getAttribute("data-transfer"));
+              MP.err = ""; MP.okMsg = "History row deleted";
+            } catch (e) { MP.err = (e && e.message) || String(e); MP.okMsg = ""; }
+            render(); renderMoveLog();
+            return;
+          }
+          if (act === "th-add-save") {
+            var w = document.getElementById("mla-worker").value;
+            var d = document.getElementById("mla-date").value;
+            if (!w || !d) return;                   // worker + date are required
+            rememberOpenGroups();
+            try {
+              await Dash.addPastMove({
+                staffId: w,
+                fromProjectId: document.getElementById("mla-from").value || null,
+                toProjectId: document.getElementById("mla-to").value || null,
+                effectiveDate: d,
+                remarks: document.getElementById("mla-remarks").value || null
+              });
+              MP.err = ""; MP.okMsg = "Past move added to history (current site untouched)";
+            } catch (e) { MP.err = (e && e.message) || String(e); MP.okMsg = ""; }
+            render(); renderMoveLog();
+            return;
+          }
+        });
 
         document.getElementById("housekeeping").addEventListener("click", function (ev) {
           var b = ev.target.closest("button[data-hk-btn]");
@@ -837,10 +955,12 @@
             var sel = document.querySelector('select[data-staff="' + staffId + '"]');
             if (!sel || !sel.value) return;
             var remEl = document.querySelector('input[data-staff-remarks="' + staffId + '"]');
+            var dateEl = document.querySelector('input[data-staff-date="' + staffId + '"]');
             rememberOpenGroups();
             try {
               var r = await Dash.moveStaff(staffId, sel.value === "unassign" ? null : sel.value,
-                remEl && remEl.value ? remEl.value : null);
+                remEl && remEl.value ? remEl.value : null,
+                dateEl && dateEl.value ? dateEl.value : null);
               var tgt = MP.projects.find(function (p) { return p.project_id === sel.value; });
               MP.err = "";
               MP.okMsg = (r.full_name || "Worker") + " moved to " +
