@@ -53,8 +53,14 @@
    await Dash.moveStaff(staffId, projectId|null, remarks?)   -> reassign a worker
                                                      (null = unassigned); every applied
                                                      move lands in transfer_log
-   await Dash.moveMachine(machineId, projectId|null, remarks?) -> same for machines
-                                                     (stamps mobilised_date on a move)
+   await Dash.moveMachine(machineId, projectId|null, remarks?, effectiveDate?)
+                                                  -> same for machines. Stamps
+                                                     mobilised_date = effectiveDate
+                                                     (YYYY-MM-DD, when the move
+                                                     REALLY happened — backdate for
+                                                     corrections) or today when
+                                                     omitted. The transfer log keeps
+                                                     its own entry timestamp.
    await Dash.getTransferLog(limit?)              -> recent moves, newest first
                                                      (management/office only)
    await Dash.getMovementPlans()           -> every movement plan (staff AND
@@ -108,12 +114,16 @@
                                               duplicate_employee_code like addStaff.
    await Dash.updateMachine(machineId, {machineType?, brand?, model?,
                             registrationNo?, serialNumber?, yearManufactured?,
-                            serviceIntervalHours?, status?, nextMoveDate?,
-                            clearNextMove?})
+                            serviceIntervalHours?, status?, mobilisedDate?,
+                            clearMobilised?})
                                            -> partial machine edit (blank =
-                                              unchanged; clearNextMove nulls the
-                                              planned move). machine_code is NOT
-                                              editable — bot matching key.
+                                              unchanged). mobilisedDate is a
+                                              CORRECTION — moves stamp it
+                                              themselves; clearMobilised nulls
+                                              it. machine_code is NOT editable
+                                              — bot matching key. (next-move
+                                              editing removed in 0049 — plan
+                                              moves via addMovementPlan.)
    await Dash.addServiceRecord(machineId, {serviceDate, serviceType, description?,
                                hourMeter?, parts?, costTotal?, vendor?, remarks?})
                                            -> log a service/repair; machines
@@ -355,9 +365,11 @@
     }));
   }
 
-  function moveMachine(machineId, projectId, remarks) {
+  function moveMachine(machineId, projectId, remarks, effectiveDate) {
     return q(sb.rpc("move_machine", {
-      p_machine_id: machineId, p_project_id: projectId || null, p_remarks: remarks || null
+      p_machine_id: machineId, p_project_id: projectId || null,
+      p_remarks: remarks || null,
+      p_effective_date: effectiveDate || null   // null = today (KL)
     }));
   }
 
@@ -441,8 +453,8 @@
       p_year_manufactured: numOrNull(o.yearManufactured),
       p_service_interval_hours: numOrNull(o.serviceIntervalHours),
       p_status: o.status || null,
-      p_next_move_date: o.nextMoveDate || null,
-      p_clear_next_move: !!o.clearNextMove
+      p_mobilised_date: o.mobilisedDate || null,
+      p_clear_mobilised: !!o.clearMobilised
     }));
   }
 

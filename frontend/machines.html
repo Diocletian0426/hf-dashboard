@@ -385,8 +385,9 @@
         '<label>year <input id="me-year" type="number" min="1980" max="2100" value="' + (m.year_manufactured || "") + '"></label>' +
         '<label>service interval (h) <input id="me-interval" type="number" min="0" step="50" value="' + (m.service_interval_hours || "") + '"></label>' +
         '<label>status <select id="me-status">' + stOpts + "</select></label>" +
-        '<label>next move <input id="me-nextmove" type="date" value="' + esc(m.next_move_date || "") + '"></label>' +
-        '<label class="mc-check"><input type="checkbox" id="me-clearmove"> clear next move</label>' +
+        '<label>mobilised <input id="me-mobilised" type="date" value="' + esc(m.mobilised_date || "") +
+          '" title="correction only — Move stamps this itself (backdatable there too)"></label>' +
+        '<label class="mc-check"><input type="checkbox" id="me-clearmobilised"> clear mobilised</label>' +
         '<button type="button" data-action="mc-edit-save" data-machine-id="' + m.machine_id + '">Save</button>' +
         '<button type="button" data-action="mc-cancel" data-machine-id="' + m.machine_id + '">Cancel</button>' +
         "</div>";
@@ -437,6 +438,9 @@
         ['<option value="unassign">— unassigned —</option>']).join("");
       return '<div class="pc-line"><span class="move-ctl">' +
              '<select data-machine-id="' + m.machine_id + '">' + opts + "</select>" +
+             '<input type="date" id="mv-date-' + m.machine_id + '" value="' + Dash.todayKL() +
+             '" title="when the move really happened — backdate for corrections (mobilised date gets THIS date)">' +
+             '<input type="text" id="mv-remarks-' + m.machine_id + '" size="10" placeholder="remarks">' +
              '<button type="button" data-action="move-machine" data-machine-id="' + m.machine_id + '">Move</button>' +
              "</span></div>";
     }
@@ -829,8 +833,8 @@
               yearManufactured: document.getElementById("me-year").value,
               serviceIntervalHours: document.getElementById("me-interval").value,
               status: newStatus,
-              nextMoveDate: document.getElementById("me-nextmove").value || null,
-              clearNextMove: document.getElementById("me-clearmove").checked
+              mobilisedDate: document.getElementById("me-mobilised").value || null,
+              clearMobilised: document.getElementById("me-clearmobilised").checked
             });
             window.location.reload();
           } catch (e) { fail(e); }
@@ -868,7 +872,9 @@
     }
 
     // move button inside a record card -> move_machine, then reload (the
-    // machine reappears under its new site — self-evident feedback)
+    // machine reappears under its new site — self-evident feedback).
+    // The date box (default today) backdates mobilised_date for catch-up
+    // moves / corrections; remarks land in the transfer log.
     function wireMachineMoves() {
       document.getElementById("sites").addEventListener("click", async function (ev) {
         var btn = ev.target.closest('button[data-action="move-machine"]');
@@ -876,8 +882,12 @@
         var id = btn.getAttribute("data-machine-id");
         var sel = document.querySelector('select[data-machine-id="' + id + '"]');
         if (!sel || !sel.value) return;
+        var dateEl = document.getElementById("mv-date-" + id);
+        var remEl = document.getElementById("mv-remarks-" + id);
         try {
-          await Dash.moveMachine(id, sel.value === "unassign" ? null : sel.value);
+          await Dash.moveMachine(id, sel.value === "unassign" ? null : sel.value,
+            remEl && remEl.value ? remEl.value : null,
+            dateEl && dateEl.value ? dateEl.value : null);
           window.location.reload();
         } catch (e) {
           document.getElementById("error").innerHTML =

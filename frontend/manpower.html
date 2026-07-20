@@ -180,6 +180,8 @@
       return '<td><span class="move-ctl">' +
              '<select data-staff="' + r.staff_id + '"><option value="">move to…</option>' +
              siteOptions(true) + "</select>" +
+             '<input type="text" data-staff-remarks="' + r.staff_id + '" size="8" placeholder="remarks"' +
+             ' title="optional — lands in the move log (say &quot;data correction&quot; when fixing old records)">' +
              '<button type="button" data-action="move" data-staff="' + r.staff_id + '">Move</button>' +
              '<button type="button" data-action="edit" data-staff="' + r.staff_id + '">edit</button>' +
              '<button type="button" data-action="plan" data-staff="' + r.staff_id +
@@ -834,9 +836,11 @@
           if (act === "move") {
             var sel = document.querySelector('select[data-staff="' + staffId + '"]');
             if (!sel || !sel.value) return;
+            var remEl = document.querySelector('input[data-staff-remarks="' + staffId + '"]');
             rememberOpenGroups();
             try {
-              var r = await Dash.moveStaff(staffId, sel.value === "unassign" ? null : sel.value);
+              var r = await Dash.moveStaff(staffId, sel.value === "unassign" ? null : sel.value,
+                remEl && remEl.value ? remEl.value : null);
               var tgt = MP.projects.find(function (p) { return p.project_id === sel.value; });
               MP.err = "";
               MP.okMsg = (r.full_name || "Worker") + " moved to " +
