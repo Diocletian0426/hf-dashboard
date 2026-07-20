@@ -38,6 +38,7 @@
         <button type="button" data-co="HF-BP">HF-BP</button>
         <button type="button" data-co="Hai Fu">Hai Fu</button>
       </span>
+      <span id="mp-extra"></span>
     </div>
     <div class="filter-wrap">
       <input type="search" id="mp-search" class="filter-box"
@@ -97,6 +98,7 @@
     var MP = { rows: [], projects: [], canMove: false, open: {}, showAdd: false,
                editing: null, groupMode: "site", companyFilter: "all", err: "", okMsg: "",
                hkFilter: null,               // 'joined' | 'code' | 'contact' | null
+               roleFilter: "all", siteFilter: "all", driftOnly: false,
                supervisorsByPid: {},         // project_id -> "Name, Name"
                machinesBySite: {} };         // project_code -> [{code,type}]
 
@@ -214,11 +216,40 @@
               (r.has_contact ? "" : "contact")).trim();
     }
 
+    // extra filter selects + drift chip (options depend on loaded data)
+    function renderExtraFilters() {
+      var el = document.getElementById("mp-extra");
+      if (!el) return;
+      var act = activeRows();
+      var driftN = act.filter(isDrift).length;
+      var roleOpts = ['<option value="all">any role</option>'].concat(ROLES.filter(function (ro) {
+        return act.some(function (r) { return r.role === ro; });
+      }).map(function (ro) {
+        return '<option value="' + ro + '"' + (MP.roleFilter === ro ? " selected" : "") + ">" +
+               ro.replace(/_/g, " ") + "</option>";
+      })).join("");
+      var siteKeys = {};
+      act.forEach(function (r) { if (r.project_code) siteKeys[r.project_code] = r.project_name || ""; });
+      var siteOptsF = ['<option value="all">any site</option>',
+                       '<option value="__none"' + (MP.siteFilter === "__none" ? " selected" : "") + ">— unassigned —</option>"]
+        .concat(Object.keys(siteKeys).sort().map(function (k) {
+          return '<option value="' + esc(k) + '"' + (MP.siteFilter === k ? " selected" : "") + ">" +
+                 escHtml(k + " — " + siteKeys[k]) + "</option>";
+        })).join("");
+      el.innerHTML =
+        '<select id="mp-role">' + roleOpts + "</select>" +
+        '<select id="mp-site">' + siteOptsF + "</select>" +
+        '<button type="button" data-chip="drift"' + (MP.driftOnly ? ' class="active"' : "") +
+        ' title="bot recently reported them at a DIFFERENT site than the roster">' + driftN + " drift</button>";
+    }
+
     function groupBlock(key, title, list, mode) {
       var byRole = mode === "role";
       var isOpen = MP.open[key] !== false;   // default open
       var rows = list.map(function (r) {
-        return '<tr data-search="' + rowSearchAttr(r) + '" data-hk="' + rowHkAttr(r) + '">' +
+        return '<tr data-search="' + rowSearchAttr(r) + '" data-hk="' + rowHkAttr(r) +
+               '" data-role="' + esc(r.role || "") + '" data-site="' + esc(r.project_code || "__none") +
+               '" data-drift="' + (isDrift(r) ? "1" : "") + '">' +
                "<td>" + (r.employee_code ? escHtml(r.employee_code) : "—") + "</td>" +
                "<td><strong>" + escHtml(r.full_name) + "</strong></td>" +
                "<td>" + (byRole ? siteLabel(r) : escHtml(String(r.role || "").replace(/_/g, " "))) + "</td>" +
@@ -413,6 +444,7 @@
       document.getElementById("groups").innerHTML =
         html || '<div class="muted-line">No active workers found.</div>';
       renderHousekeeping();
+      renderExtraFilters();
       applyFilter();
     }
 
@@ -421,16 +453,21 @@
     function applyFilter() {
       var qstr = (document.getElementById("mp-search").value || "").trim().toLowerCase();
       var hk = MP.hkFilter;
+      var filtering = qstr || hk || MP.roleFilter !== "all" ||
+                      MP.siteFilter !== "all" || MP.driftOnly;
       document.querySelectorAll("#groups details.zone").forEach(function (det) {
         var any = false;
         det.querySelectorAll("tbody tr").forEach(function (tr) {
           var hit = (!qstr || (tr.getAttribute("data-search") || "").indexOf(qstr) !== -1) &&
-                    (!hk || (tr.getAttribute("data-hk") || "").indexOf(hk) !== -1);
+                    (!hk || (tr.getAttribute("data-hk") || "").indexOf(hk) !== -1) &&
+                    (MP.roleFilter === "all" || tr.getAttribute("data-role") === MP.roleFilter) &&
+                    (MP.siteFilter === "all" || tr.getAttribute("data-site") === MP.siteFilter) &&
+                    (!MP.driftOnly || tr.getAttribute("data-drift") === "1");
           tr.style.display = hit ? "" : "none";
           if (hit) any = true;
         });
         det.style.display = any ? "" : "none";
-        if ((qstr || hk) && any) det.open = true;
+        if (filtering && any) det.open = true;
       });
     }
 
@@ -601,10 +638,16 @@
           applyFilter();
         });
 
-        // group-mode + company chips: set state, restyle, re-render
+        // group-mode + company chips + drift chip: set state, restyle, re-render
         document.querySelector(".mp-controls").addEventListener("click", function (ev) {
           var b = ev.target.closest("button");
           if (!b) return;
+          if (b.getAttribute("data-chip") === "drift") {
+            MP.driftOnly = !MP.driftOnly;
+            renderExtraFilters();
+            applyFilter();
+            return;
+          }
           var wrap = b.parentElement;
           if (b.getAttribute("data-mode")) {
             MP.groupMode = b.getAttribute("data-mode");
@@ -615,6 +658,12 @@
           wrap.querySelectorAll("button").forEach(function (x) { x.classList.remove("active"); });
           b.classList.add("active");
           render();
+        });
+
+        // role / site filter selects
+        document.querySelector(".mp-controls").addEventListener("change", function (ev) {
+          if (ev.target.id === "mp-role")      { MP.roleFilter = ev.target.value; applyFilter(); }
+          else if (ev.target.id === "mp-site") { MP.siteFilter = ev.target.value; applyFilter(); }
         });
 
         document.getElementById("groups").addEventListener("click", async function (ev) {
