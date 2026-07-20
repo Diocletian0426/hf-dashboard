@@ -220,7 +220,7 @@
       //    the machine's latest move; machines with no history are skipped.
       var stateDrift = [];
       machines.forEach(function (m) {
-        var t = (MOVELOG[m.machine_code] || [])[0];
+        var t = (MOVELOG[m.machine_id] || [])[0];
         if (!t) return;
         var cur = m.current_site || "unassigned";
         if (cur !== t.to_project) {
@@ -546,7 +546,7 @@
     // delete a wrong row, or backfill a pre-dashboard move — backfill NEVER
     // touches the current site (that's what Move is for).
     function movementHistoryHtml(m) {
-      var moves = MOVELOG[m.machine_code] || [];
+      var moves = MOVELOG[m.machine_id] || [];
       var lines = moves.slice(0, 6).map(function (t) {
         return '<div class="pc-line"><strong title="entered ' + esc(Dash.klDateTime(t.moved_at)) + '">' +
                dstr(t.effective_date) + "</strong> " +
@@ -1150,9 +1150,11 @@
         // newest move even as backfill grows the log.
         if (MOVE.can) {
           try {
+            // keyed by machine_id (0051 feed) — codes are unique today, but
+            // ids can never collide, and it matches the manpower page's keying
             (await Dash.getTransferLog(500)).forEach(function (t) {
-              if (t.subject_type !== "machine") return;
-              (MOVELOG[t.subject_name] = MOVELOG[t.subject_name] || []).push(t);
+              if (t.subject_type !== "machine" || !t.machine_id) return;
+              (MOVELOG[t.machine_id] = MOVELOG[t.machine_id] || []).push(t);
             });
           } catch (e) { /* no history panel */ }
         }

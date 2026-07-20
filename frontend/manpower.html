@@ -100,6 +100,8 @@
     // and company filter all survive re-renders
     var MP = { rows: [], projects: [], canMove: false, open: {}, showAdd: false,
                editing: null, planning: null, plans: [],   // 0048 movement planning
+               cardOpen: null, cardCache: {},              // worker record card (0051)
+               translog: [], histByStaff: {},              // transfer feed, keyed by staff_id
                groupMode: "site", companyFilter: "all", err: "", okMsg: "",
                hkFilter: null,               // 'joined' | 'code' | 'contact' | null
                roleFilter: "all", siteFilter: "all", driftOnly: false,
@@ -257,15 +259,20 @@
       var byRole = mode === "role";
       var isOpen = MP.open[key] !== false;   // default open
       var rows = list.map(function (r) {
-        return '<tr data-search="' + rowSearchAttr(r) + '" data-hk="' + rowHkAttr(r) +
+        var tr = '<tr data-staffrow="' + r.staff_id + '" data-search="' + rowSearchAttr(r) +
+               '" data-hk="' + rowHkAttr(r) +
                '" data-role="' + esc(r.role || "") + '" data-site="' + esc(r.project_code || "__none") +
-               '" data-drift="' + (isDrift(r) ? "1" : "") + '">' +
+               '" data-drift="' + (isDrift(r) ? "1" : "") + '"' +
+               (MP.canMove ? ' style="cursor:pointer" title="Click for the worker record"' : "") + ">" +
                "<td>" + (r.employee_code ? escHtml(r.employee_code) : "—") + "</td>" +
                "<td><strong>" + escHtml(r.full_name) + "</strong></td>" +
                "<td>" + (byRole ? siteLabel(r) : escHtml(String(r.role || "").replace(/_/g, " "))) + "</td>" +
                "<td>" + escHtml(r.company) + "</td>" +
                lastReportedCell(r) +
                actionCell(r) + "</tr>";
+        // record card sits right under its worker row (0051, office only)
+        if (MP.canMove && MP.cardOpen === r.staff_id) tr += workerCard(r);
+        return tr;
       }).join("");
 
       // site-mode header extras: work-line scope tag (BP/SP/BP+SP, derived
@@ -468,6 +475,99 @@
         "</div>";
     }
 
+    // ================= WORKER RECORD CARD (0051) =================
+    // Office/management only: identity facts come from the gated
+    // get_staff_detail read (fetched once per worker, cached) and history
+    // from the gated feed — other logins never get a card (their row already
+    // shows everything they may see). History edits here follow the house
+    // rule: they fix the RECORD only; the roster changes via Move.
+    function whEditForm(sid, transferId, date, remarks) {
+      return '<div class="claim-form">' +
+        "<strong>Fix history row</strong>" +
+        '<label>happened on <input type="date" id="wh-date-' + sid + '" value="' + esc(date) + '"></label>' +
+        '<label>remarks <input type="text" id="wh-remarks-' + sid + '" size="16" value="' + esc(remarks) + '"></label>' +
+        '<button type="button" data-action="wh-edit-save" data-transfer="' + transferId +
+        '" data-staffcard="' + sid + '">Save</button>' +
+        '<button type="button" data-action="wh-form-cancel" data-staffcard="' + sid + '">Cancel</button>' +
+        '<span class="muted-line">wrong sites? delete the row and add a past move (Recent moves panel)</span>' +
+        "</div>";
+    }
+
+    function workerCard(r) {
+      var d = MP.cardCache[r.staff_id] || {};
+      var chips = [];
+      if (r.employee_code) chips.push("Code " + escHtml(r.employee_code));
+      if (d.date_joined) chips.push("Joined " + mlDate(d.date_joined));
+      if (d.contact_number) chips.push("Contact " + escHtml(d.contact_number));
+      if (d.country_origin) chips.push("Origin " + escHtml(d.country_origin));
+      if (d.whatsapp_name) chips.push("WhatsApp " + escHtml(d.whatsapp_name));
+
+      var head =
+        '<div class="pc-head"><strong>' + escHtml(r.full_name) + "</strong> " +
+        escHtml(String(r.role || "").replace(/_/g, " ")) + " · " + escHtml(r.company) +
+        (d.designation ? ' <span class="badge badge-gray">' + escHtml(d.designation) + "</span>" : "") +
+        (chips.length ? ' <span class="pc-chips">' + chips.join(" · ") + "</span>" : "") + "</div>";
+
+      var where =
+        "<div><h3>Whereabouts</h3>" +
+        '<div class="pc-line">Site: ' + siteLabel(r) + "</div>" +
+        (r.last_reported_date
+          ? '<div class="pc-line">Last reported: ' + mlDate(r.last_reported_date) + " @ " +
+            escHtml(r.last_reported_project_code || "?") +
+            (isDrift(r) ? ' <span class="badge badge-anomaly">differs from roster</span>' : "") + "</div>"
+          : '<div class="pc-line muted-line">No bot attendance recorded (the bot skips sites and days).</div>') +
+        "</div>";
+
+      var plans = MP.plans.filter(function (p) { return p.staff_id === r.staff_id; });
+      var plansHtml = plans.map(function (p) {
+        var days = daysAgo(p.planned_date);
+        var late = days !== null && days > 0;
+        var dest = p.to_project_code
+          ? escHtml(p.to_project_code + (p.to_project_name ? " — " + p.to_project_name : ""))
+          : "unassigned (mob out)";
+        var label = (p.full_name || "") + " → " + (p.to_project_code || "unassigned");
+        return '<div class="pc-line"><span class="' + (late ? "stale-warn" : "") + '">' +
+               mlDate(p.planned_date) +
+               (late ? " — planned " + days + " day" + (days === 1 ? "" : "s") + " ago" : "") +
+               "</span> &rarr; " + dest +
+               (p.remarks ? ' <span class="muted">(' + escHtml(p.remarks) + ")</span>" : "") +
+               ' <span class="move-ctl">' +
+               '<button type="button" data-action="plan-execute" data-plan="' + p.plan_id +
+               '" data-label="' + esc(label) + '">Execute now</button>' +
+               '<button type="button" data-action="plan-cancel" data-plan="' + p.plan_id +
+               '" data-label="' + esc(label) + '">Cancel</button></span></div>';
+      }).join("");
+      var plansBlock = "<div><h3>Planned moves</h3>" +
+        (plansHtml || '<div class="muted-line">None — use the row&#39;s plan button.</div>') + "</div>";
+
+      var hist = MP.histByStaff[r.staff_id] || [];
+      var histHtml = hist.slice(0, 8).map(function (t) {
+        return '<div class="pc-line"><strong title="entered ' + esc(Dash.klDateTime(t.moved_at)) + '">' +
+               mlDate(t.effective_date) + "</strong> " +
+               escHtml(t.from_project) + " &rarr; " + escHtml(t.to_project) +
+               (t.source === "backfill" ? ' <span class="badge badge-gray">backfill</span>' : "") +
+               (t.remarks ? ' <span class="muted">(' + escHtml(t.remarks) + ")</span>" : "") +
+               ' <span class="muted">by ' + escHtml(t.moved_by_name || t.source) + "</span>" +
+               ' <span class="move-ctl">' +
+               '<button type="button" data-action="wh-edit" data-transfer="' + t.transfer_id +
+               '" data-staffcard="' + r.staff_id + '" data-date="' + esc(t.effective_date) +
+               '" data-remarks="' + esc(t.remarks || "") + '">edit</button>' +
+               '<button type="button" class="danger" data-action="wh-del" data-transfer="' +
+               t.transfer_id + '">delete</button></span>' +
+               "</div>";
+      }).join("");
+      if (hist.length > 8) {
+        histHtml += '<div class="pc-meta">+ ' + (hist.length - 8) + " older move(s) recorded</div>";
+      }
+
+      return '<tr class="pile-card-row"><td colspan="6"><div class="pile-card">' + head +
+             '<div class="pc-grid"><div><h3>Movement history</h3>' +
+             (histHtml || '<div class="muted-line">No moves recorded yet — backfill via the Recent moves panel.</div>') +
+             '<div id="wcf-' + r.staff_id + '"></div></div>' +
+             '<div class="pc-side">' + where + plansBlock + "</div></div>" +
+             "</div></td></tr>";
+    }
+
     function render() {
       var act = activeRows();
       var unassigned = act.filter(function (r) { return !r.current_project_id; });
@@ -617,11 +717,24 @@
         "</div>";
     }
 
-    async function renderMoveLog() {
+    // one gated fetch feeds BOTH the Recent moves panel and the worker record
+    // cards; keyed by staff_id (0051 feed) because full names can duplicate
+    async function loadTranslog() {
+      if (!MP.canMove) return;
+      try { MP.translog = await Dash.getTransferLog(500); }
+      catch (e) { MP.translog = []; }               // DB said no — panels stay absent
+      MP.histByStaff = {};
+      MP.translog.forEach(function (t) {
+        if (t.subject_type !== "staff" || !t.staff_id) return;
+        (MP.histByStaff[t.staff_id] = MP.histByStaff[t.staff_id] || []).push(t);
+      });
+    }
+
+    function renderMoveLog() {
       if (!MP.canMove) return;                      // office-only history
       var el = document.getElementById("movelog");
       try {
-        var log = await Dash.getTransferLog(50);
+        var log = (MP.translog || []).slice(0, 50); // panel shows the newest 50
         var rows = log.map(function (t) {
           return '<tr><td title="entered ' + esc(Dash.klDateTime(t.moved_at)) + '">' +
                  mlDate(t.effective_date) + "</td>" +
@@ -660,7 +773,8 @@
     }
 
     async function refresh() {
-      var res = await Promise.all([Dash.getManpowerBySite(), Dash.getMovementPlans()]);
+      var res = await Promise.all([Dash.getManpowerBySite(), Dash.getMovementPlans(),
+                                   loadTranslog()]);
       MP.rows = res[0];
       setPlans(res[1]);
       render();
@@ -754,7 +868,8 @@
           Dash.getProjectDirectory(),
           Dash.getProjectSupervisors(),   // site headers: SV name
           Dash.getMachines(),             // site headers: plant + crew-vs-plant hint
-          Dash.getMovementPlans()         // 0048: planned moves (never auto-applied)
+          Dash.getMovementPlans(),        // 0048: planned moves (never auto-applied)
+          loadTranslog()                  // 0051: history feed (panel + worker cards)
         ]);
         MP.rows = res[0]; MP.projects = res[1];
         setPlans(res[4]);
@@ -799,7 +914,7 @@
               });
               MP.err = ""; MP.okMsg = "History row updated";
             } catch (e) { MP.err = (e && e.message) || String(e); MP.okMsg = ""; }
-            render(); renderMoveLog();
+            await loadTranslog(); render(); renderMoveLog();
             return;
           }
           if (act === "th-del") {
@@ -809,7 +924,7 @@
               await Dash.deleteTransfer(btn.getAttribute("data-transfer"));
               MP.err = ""; MP.okMsg = "History row deleted";
             } catch (e) { MP.err = (e && e.message) || String(e); MP.okMsg = ""; }
-            render(); renderMoveLog();
+            await loadTranslog(); render(); renderMoveLog();
             return;
           }
           if (act === "th-add-save") {
@@ -827,7 +942,7 @@
               });
               MP.err = ""; MP.okMsg = "Past move added to history (current site untouched)";
             } catch (e) { MP.err = (e && e.message) || String(e); MP.okMsg = ""; }
-            render(); renderMoveLog();
+            await loadTranslog(); render(); renderMoveLog();
             return;
           }
         });
@@ -871,7 +986,24 @@
 
         document.getElementById("groups").addEventListener("click", async function (ev) {
           var btn = ev.target.closest("button[data-action]");
-          if (!btn) return;
+          if (!btn) {
+            // no button hit -> maybe a worker-row click: toggle the record
+            // card (office only; controls inside the row stay theirs)
+            if (!MP.canMove) return;
+            if (ev.target.closest("button, select, input, a")) return;
+            var trEl = ev.target.closest("tr[data-staffrow]");
+            if (!trEl) return;
+            var sid = trEl.getAttribute("data-staffrow");
+            rememberOpenGroups();
+            if (MP.cardOpen === sid) { MP.cardOpen = null; render(); return; }
+            MP.cardOpen = sid;
+            if (!MP.cardCache[sid]) {
+              try { MP.cardCache[sid] = await Dash.getStaffDetail(sid); }
+              catch (e) { MP.cardCache[sid] = {}; }   // gated read said no — open facts only
+            }
+            render();
+            return;
+          }
           ev.preventDefault();
           var act = btn.getAttribute("data-action");
           var staffId = btn.getAttribute("data-staff");
@@ -946,6 +1078,44 @@
             try {
               await Dash.cancelMovementPlan(btn.getAttribute("data-plan"));
               MP.err = ""; MP.okMsg = "Plan cancelled";
+            } catch (e) { MP.err = (e && e.message) || String(e); MP.okMsg = ""; }
+            await refresh();
+            return;
+          }
+
+          // worker-card history maintenance (0051) — fixes the RECORD only;
+          // the roster never changes from here (house rule)
+          if (act === "wh-edit") {
+            var whHost = document.getElementById("wcf-" + btn.getAttribute("data-staffcard"));
+            if (whHost) whHost.innerHTML = whEditForm(btn.getAttribute("data-staffcard"),
+              btn.getAttribute("data-transfer"), btn.getAttribute("data-date"),
+              btn.getAttribute("data-remarks"));
+            return;
+          }
+          if (act === "wh-form-cancel") {
+            var whHost2 = document.getElementById("wcf-" + btn.getAttribute("data-staffcard"));
+            if (whHost2) whHost2.innerHTML = "";
+            return;
+          }
+          if (act === "wh-edit-save") {
+            var whSid = btn.getAttribute("data-staffcard");
+            rememberOpenGroups();
+            try {
+              await Dash.updateTransfer(btn.getAttribute("data-transfer"), {
+                effectiveDate: document.getElementById("wh-date-" + whSid).value || null,
+                remarks: document.getElementById("wh-remarks-" + whSid).value || null
+              });
+              MP.err = ""; MP.okMsg = "History row updated";
+            } catch (e) { MP.err = (e && e.message) || String(e); MP.okMsg = ""; }
+            await refresh();
+            return;
+          }
+          if (act === "wh-del") {
+            if (!window.confirm("Delete this history row? This cannot be undone.")) return;
+            rememberOpenGroups();
+            try {
+              await Dash.deleteTransfer(btn.getAttribute("data-transfer"));
+              MP.err = ""; MP.okMsg = "History row deleted";
             } catch (e) { MP.err = (e && e.message) || String(e); MP.okMsg = ""; }
             await refresh();
             return;
