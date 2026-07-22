@@ -124,9 +124,11 @@
         "</div>";
     }
 
+    // code AND name — the office knows sites by name (house picker rule)
     function rowHtml(t, infoHtml) {
-      return '<div class="pc-line"><strong>' + escHtml(t.project_code || "") + "</strong> · " +
-             escHtml(t.pile_mark_no || "") +
+      return '<div class="pc-line"><strong>' + escHtml(t.project_code || "") + "</strong>" +
+             (t.project_name ? ' <span class="muted">' + escHtml(t.project_name) + "</span>" : "") +
+             " · " + escHtml(t.pile_mark_no || "") +
              ' · <span class="badge badge-gray">' + escHtml(t.test_code || "") + "</span> " +
              infoHtml + rowActions(t) + pileLink(t) +
              '</div><div id="tqf-' + t.test_req_id + '"></div>';
