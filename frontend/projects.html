@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>HF Dashboard — Project progress</title>
+  <title>HF Dashboard — Projects</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -11,28 +11,21 @@
   <header id="nav"></header>
 
   <main id="main">
-    <h1>Project progress</h1>
+    <h1>Projects</h1>
     <p class="page-caption">
-      How far along each job is, and whether it will finish on time.
-      <strong>Work vs time</strong> compares % of piles completed against % of contract time used —
-      "behind" means time is running out faster than piles are going in.
-      (Today's site situation lives on the <a href="index.html">Overview</a>.)
+      Every project, any status — search by name or click a card to open its hub.
+      <strong>Work vs time</strong> compares % of piles done against % of contract
+      time used; "behind" means time is running out faster than piles are going in.
     </p>
 
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Code</th><th>Project</th><th>Status</th>
-            <th>Progress (piles)</th>
-            <th>Work vs time</th>
-            <th class="num" title="Tests completed / required">Tests</th>
-            <th>Started</th><th>Target end</th><th class="num">Days left</th>
-          </tr>
-        </thead>
-        <tbody id="rows"><tr><td colspan="9" class="empty">Loading…</td></tr></tbody>
-      </table>
+    <div class="filter-wrap">
+      <input id="p-search" class="filter-box" type="search"
+             placeholder="Search code, name or client…" autocomplete="off" />
     </div>
+    <div class="mp-controls" id="p-chips"></div>
+
+    <div id="cards" class="pcards"></div>
+    <div id="empty"></div>
     <div id="error"></div>
   </main>
 
@@ -43,61 +36,165 @@
   <script src="shell.js"></script>
 
   <script>
-    // compare % work done vs % contract time used
+    // Project DIRECTORY: the master list is v_project_directory (every project,
+    // both business lines); BP progress metrics (v_project_pulse) join on top
+    // where they exist. Cards open the project hub.
+    var DIR = { rows: [], progById: {}, status: "active", q: "" };
+
+    function statusBadge(s) {
+      var cls = s === "active" ? "badge-approved"
+              : s === "completed" ? "badge-gray"
+              : "badge-pending";
+      return UI.badge(s, cls);
+    }
+
+    // compare % work done vs % contract time used (BP projects with dates)
     function workVsTime(p) {
-      if (p.project_status === "completed") return '<span class="badge badge-approved">completed</span>';
-      if (p.project_status === "cancelled") return '<span class="badge badge-gray">cancelled</span>';
+      if (!p) return "";
+      if (p.project_status === "completed") return UI.badge("completed", "badge-approved");
+      if (p.project_status === "cancelled") return UI.badge("cancelled", "badge-gray");
       var elapsed = p.days_elapsed, remaining = p.days_remaining;
       if (elapsed === null || elapsed === undefined || remaining === null || remaining === undefined)
-        return '<span class="badge badge-gray">no dates</span>';
+        return "";
 
       var totalDays = elapsed + Math.max(remaining, 0);
-      if (totalDays <= 0) return '<span class="badge badge-gray">no dates</span>';
+      if (totalDays <= 0) return "";
       var timePct = Math.min(100, Math.round(elapsed / totalDays * 100));
       if (remaining < 0) timePct = 100;
       var workPct = Number(p.progress_pct) || 0;
       var diff = workPct - timePct;
 
       var label, cls;
-      if (remaining < 0)      { label = "OVERDUE";  cls = "badge-critical"; }
-      else if (diff >= 10)    { label = "ahead";    cls = "badge-approved"; }
-      else if (diff >= -10)   { label = "on track"; cls = "badge-gray"; }
-      else if (diff >= -25)   { label = "behind";   cls = "badge-medium"; }
-      else                    { label = "far behind"; cls = "badge-critical"; }
+      if (remaining < 0)      { label = "OVERDUE";    cls = "badge-critical"; }
+      else if (diff >= 10)    { label = "Ahead";      cls = "badge-approved"; }
+      else if (diff >= -10)   { label = "On track";   cls = "badge-gray"; }
+      else if (diff >= -25)   { label = "Behind";     cls = "badge-medium"; }
+      else                    { label = "Far behind"; cls = "badge-critical"; }
 
-      return '<span class="badge ' + cls + '">' + label + "</span>" +
-             '<div class="muted-line" style="font-size:11px">work ' + Math.round(workPct) + "% · time " + timePct + "%</div>";
+      return '<span class="badge ' + cls + '" title="work ' + Math.round(workPct) +
+             "% done · " + timePct + '% of contract time used">' + label + "</span>";
+    }
+
+    function matches(r) {
+      if (DIR.status === "active" && r.status !== "active") return false;
+      if (DIR.status === "completed" && r.status !== "completed") return false;
+      if (DIR.status === "others" && (r.status === "active" || r.status === "completed")) return false;
+      if (DIR.q) {
+        var prog = DIR.progById[r.project_id];
+        var hay = ((r.project_code || "") + " " + (r.project_name || "") + " " +
+                   (prog && prog.client_name ? prog.client_name : "")).toLowerCase();
+        if (hay.indexOf(DIR.q) === -1) return false;
+      }
+      return true;
+    }
+
+    function scopeChips(r) {
+      var out = [];
+      if (r.has_bored_scope) out.push('<span class="chip chip-tag" title="Bored piling scope">BP</span>');
+      if (r.has_sheet_scope) out.push('<span class="chip chip-tag" title="Sheet piling scope">SP</span>');
+      return out.join(" ");
+    }
+
+    function cardHtml(r) {
+      var prog = DIR.progById[r.project_id];
+      var head = '<div class="pcard-head"><strong>' + UI.escHtml(r.project_code || "?") +
+                 "</strong> — " + UI.escHtml(r.project_name || "") + "</div>";
+      var statusLine = '<div class="pcard-line">' + statusBadge(r.status) + " " + scopeChips(r) +
+                       (prog ? " " + workVsTime(prog) : "") + "</div>";
+      var client = prog && prog.client_name
+        ? '<div class="pcard-line muted-line">' + UI.escHtml(prog.client_name) + "</div>" : "";
+
+      var body = "";
+      var chips = [];
+      if (prog) {
+        var pct = Math.max(0, Math.min(100, Number(prog.progress_pct) || 0));
+        var total = prog.total_piles_planned || prog.total_piles_registered || 0;
+        body = '<div class="pcard-line"><span class="bar" style="flex:1"><span style="width:' +
+               pct + '%"></span></span><span>' + pct + "%</span></div>" +
+               '<div class="pcard-line muted-line">' + (prog.piles_completed || 0) + " of " +
+               total + " piles cast</div>";
+
+        if (prog.total_tests_required > 0)
+          chips.push('<span class="chip">Tests ' + (prog.tests_completed || 0) + "/" +
+                     prog.total_tests_required + "</span>");
+        var dl = prog.days_remaining;
+        if (dl !== null && dl !== undefined && r.status === "active") {
+          chips.push(dl < 0
+            ? '<span class="chip chip-bad">' + Math.abs(dl) + " days OVER target</span>"
+            : '<span class="chip">' + dl + " days left</span>");
+        }
+        if (prog.start_date)
+          chips.push('<span class="chip">' + UI.dstr(prog.start_date) + " → " +
+                     UI.dstr(prog.target_end_date) + "</span>");
+      } else {
+        body = '<div class="pcard-line muted-line">Hai Fu sheet piling — tracked outside the ' +
+               "bored-piling dashboard.</div>";
+      }
+
+      var inner = head + statusLine + client + body +
+                  (chips.length ? '<div class="pcard-chips">' + chips.join(" ") + "</div>" : "");
+
+      // only BP projects have a hub page to open
+      if (prog) {
+        return '<a class="pcard" href="project.html?project=' + r.project_id + '">' + inner + "</a>";
+      }
+      return '<div class="pcard" style="cursor:default">' + inner + "</div>";
+    }
+
+    function chipBtn(key, label, count) {
+      return '<button type="button" data-status="' + key + '"' +
+             (DIR.status === key ? ' class="active"' : "") + ">" +
+             label + " (" + count + ")</button>";
+    }
+
+    function render() {
+      var counts = { all: DIR.rows.length, active: 0, completed: 0, others: 0 };
+      DIR.rows.forEach(function (r) {
+        if (r.status === "active") counts.active++;
+        else if (r.status === "completed") counts.completed++;
+        else counts.others++;
+      });
+      document.getElementById("p-chips").innerHTML =
+        "<span>Show:</span>" +
+        chipBtn("active", "Active", counts.active) +
+        chipBtn("completed", "Completed", counts.completed) +
+        chipBtn("others", "Others", counts.others) +
+        chipBtn("all", "All", counts.all);
+
+      var list = DIR.rows.filter(matches);
+      document.getElementById("cards").innerHTML = list.map(cardHtml).join("");
+      document.getElementById("empty").innerHTML = list.length ? "" :
+        UI.empty("No projects match.",
+                 DIR.q ? "Try a shorter search, or switch the status filter." :
+                         "Switch the status filter above.");
     }
 
     window.onShellReady = async function () {
-      var tbody = document.getElementById("rows");
+      document.getElementById("cards").innerHTML = UI.empty("Loading…");
       try {
-        var rows = await Dash.getProjects();
-        if (!rows.length) { tbody.innerHTML = '<tr><td colspan="9" class="empty">No projects.</td></tr>'; return; }
+        var res = await Promise.all([Dash.getProjectDirectory(), Dash.getProjects()]);
+        DIR.rows = res[0].slice().sort(function (a, b) {
+          var aa = a.status === "active" ? 0 : 1, bb = b.status === "active" ? 0 : 1;
+          if (aa !== bb) return aa - bb;
+          return String(a.project_code || "").localeCompare(String(b.project_code || ""));
+        });
+        res[1].forEach(function (p) { DIR.progById[p.project_id] = p; });
+        if (!DIR.rows.some(function (r) { return r.status === "active"; })) DIR.status = "all";
+        render();
 
-        tbody.innerHTML = rows.map(function (p) {
-          var pct = Math.max(0, Math.min(100, Number(p.progress_pct) || 0));
-          var total = p.total_piles_planned || p.total_piles_registered || 0;
-          var daysLeft = p.days_remaining;
-          return "<tr onclick=\"location.href='piles.html?project=" + p.project_id + "'\" style=\"cursor:pointer\">" +
-            "<td><strong>" + p.project_code + "</strong></td>" +
-            '<td class="wrap">' + (p.project_name || "") +
-              (p.client_name ? '<div class="muted-line" style="font-size:11px">' + p.client_name + "</div>" : "") + "</td>" +
-            '<td><span class="badge badge-' + (p.project_status === "active" ? "approved" : "gray") + '">' + p.project_status + "</span></td>" +
-            '<td><span class="bar"><span style="width:' + pct + '%"></span></span> ' +
-              pct + "% (" + (p.piles_completed || 0) + "/" + total + ")</td>" +
-            "<td>" + workVsTime(p) + "</td>" +
-            '<td class="num">' + (p.tests_completed || 0) + " / " + (p.total_tests_required || 0) + "</td>" +
-            "<td>" + (p.start_date || "—") + "</td>" +
-            "<td>" + (p.target_end_date || "—") + "</td>" +
-            '<td class="num' + (daysLeft !== null && daysLeft < 0 ? " neg" : "") + '">' +
-              (daysLeft === null || daysLeft === undefined ? "—" : daysLeft) + "</td>" +
-          "</tr>";
-        }).join("");
+        document.getElementById("p-chips").addEventListener("click", function (ev) {
+          var b = ev.target.closest("button[data-status]");
+          if (!b) return;
+          DIR.status = b.getAttribute("data-status");
+          render();
+        });
+        document.getElementById("p-search").addEventListener("input", function () {
+          DIR.q = this.value.trim().toLowerCase();
+          render();
+        });
       } catch (e) {
-        tbody.innerHTML = "";
-        document.getElementById("error").innerHTML =
-          '<div class="banner banner-red">Could not load: ' + (e.message || e) + "</div>";
+        document.getElementById("cards").innerHTML = "";
+        document.getElementById("error").innerHTML = UI.errorBanner(e.message || e);
       }
     };
   </script>

@@ -33,13 +33,14 @@
 
     <div id="pile-strip"></div>
 
-    <!-- Production trend (round C + follow-ups): dual-axis SVG — blue bars =
-         metres bored (left scale; only reports carrying start/end depths),
-         orange line = diesel L (right scale), green numbers = piles cast.
-         Range controls: 7d / 14d / 28d / All time / custom from-to; ranges
-         over ~2 months switch to weekly bars. Preset ranges also show a
-         previous-equal-window comparison. Hidden when the project has no
-         activity rows at all. -->
+    <!-- Production trend (UX refresh round 3): responsive SVG with two
+         stacked panels sharing one time axis — top: blue bars = metres bored
+         (only reports carrying start/end depths) + green number = piles
+         cast; bottom: orange line = diesel L on its own scale. Range
+         controls: 7d / 14d / 28d / All time / custom; long ranges (and
+         narrow phones) bucket to weekly bars. Preset ranges show a
+         previous-equal-window comparison; tap a column to pin its numbers.
+         Hidden when the project has no activity rows at all. -->
     <div id="trend"></div>
 
     <div id="sections"></div>
@@ -55,40 +56,10 @@
   <script src="shell.js"></script>
 
   <script>
-    // ---- shared helpers (same definitions the pile/machine pages use) ----
-    function esc(s) { return String(s === null || s === undefined ? "" : s).replace(/"/g, "&quot;"); }
-    function escHtml(s) {
-      return String(s === null || s === undefined ? "" : s)
-        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    }
-    function dstr(d) {
-      if (!d) return "—";
-      return new Intl.DateTimeFormat("en-MY", { day: "2-digit", month: "short", year: "numeric" })
-        .format(new Date(d + "T00:00:00"));
-    }
-    function daysSince(dateStr) {
-      if (!dateStr) return null;
-      return Math.round((new Date(Dash.todayKL()) - new Date(dateStr)) / 86400000);
-    }
-
-    // ---- pile pipeline strip (same component as piles.html) ----
-    var STAGES = [
-      ["Planned", ["planned"]],
-      ["Boring",  ["casing_installed", "boring_in_progress"]],
-      ["Bored",   ["bored_complete"]],
-      ["Cage",    ["cage_in_progress", "cage_installed"]],
-      ["Cast",    ["casting_in_progress", "cast_complete"]],
-      ["Trimmed", ["head_trimmed"]]
-    ];
-    function stageOf(status) {
-      for (var i = 0; i < STAGES.length; i++)
-        if (STAGES[i][1].indexOf(status) !== -1) return STAGES[i][0];
-      return "Planned";
-    }
-    var STAGE_COLORS = {
-      "Planned": "#e5e7eb", "Boring": "#5598e7", "Bored": "#2a78d6",
-      "Cage": "#1c5cab", "Cast": "#1baf7a", "Trimmed": "#008300"
-    };
+    // ---- shared helpers now live in ui.js (window.UI) — local aliases keep
+    //      every call site below unchanged ----
+    var esc = UI.esc, escHtml = UI.escHtml, dstr = UI.dstr, daysSince = UI.daysSince;
+    var STAGES = UI.PILE_STAGES, stageOf = UI.stageOf, STAGE_COLORS = UI.STAGE_COLORS;
 
     // one segmented stage bar for any list of piles
     function stageBarHtml(list) {
@@ -146,49 +117,70 @@
              zoneRows + "</div>";
     }
 
-    // ---- 14-day production trend (dual-axis combo, owner's choice) ----
-    // Blue bars = metres bored (LEFT scale). Orange line + dots = diesel
-    // (RIGHT scale). The two scales are independent — crossings carry no
-    // meaning; per-side scale labels + per-day tooltips keep it honest.
-    // Bars become stacked soil/rock when the bot starts tagging rock coring
-    // as its own activity type (see roadmap bot wishlist).
-    function buildTrendSvg(days, maxM, maxD, weekly) {
-      var W = 700, H = 152, L = 34, R = 40, T = 8, B = 32;
-      var pw = W - L - R, ph = H - T - B, slot = pw / days.length;
+    // ---- production trend (responsive; two stacked panels, one time axis) ----
+    // TOP panel: blue bars = metres bored, green number = piles cast.
+    // BOTTOM panel: orange line = diesel litres, on its own scale.
+    // (The old chart put both measures on one plot with two y-scales — a
+    // classic misread; separate panels keep each honest.)
+    // Renders at the container's real pixel width so labels stay readable on
+    // phones; re-renders on resize; tap/click a column pins its numbers to
+    // the readout line under the chart.
+    function buildTrendSvg(days, maxM, maxD, weekly, width, selIdx) {
+      var W = Math.max(320, Math.floor(width));
+      var L = 46, R = 10, T = 18;
+      var ph1 = 108;                     // production panel height
+      var base1 = T + ph1;
+      var castY = base1 + 14;            // green cast numbers under the baseline
+      var T2 = castY + 16;               // diesel panel top
+      var ph2 = 52;
+      var base2 = T2 + ph2;
+      var H = base2 + 20;
+      var pw = W - L - R, slot = pw / days.length;
       var parts = [];
 
-      // baseline + per-side scale labels
-      parts.push('<line x1="' + L + '" y1="' + (T + ph) + '" x2="' + (W - R) + '" y2="' + (T + ph) +
-                 '" stroke="#e5e7eb" stroke-width="1"/>');
-      parts.push('<text x="' + (L - 4) + '" y="' + (T + 8) + '" text-anchor="end" class="tx-axis">' +
-                 f1(maxM) + " m</text>");
-      parts.push('<text x="' + (L - 4) + '" y="' + (T + ph) + '" text-anchor="end" class="tx-axis">0</text>');
-      parts.push('<text x="' + (W - R + 4) + '" y="' + (T + 8) + '" class="tx-axis">' +
-                 Math.round(maxD) + " L</text>");
-      parts.push('<text x="' + (W - R + 4) + '" y="' + (T + ph) + '" class="tx-axis">0</text>');
+      // panel captions + scale labels (left)
+      parts.push('<text x="' + L + '" y="11" class="tx-axis">Metres bored' +
+                 (weekly ? " / week" : " / day") + "</text>");
+      parts.push('<text x="' + L + '" y="' + (T2 - 5) + '" class="tx-axis">Diesel L' +
+                 (weekly ? " / week" : " / day") + "</text>");
+      parts.push('<text x="' + (L - 5) + '" y="' + (T + 9) + '" text-anchor="end" class="tx-axis">' +
+                 f1(maxM) + "</text>");
+      parts.push('<text x="' + (L - 5) + '" y="' + base1 + '" text-anchor="end" class="tx-axis">0</text>');
+      parts.push('<text x="' + (L - 5) + '" y="' + (T2 + 9) + '" text-anchor="end" class="tx-axis">' +
+                 Math.round(maxD) + "</text>");
+      parts.push('<text x="' + (L - 5) + '" y="' + base2 + '" text-anchor="end" class="tx-axis">0</text>');
 
-      // metres bars + cast numbers
+      // tapped-column highlight (behind the marks)
+      if (selIdx !== null && selIdx !== undefined && days[selIdx]) {
+        parts.push('<rect x="' + (L + slot * selIdx).toFixed(1) + '" y="0" width="' + slot.toFixed(1) +
+                   '" height="' + H + '" fill="#2563eb" opacity="0.08"/>');
+      }
+
+      // baselines
+      parts.push('<line x1="' + L + '" y1="' + base1 + '" x2="' + (W - R) + '" y2="' + base1 +
+                 '" stroke="#e4e8ee" stroke-width="1"/>');
+      parts.push('<line x1="' + L + '" y1="' + base2 + '" x2="' + (W - R) + '" y2="' + base2 +
+                 '" stroke="#e4e8ee" stroke-width="1"/>');
+
+      // production: metres bars + cast numbers
       days.forEach(function (d, i) {
         var cx = L + slot * (i + 0.5);
         if (d.metres > 0) {
-          var h = Math.max(3, d.metres / maxM * ph);
-          var bw = slot * 0.55;
-          parts.push('<rect x="' + (cx - bw / 2).toFixed(1) + '" y="' + (T + ph - h).toFixed(1) +
+          var h = Math.max(3, d.metres / maxM * ph1);
+          var bw = Math.min(26, slot * 0.55);
+          parts.push('<rect x="' + (cx - bw / 2).toFixed(1) + '" y="' + (base1 - h).toFixed(1) +
                      '" width="' + bw.toFixed(1) + '" height="' + h.toFixed(1) +
                      '" rx="2" fill="#2a78d6"/>');
         }
         if (d.cast) {
-          parts.push('<text x="' + cx.toFixed(1) + '" y="' + (T + ph + 13) +
+          parts.push('<text x="' + cx.toFixed(1) + '" y="' + castY +
                      '" text-anchor="middle" class="tx-cast">' + d.cast + "</text>");
         }
       });
 
-      // diesel line + dots (right scale)
+      // diesel line + dots (its own panel, its own scale)
       var pts = days.map(function (d, i) {
-        return {
-          x: L + slot * (i + 0.5),
-          y: T + ph - (d.diesel / maxD * ph)
-        };
+        return { x: L + slot * (i + 0.5), y: base2 - (d.diesel / maxD * ph2) };
       });
       parts.push('<polyline fill="none" stroke="#eb6834" stroke-width="2" points="' +
                  pts.map(function (pt) { return pt.x.toFixed(1) + "," + pt.y.toFixed(1); }).join(" ") + '"/>');
@@ -211,17 +203,23 @@
                    '" class="tx-axis">' + (weekly ? "wk " : "") + dstr(days[idx].date) + "</text>");
       });
 
-      // hover targets last (on top): whole-column, native tooltip
+      // hover/tap targets last (on top): whole column, native tooltip + index
       days.forEach(function (d, i) {
-        var tip = (weekly ? "Week of " : "") + dstr(d.date) + " — " + f1(d.metres) + " m bored" +
-                  (d.boredOn ? " (" + d.boredOn + " pile" + (d.boredOn === 1 ? "" : "s") + ")" : "") +
-                  " · " + d.cast + " cast · " + Math.round(d.diesel) + " L diesel";
-        parts.push('<rect x="' + (L + slot * i).toFixed(1) + '" y="0" width="' + slot.toFixed(1) +
-                   '" height="' + H + '" fill="transparent"><title>' + escHtml(tip) + "</title></rect>");
+        parts.push('<rect data-idx="' + i + '" x="' + (L + slot * i).toFixed(1) +
+                   '" y="0" width="' + slot.toFixed(1) +
+                   '" height="' + H + '" fill="transparent"><title>' +
+                   escHtml(colSummary(d, weekly)) + "</title></rect>");
       });
 
       return '<svg class="trend-svg" viewBox="0 0 ' + W + " " + H + '" role="img">' +
              parts.join("") + "</svg>";
+    }
+
+    // one column's numbers in words (tooltip + tap readout share it)
+    function colSummary(d, weekly) {
+      return (weekly ? "Week of " : "") + dstr(d.date) + " — " + f1(d.metres) + " m bored" +
+             (d.boredOn ? " (" + d.boredOn + " pile" + (d.boredOn === 1 ? "" : "s") + ")" : "") +
+             " · " + d.cast + " cast · " + Math.round(d.diesel) + " L diesel";
     }
 
     function addDays(dateStr, n) {
@@ -229,10 +227,13 @@
       d.setUTCDate(d.getUTCDate() + n);
       return d.toISOString().slice(0, 10);
     }
-    function f1(v) { return (Math.round(v * 10) / 10).toString(); }
+    var f1 = UI.f1;
 
-    // range state: rows cached once, chart re-renders client-side
+    // range state: rows cached once, chart re-renders client-side.
+    // _trendState remembers the current range so resize/tap can re-render it;
+    // _trendSel is the tapped column (index into the rendered series).
     var _trendRows = null, _trendMin = null;
+    var _trendState = null, _trendSel = null, _trendSeries = null, _trendWeekly = false;
 
     function trendSums(list) {
       return list.reduce(function (s, d) {
@@ -276,6 +277,7 @@
     }
 
     function renderTrendBody(mode, from, to) {
+      _trendState = { mode: mode, from: from, to: to };
       var byDate = {};
       _trendRows.forEach(function (r) { byDate[r.log_date] = r; });
       var today = Dash.todayKL();
@@ -288,8 +290,14 @@
       }
 
       var days = buildRangeDays(byDate, fromStr, toStr);
-      var weekly = days.length > 60;
+      // real rendering width: bars thinner than ~12px read as slivers, so
+      // narrow screens switch to weekly buckets sooner than wide ones
+      var bodyEl = document.getElementById("trend-body");
+      var width = Math.max(320, bodyEl.clientWidth || 660);
+      var weekly = days.length > Math.max(30, Math.floor((width - 56) / 12));
       var series = weekly ? bucketWeekly(days) : days;
+      _trendSeries = series; _trendWeekly = weekly;
+      if (_trendSel !== null && (_trendSel < 0 || _trendSel >= series.length)) _trendSel = null;
       var tot = trendSums(days);
 
       var head = "<strong>" + label + ": " + tot.cast + " pile" + (tot.cast === 1 ? "" : "s") +
@@ -322,17 +330,24 @@
       } else {
         var maxM = Math.max.apply(null, series.map(function (d) { return d.metres; }).concat([1]));
         var maxD = Math.max.apply(null, series.map(function (d) { return d.diesel; }).concat([1]));
-        body = buildTrendSvg(series, maxM, maxD, weekly) +
-               '<div class="trend-castnote"><i class="key-metres"></i>metres bored (left scale)' +
-               ' <i class="key-diesel"></i>diesel line (right scale, L' + (weekly ? "/week" : "/day") + ")" +
-               ' <i class="key-cast"></i>green number = piles cast' +
-               (weekly ? " that week (weekly bars — long range)" : " that day") + "</div>" +
+        body = buildTrendSvg(series, maxM, maxD, weekly, width, _trendSel) +
+               '<div id="trend-readout" class="pipe-note">' + escHtml(trendReadout()) + "</div>" +
+               '<div class="trend-castnote"><i class="key-metres"></i>bars = metres bored' +
+               ' <i class="key-cast"></i>number = piles cast' +
+               ' <i class="key-diesel"></i>bottom line = diesel' +
+               (weekly ? " (weekly buckets — long range)" : "") + "</div>" +
                '<div class="pipe-note">metres count only the reports that included start/end depths — ' +
                "quiet days may still have had boring; diesel comes from the nightly machine reports; " +
                "bars split into soil/rock once reports tag rock coring separately</div>";
       }
-      document.getElementById("trend-body").innerHTML =
+      bodyEl.innerHTML =
         '<div class="trend-head">' + head + compare + "</div>" + body;
+    }
+
+    function trendReadout() {
+      if (_trendSel !== null && _trendSeries && _trendSeries[_trendSel])
+        return colSummary(_trendSeries[_trendSel], _trendWeekly);
+      return "Tap or hover a column for that " + (_trendWeekly ? "week" : "day") + "'s exact numbers.";
     }
 
     function initTrend(rows) {
@@ -357,6 +372,14 @@
         '<div id="trend-body"></div></div>';
 
       el.addEventListener("click", function (ev) {
+        // tap a column -> pin its numbers to the readout line (tap again to unpin)
+        var col = ev.target.closest ? ev.target.closest("rect[data-idx]") : null;
+        if (col) {
+          var idx = Number(col.getAttribute("data-idx"));
+          _trendSel = (_trendSel === idx) ? null : idx;
+          renderTrendBody(_trendState.mode, _trendState.from, _trendState.to);
+          return;
+        }
         var b = ev.target.closest("button");
         if (!b) return;
         if (b.id === "trend-apply") {
@@ -365,12 +388,24 @@
           if (!from || !to || from > to) return;
           el.querySelectorAll(".trend-controls button").forEach(function (x) { x.classList.remove("active"); });
           b.classList.add("active");
+          _trendSel = null;
           renderTrendBody("custom", from, to);
         } else if (b.getAttribute("data-range")) {
           el.querySelectorAll(".trend-controls button").forEach(function (x) { x.classList.remove("active"); });
           b.classList.add("active");
+          _trendSel = null;
           renderTrendBody(b.getAttribute("data-range"));
         }
+      });
+
+      // phones rotate, windows resize — re-render at the new width
+      var resizeTimer = null;
+      window.addEventListener("resize", function () {
+        if (!_trendState) return;
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(function () {
+          renderTrendBody(_trendState.mode, _trendState.from, _trendState.to);
+        }, 150);
       });
 
       renderTrendBody("14");
@@ -389,9 +424,9 @@
 
       // 1) machine breakdown
       machines.filter(function (m) { return m.last_status === "breakdown"; }).forEach(function (m) {
-        items.push({ rank: 1, html: attLine("badge-critical", "breakdown",
+        items.push({ rank: 1, html: attLine("badge-critical", "Breakdown",
           "<strong>" + escHtml(m.machine_code) + "</strong> " +
-          escHtml(String(m.machine_type || "").replace(/_/g, " ")),
+          escHtml(UI.label(m.machine_type)),
           "last report " + (m.last_status_date || "—")) });
       });
 
@@ -403,7 +438,7 @@
         if (i.assigned_to_name_resolved) meta.push("PIC: " + escHtml(i.assigned_to_name_resolved));
         if (i.latest_action) meta.push("latest: " + escHtml(i.latest_action));
         items.push({ rank: 2, html: attLine(
-          i.priority === "critical" ? "badge-critical" : "badge-high", i.priority,
+          i.priority === "critical" ? "badge-critical" : "badge-high", UI.label(i.priority),
           "<strong>#" + i.issue_number + "</strong> " + escHtml(i.title || ""), meta.join(" · ")) });
       });
 
@@ -434,7 +469,7 @@
         var last = i.latest_action_date ? String(i.latest_action_date).slice(0, 10) : i.raised_date;
         items.push({ rank: 6, html: attLine("badge-pending", "no update " + daysSince(last) + "d",
           "<strong>#" + i.issue_number + "</strong> " + escHtml(i.title || ""),
-          escHtml(i.priority || "") + " · raised " + dstr(i.raised_date)) });
+          escHtml(UI.label(i.priority)) + " · raised " + dstr(i.raised_date)) });
       });
 
       // 7) site silent (active projects only — completed sites are quiet by nature)
@@ -494,17 +529,17 @@
                        : m.last_status === "breakdown" ? "breakdown" : "gray";
           var d = daysSince(m.last_status_date);
           var state = m.last_status
-            ? '<span class="badge badge-' + stateCls + '">' + escHtml(m.last_status) + "</span>" +
+            ? UI.badge(m.last_status, "badge-" + stateCls) +
               ' <span class="' + (d !== null && d >= 3 ? "stale-warn" : "muted") + '">' + (m.last_status_date || "") + "</span>"
             : '<span class="muted-line">never reported</span>';
           return "<tr>" +
-            "<td><strong>" + escHtml(m.machine_code) + "</strong></td>" +
-            "<td>" + escHtml(String(m.machine_type || "").replace(/_/g, " ")) + "</td>" +
-            "<td>" + state + "</td>" +
-            '<td class="num' + (m.open_issues > 0 ? " bold" : "") + '">' + (m.open_issues || 0) + "</td>" +
+            UI.td("Machine", "<strong>" + escHtml(m.machine_code) + "</strong>") +
+            UI.td("Type", escHtml(UI.label(m.machine_type))) +
+            UI.td("Last report", state) +
+            UI.td("Open issues", String(m.open_issues || 0), "num" + (m.open_issues > 0 ? " bold" : "")) +
           "</tr>";
         }).join("");
-        body = '<div class="table-wrap"><table>' +
+        body = '<div class="table-wrap table-stack"><table>' +
                "<thead><tr><th>Machine</th><th>Type</th><th>Last report</th>" +
                '<th class="num">Open issues</th></tr></thead>' +
                "<tbody>" + rows + "</tbody></table></div>";
@@ -513,24 +548,8 @@
              '<a class="section-link" href="machines.html">machines page →</a></h2>' + body;
     }
 
-    // ---- tests: pipeline buckets (shared by the KPI card + tests section) ----
-    // Curing -> To arrange (curing done, not booked; RED after the 7-day
-    // grace) -> Booked -> done. "Date missed" = a booked date passed.
-    var TEST_GRACE_DAYS = 7;
-    function testBuckets(tests) {
-      var done = ["completed", "passed"];
-      var b = { missed: [], notBooked: [], toArrange: [], booked: [], curing: [] };
-      tests.forEach(function (t) {
-        if (done.indexOf(t.status) !== -1 || t.test_result || t.actual_test_date) return;
-        if (t.is_overdue === true) { b.missed.push(t); return; }
-        if (t.scheduled_test_date) { b.booked.push(t); return; }
-        if (t.days_until_eligible === null || t.days_until_eligible === undefined) return;
-        if (t.days_until_eligible > 0) { b.curing.push(t); return; }
-        if (-t.days_until_eligible > TEST_GRACE_DAYS) b.notBooked.push(t);
-        else b.toArrange.push(t);
-      });
-      return b;
-    }
+    // ---- tests: pipeline buckets — canonical copy lives in ui.js ----
+    var testBuckets = UI.testBuckets;
 
     // (the old per-section issue + test lists were absorbed into the
     //  management-attention panel above; curing/booked pipeline counts
@@ -544,23 +563,7 @@
     // The hub shows claims; WORKING them (create / edit lines / certify /
     // status / delete latest) lives on the dedicated claims.html page,
     // linked below — owner decision 2026-07-16.
-    var RM_FMT = new Intl.NumberFormat("en-MY", {
-      minimumFractionDigits: 2, maximumFractionDigits: 2
-    });
-    function fmtRM(v) {
-      if (v === null || v === undefined || v === "") return "—";
-      return "RM " + RM_FMT.format(Number(v));
-    }
-    function fmtPct(v) {
-      return (v === null || v === undefined || v === "") ? "—" : Number(v) + "%";
-    }
-    // claim periods read as a month, not a day ("May 2026") — the stored date
-    // is the month's last day by entry convention
-    function mstr(d) {
-      if (!d) return "—";
-      return new Intl.DateTimeFormat("en-MY", { month: "short", year: "numeric" })
-        .format(new Date(d + "T00:00:00"));
-    }
+    var fmtRM = UI.fmtRM, fmtPct = UI.fmtPct, mstr = UI.mstr;
     var CLAIM_BADGE = { submitted: "badge-pending", certified: "badge-approved", paid: "badge-gray" };
 
     // shared claims state — survives re-renders (open/closed claim rows)
@@ -794,8 +797,8 @@
 
         // ---- header ----
         titleEl.textContent = p.project_code + " — " + (p.project_name || "");
-        var subBits = ['<span class="badge badge-' +
-          (p.project_status === "active" ? "approved" : "gray") + '">' + p.project_status + "</span>"];
+        var subBits = [UI.badge(p.project_status,
+          "badge-" + (p.project_status === "active" ? "approved" : "gray"))];
         if (p.client_name) subBits.push("Client: " + escHtml(p.client_name));
         var supRow = results[5].find(function (s) { return s.project_id === projectId; });
         if (supRow && supRow.supervisors) subBits.push("Supervisor: " + escHtml(supRow.supervisors));

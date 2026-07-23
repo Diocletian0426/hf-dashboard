@@ -740,6 +740,11 @@ summary.zone-rich::before { float: left; margin: 4px 8px 0 0; }
 }
 .table-sticky-first table th:first-child { z-index: 3; background: var(--surface-2); }
 .table-sticky-first table tbody tr:hover td:first-child { background: #f4f7fb; }
+/* full-width expandable rows (record cards, claim lines) opt back out */
+.table-sticky-first table tr.pile-card-row > td,
+.table-sticky-first table tr.claim-lines-row > td {
+  position: static; box-shadow: none; background: #fbfcfe;
+}
 
 /* ============================ 8. RESPONSIVE =============================== */
 

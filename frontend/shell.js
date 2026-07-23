@@ -120,7 +120,10 @@
     var projectId = new URLSearchParams(window.location.search).get("project") || "";
 
     Dash.getProjectDirectory().then(function (rows) {
-      rows = (rows || []).slice().sort(function (a, b) {
+      // hub/piles/claims are bored-piling pages — sheet-piling-only sites
+      // have nothing to show there, so keep them out of the switcher
+      rows = (rows || []).filter(function (r) { return r.has_bored_scope !== false; });
+      rows = rows.slice().sort(function (a, b) {
         var aa = a.status === "active" ? 0 : 1, bb = b.status === "active" ? 0 : 1;
         if (aa !== bb) return aa - bb;
         return String(a.project_code || "").localeCompare(String(b.project_code || ""));
