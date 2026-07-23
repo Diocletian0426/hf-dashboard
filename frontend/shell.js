@@ -24,7 +24,8 @@
     { href: "machines.html",   label: "Machines"   },
     { href: "manpower.html",   label: "Manpower"   },
     { href: "attendance.html", label: "Attendance" },
-    { href: "leave.html",      label: "Leave"      },
+    // leave.html stays in PAGE_ACCESS but is out of the nav until the page
+    // is actually built (owner decision — leave UI deferred)
     { href: "tests.html",      label: "Tests"      }
   ];
 
