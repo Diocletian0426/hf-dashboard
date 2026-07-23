@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HF Dashboard — Tests</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <header id="nav"></header>
+
+  <main id="main">
+
+    <!-- ================= TEST ACTION QUEUE (0052) =================
+         Deliberately THIN: this is the cross-project CHASING list, not a
+         test browser (completed/passed tests never show here — the full
+         record lives on each pile's card on the piles page). Buckets use
+         the hub's pipeline language (testBuckets + 7-day grace, copied
+         from project.html — house pattern):
+           To arrange — curing done, no date. RED subset = idle past the
+                        7-day grace ("not booked").
+           Booked     — has a date. RED subset = the date came and went
+                        ("date missed", the tracker's is_overdue).
+           Curing     — not eligible yet (collapsed; nothing to do).
+         Inline actions (management/office only; the database re-checks
+         every call): book / rebook / unbook, record result. Every row
+         deep-links to its pile card (piles.html?project=&pile=). -->
+    <div class="page-eyebrow">Tests</div>
+    <h1>Test action queue</h1>
+    <p id="tq-sub" class="page-caption"></p>
+
+    <div id="error"></div>
+
+    <div class="mp-controls" id="tq-controls" hidden>
+      <span>Project: <select id="tq-project"></select></span>
+      <span>Type: <select id="tq-type"></select></span>
+    </div>
+
+    <div id="buckets"></div>
+
+  </main>
+
+  <script src="vendor/supabase.js"></script>
+  <script src="config.js"></script>
+  <script src="dashboard-client.js"></script>
+  <script src="shell.js"></script>
+
+  <script>
+    function esc(s) { return String(s === null || s === undefined ? "" : s).replace(/"/g, "&quot;"); }
+    function escHtml(s) {
+      return String(s === null || s === undefined ? "" : s)
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+    // '2026-07-03' -> '03 Jul 2026'
+    function dstr(d) {
+      if (!d) return "—";
+      return new Intl.DateTimeFormat("en-MY", { day: "2-digit", month: "short", year: "numeric" })
+        .format(new Date(d + "T00:00:00"));
+    }
+
+    var TQ = { rows: [], types: [], dir: [], can: false, codeToId: {},
+               projFilter: "all", typeFilter: "all" };
+
+    // same rule as the hub: curing done + idle past the grace = escalated red
+    var TEST_GRACE_DAYS = 7;
+
+    // canonical bucket logic (copied from project.html — house pattern)
+    function testBuckets(tests) {
+      var b = { missed: [], booked: [], curing: [], toArrange: [], notBooked: [] };
+      tests.forEach(function (t) {
+        if (t.is_overdue === true) { b.missed.push(t); return; }
+        if (t.scheduled_test_date) { b.booked.push(t); return; }
+        if (t.days_until_eligible === null || t.days_until_eligible === undefined) return;
+        if (t.days_until_eligible > 0) { b.curing.push(t); return; }
+        if (-t.days_until_eligible > TEST_GRACE_DAYS) b.notBooked.push(t);
+        else b.toArrange.push(t);
+      });
+      return b;
+    }
+
+    function filtered() {
+      return TQ.rows.filter(function (t) {
+        return (TQ.projFilter === "all" || t.project_code === TQ.projFilter) &&
+               (TQ.typeFilter === "all" || t.test_code === TQ.typeFilter);
+      });
+    }
+
+    function pileLink(t) {
+      var pid = TQ.codeToId[t.project_code];
+      if (!pid) return "";
+      return ' <a href="piles.html?project=' + pid + "&pile=" +
+             encodeURIComponent(t.pile_mark_no || "") + '">pile &rarr;</a>';
+    }
+
+    // inline actions: book/rebook (+unbook when booked) and record result.
+    // Buttons are convenience — the database re-checks the caller every call.
+    function rowActions(t) {
+      if (!TQ.can) return "";
+      return ' <span class="move-ctl">' +
+        '<input type="date" id="tqd-' + t.test_req_id + '" value="' + esc(t.scheduled_test_date || "") + '">' +
+        '<button type="button" data-action="tq-book" data-req="' + t.test_req_id + '">' +
+        (t.scheduled_test_date ? "Rebook" : "Book") + "</button>" +
+        (t.scheduled_test_date
+          ? '<button type="button" data-action="tq-unbook" data-req="' + t.test_req_id + '">Unbook</button>'
+          : "") +
+        '<button type="button" data-action="tq-result" data-req="' + t.test_req_id +
+        '" data-code="' + esc(t.test_code || "") + '" data-mark="' + esc(t.pile_mark_no || "") +
+        '">result…</button></span>';
+    }
+
+    function resultFormHtml(reqId, code, mark) {
+      return '<div class="claim-form">' +
+        "<strong>Record result — " + escHtml(code) + " on " + escHtml(mark) + "</strong>" +
+        '<label>test date <input id="tqr-date-' + reqId + '" type="date" value="' + Dash.todayKL() + '"></label>' +
+        '<label>result <select id="tqr-status-' + reqId + '">' +
+          '<option value="passed">passed</option><option value="failed">failed</option>' +
+          '<option value="inconclusive">inconclusive</option>' +
+          '<option value="pending_review">pending review</option></select></label>' +
+        '<label>report URL <input id="tqr-url-' + reqId + '" size="22" placeholder="optional — Drive link"></label>' +
+        '<label>remarks <input id="tqr-remarks-' + reqId + '" size="12" placeholder="optional"></label>' +
+        '<button type="button" data-action="tq-result-save" data-req="' + reqId + '">Save result</button>' +
+        '<button type="button" data-action="tq-form-cancel" data-req="' + reqId + '">Cancel</button>' +
+        "</div>";
+    }
+
+    // code AND name — the office knows sites by name (house picker rule)
+    function rowHtml(t, infoHtml) {
+      return '<div class="pc-line"><strong>' + escHtml(t.project_code || "") + "</strong>" +
+             (t.project_name ? ' <span class="muted">' + escHtml(t.project_name) + "</span>" : "") +
+             " · " + escHtml(t.pile_mark_no || "") +
+             ' · <span class="badge badge-gray">' + escHtml(t.test_code || "") + "</span> " +
+             infoHtml + rowActions(t) + pileLink(t) +
+             '</div><div id="tqf-' + t.test_req_id + '"></div>';
+    }
+
+    function zoneBlock(title, count, note, body, open) {
+      return '<details class="zone"' + (open ? " open" : "") + ">" +
+             '<summary><span class="zone-name">' + title + "</span>" +
+             '<span class="zone-count">' + count + (note ? " · " + note : "") + "</span></summary>" +
+             '<div class="chase-body">' +
+             (body || '<div class="muted-line">Nothing here.</div>') + "</div></details>";
+    }
+
+    function render() {
+      var b = testBuckets(filtered());
+
+      // TO ARRANGE: escalated (past grace) first, red — then in-grace, amber
+      var arrange =
+        b.notBooked.sort(function (x, y) { return x.days_until_eligible - y.days_until_eligible; })
+          .map(function (t) {
+            return rowHtml(t, '<span class="badge badge-critical">not booked</span> ' +
+              '<span class="stale-warn">curing done ' + (-t.days_until_eligible) + "d ago</span>");
+          }).join("") +
+        b.toArrange.sort(function (x, y) { return x.days_until_eligible - y.days_until_eligible; })
+          .map(function (t) {
+            return rowHtml(t, '<span class="badge badge-pending">to arrange</span> ' +
+              '<span class="muted">curing done ' + (-t.days_until_eligible) + "d ago</span>");
+          }).join("");
+
+      // BOOKED: missed dates first, red — then upcoming by date
+      var booked =
+        b.missed.sort(function (x, y) { return (y.overdue_days || 0) - (x.overdue_days || 0); })
+          .map(function (t) {
+            return rowHtml(t, '<span class="badge badge-critical">date missed</span> ' +
+              '<span class="stale-warn">booked ' + dstr(t.scheduled_test_date) + " · " +
+              (t.overdue_days || 0) + "d late</span>");
+          }).join("") +
+        b.booked.sort(function (x, y) {
+            return String(x.scheduled_test_date).localeCompare(String(y.scheduled_test_date));
+          })
+          .map(function (t) {
+            return rowHtml(t, '<span class="badge badge-scheduled">booked</span> ' +
+              '<span class="muted">' + dstr(t.scheduled_test_date) + "</span>");
+          }).join("");
+
+      // CURING: nothing to do yet — collapsed
+      var curing = b.curing.sort(function (x, y) { return x.days_until_eligible - y.days_until_eligible; })
+        .map(function (t) {
+          return rowHtml(t, '<span class="badge badge-gray">curing</span> ' +
+            '<span class="muted">eligible ' + dstr(t.earliest_test_date) +
+            " (" + t.days_until_eligible + "d)</span>");
+        }).join("");
+
+      document.getElementById("buckets").innerHTML =
+        zoneBlock("To arrange", b.toArrange.length + b.notBooked.length,
+                  b.notBooked.length ? b.notBooked.length + " past the " + TEST_GRACE_DAYS + "-day grace" : "",
+                  arrange, true) +
+        zoneBlock("Booked", b.missed.length + b.booked.length,
+                  b.missed.length ? b.missed.length + " date missed" : "",
+                  booked, true) +
+        zoneBlock("Curing", b.curing.length, "nothing to do yet", curing, false);
+
+      document.getElementById("tq-sub").innerHTML =
+        (b.toArrange.length + b.notBooked.length) + " to arrange" +
+        (b.notBooked.length ? " (" + b.notBooked.length + " past grace)" : "") +
+        " · " + (b.missed.length + b.booked.length) + " booked" +
+        (b.missed.length ? " (" + b.missed.length + " missed)" : "") +
+        " · " + b.curing.length + " curing" +
+        (TQ.can ? "" : ' <span class="muted">(view only — actions are office/management)</span>');
+    }
+
+    function renderFilters() {
+      var projects = {};
+      TQ.rows.forEach(function (t) { projects[t.project_code] = t.project_name || ""; });
+      document.getElementById("tq-project").innerHTML =
+        '<option value="all">all projects</option>' +
+        Object.keys(projects).sort().map(function (c) {
+          return '<option value="' + esc(c) + '"' + (TQ.projFilter === c ? " selected" : "") + ">" +
+                 escHtml(c + (projects[c] ? " — " + projects[c] : "")) + "</option>";
+        }).join("");
+      document.getElementById("tq-type").innerHTML =
+        '<option value="all">any type</option>' +
+        TQ.types.map(function (t) {
+          return '<option value="' + esc(t.test_code) + '"' + (TQ.typeFilter === t.test_code ? " selected" : "") + ">" +
+                 escHtml(t.test_code) + "</option>";
+        }).join("");
+      document.getElementById("tq-controls").hidden = false;
+    }
+
+    window.onShellReady = async function () {
+      try {
+        var results = await Promise.all([
+          Dash.getTests(),             // pending only — this is a chasing queue
+          Dash.getProjectDirectory(),  // project filter + code -> id for deep links
+          Dash.getTestTypes(),         // type filter
+          Dash.getMyProfile()          // action buttons: management/office only
+        ]);
+        TQ.rows = results[0];
+        TQ.dir = results[1];
+        TQ.types = results[2];
+        var profile = results[3];
+        TQ.can = !!(profile &&
+          (profile.designation === "management" || profile.designation === "office"));
+        TQ.dir.forEach(function (p) { TQ.codeToId[p.project_code] = p.project_id; });
+
+        renderFilters();
+        render();
+
+        document.getElementById("tq-controls").addEventListener("change", function (ev) {
+          if (ev.target.id === "tq-project") TQ.projFilter = ev.target.value;
+          else if (ev.target.id === "tq-type") TQ.typeFilter = ev.target.value;
+          render();
+        });
+
+        document.getElementById("buckets").addEventListener("click", async function (ev) {
+          var btn = ev.target.closest('button[data-action^="tq-"]');
+          if (!btn) return;
+          var act = btn.getAttribute("data-action");
+          var req = btn.getAttribute("data-req");
+
+          function fail(e) {
+            document.getElementById("error").innerHTML =
+              '<div class="banner banner-red">Could not save: ' + escHtml((e && e.message) || e) + "</div>";
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          }
+
+          if (act === "tq-book") {
+            var d = document.getElementById("tqd-" + req).value;
+            if (!d) return;
+            try { await Dash.bookTest(req, d); window.location.reload(); }
+            catch (e) { fail(e); }
+            return;
+          }
+          if (act === "tq-unbook") {
+            try { await Dash.bookTest(req, null); window.location.reload(); }
+            catch (e) { fail(e); }
+            return;
+          }
+          if (act === "tq-result") {
+            var host = document.getElementById("tqf-" + req);
+            if (host) host.innerHTML = host.innerHTML
+              ? "" : resultFormHtml(req, btn.getAttribute("data-code"), btn.getAttribute("data-mark"));
+            return;
+          }
+          if (act === "tq-form-cancel") {
+            var host2 = document.getElementById("tqf-" + req);
+            if (host2) host2.innerHTML = "";
+            return;
+          }
+          if (act === "tq-result-save") {
+            var rd = document.getElementById("tqr-date-" + req).value;
+            if (!rd) return;
+            try {
+              await Dash.recordTestResult(req, {
+                testDate: rd,
+                resultStatus: document.getElementById("tqr-status-" + req).value,
+                reportUrl: document.getElementById("tqr-url-" + req).value || null,
+                remarks: document.getElementById("tqr-remarks-" + req).value || null
+              });
+              window.location.reload();
+            } catch (e) { fail(e); }
+            return;
+          }
+        });
+      } catch (e) {
+        document.getElementById("error").innerHTML =
+          '<div class="banner banner-red">Could not load: ' + escHtml((e && e.message) || e) + "</div>";
+      }
+    };
+  </script>
+</body>
+</html>

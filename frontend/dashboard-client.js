@@ -42,6 +42,33 @@
    await Dash.getLeaveRequests(year, status?)     -> leave requests ('pending' default, 'all', ...)
    await Dash.getTests(showAll?)                  -> pile test tracker (hides completed/passed
                                                      unless showAll is true)
+   await Dash.getTestTypes()                      -> test type directory (CSL/MLT/PDA/PIT:
+                                                     id, code, name, default curing days)
+   await Dash.getProjectTestSpecs()               -> per-project test specs with coverage:
+                                                     percentage => implied tests vs assigned
+                                                     vs done (base tables stay locked)
+
+   TEST OPERATIONS (management/office only — database-enforced; each returns
+   { ok, ... } or throws with .message = the database's error code)
+   -----------------------------------------------------------------------------
+   await Dash.setPileTestRequirement(pileId, testTypeId, remove?)
+                                           -> require a test on a pile (inserts
+                                              as 'pending') or remove the
+                                              requirement — removal refused once
+                                              done or a result exists
+                                              ('requirement_in_use')
+   await Dash.bookTest(reqId, date|null)   -> set the scheduled date (status ->
+                                              'scheduled'); null = unbook (back
+                                              to 'pending'). Done tests refuse;
+                                              booking a failed test = a retest.
+   await Dash.recordTestResult(reqId, {testDate, resultStatus, reportUrl?, remarks?})
+                                           -> file the result (passed/failed/
+                                              inconclusive/pending_review),
+                                              flip the requirement; the pile's
+                                              testing_status recomputes itself
+   await Dash.setProjectTestSpec(projectId, testTypeId, {percentage?, remarks?, remove?})
+                                           -> upsert/remove one project's spec
+                                              row (percentage 0–100)
    await Dash.getManpowerBySite()                 -> active staff: name/role/company + current
                                                      site (whereabouts only — no IC/phone)
    await Dash.getProjectDirectory()               -> every project id/code/name/status (ALL
@@ -369,6 +396,50 @@
     var b = sb.from("v_test_tracker").select("*");
     if (!showAll) b = b.not("status", "in", '("completed","passed")');
     return q(b.order("priority_bucket").order("scheduled_test_date", { ascending: true }));
+  }
+
+  // ---- test operations (0052) — the office runs the testing pipeline --------
+  function getTestTypes() {
+    return q(sb.from("v_test_types").select("*").order("test_code"));
+  }
+
+  function getProjectTestSpecs() {
+    return q(sb.from("v_project_test_specs").select("*")
+      .order("project_code").order("test_code"));
+  }
+
+  function setPileTestRequirement(pileId, testTypeId, remove) {
+    return q(sb.rpc("set_pile_test_requirement", {
+      p_pile_id: pileId, p_test_type_id: testTypeId, p_remove: !!remove
+    }));
+  }
+
+  function bookTest(reqId, date) {
+    return q(sb.rpc("book_test", {
+      p_test_req_id: reqId, p_scheduled_date: date || null
+    }));
+  }
+
+  function recordTestResult(reqId, o) {
+    o = o || {};
+    return q(sb.rpc("record_test_result", {
+      p_test_req_id: reqId,
+      p_test_date: o.testDate,
+      p_result_status: o.resultStatus,
+      p_report_url: o.reportUrl || null,
+      p_remarks: o.remarks || null
+    }));
+  }
+
+  function setProjectTestSpec(projectId, testTypeId, o) {
+    o = o || {};
+    return q(sb.rpc("set_project_test_spec", {
+      p_project_id: projectId,
+      p_test_type_id: testTypeId,
+      p_percentage: numOrNull(o.percentage),
+      p_remarks: o.remarks || null,
+      p_remove: !!o.remove
+    }));
   }
 
   // ---- manpower (whereabouts + office-adjustable moves, 0039) ---------------
@@ -737,6 +808,12 @@
     getLeaveBalances: getLeaveBalances,
     getLeaveRequests: getLeaveRequests,
     getTests: getTests,
+    getTestTypes: getTestTypes,
+    getProjectTestSpecs: getProjectTestSpecs,
+    setPileTestRequirement: setPileTestRequirement,
+    bookTest: bookTest,
+    recordTestResult: recordTestResult,
+    setProjectTestSpec: setProjectTestSpec,
 
     getManpowerBySite: getManpowerBySite,
     getProjectDirectory: getProjectDirectory,
