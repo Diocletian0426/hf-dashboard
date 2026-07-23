@@ -83,11 +83,7 @@
   <script src="shell.js"></script>
 
   <script>
-    function esc(s) { return String(s === null || s === undefined ? "" : s).replace(/"/g, "&quot;"); }
-    function escHtml(s) {
-      return String(s === null || s === undefined ? "" : s)
-        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    }
+    var esc = UI.esc, escHtml = UI.escHtml;
 
     // payroll trades (staff_role_check values) — site trades first
     var ROLES = ["general_worker", "boring_operator", "crane_operator", "excavator_operator",
@@ -116,10 +112,7 @@
       vibro_hammer: "vibro_operator"
     };
 
-    function daysAgo(dateStr) {
-      if (!dateStr) return null;
-      return Math.round((new Date(Dash.todayKL()) - new Date(dateStr)) / 86400000);
-    }
+    var daysAgo = UI.daysSince;
 
     // drift = the bot placed this worker on a DIFFERENT site within the last 7 days
     function isDrift(r) {
@@ -130,17 +123,17 @@
     }
 
     function lastReportedCell(r) {
-      if (!r.last_reported_date) return '<td class="muted-line">—</td>';
+      if (!r.last_reported_date) return '<td class="muted-line" data-label="Last reported">—</td>';
       var label = new Intl.DateTimeFormat("en-MY", { day: "2-digit", month: "short" })
         .format(new Date(r.last_reported_date + "T00:00:00"));
       var txt = label + " @ " + escHtml(r.last_reported_project_code || "?");
       if (isDrift(r)) {
-        return '<td class="drift" title="The bot last reported this worker at ' +
+        return '<td class="drift" data-label="Last reported" title="The bot last reported this worker at ' +
                esc(r.last_reported_project_code || "?") + " on " + esc(r.last_reported_date) +
                ' — different from the assigned site. Check, then Move whichever is wrong.">' +
                txt + " &#9888;</td>";
       }
-      return '<td class="muted-line">' + txt + "</td>";
+      return '<td class="muted-line" data-label="Last reported">' + txt + "</td>";
     }
 
     function activeRows() {
@@ -239,7 +232,7 @@
         return act.some(function (r) { return r.role === ro; });
       }).map(function (ro) {
         return '<option value="' + ro + '"' + (MP.roleFilter === ro ? " selected" : "") + ">" +
-               ro.replace(/_/g, " ") + "</option>";
+               UI.label(ro) + "</option>";
       })).join("");
       var siteKeys = {};
       act.forEach(function (r) { if (r.project_code) siteKeys[r.project_code] = r.project_name || ""; });
@@ -265,10 +258,11 @@
                '" data-role="' + esc(r.role || "") + '" data-site="' + esc(r.project_code || "__none") +
                '" data-drift="' + (isDrift(r) ? "1" : "") + '"' +
                (MP.canMove ? ' style="cursor:pointer" title="Click for the worker record"' : "") + ">" +
-               "<td>" + (r.employee_code ? escHtml(r.employee_code) : "—") + "</td>" +
-               "<td><strong>" + escHtml(r.full_name) + "</strong></td>" +
-               "<td>" + (byRole ? siteLabel(r) : escHtml(String(r.role || "").replace(/_/g, " "))) + "</td>" +
-               "<td>" + escHtml(r.company) + "</td>" +
+               UI.td("Code", r.employee_code ? escHtml(r.employee_code) : "—") +
+               UI.td("Name", "<strong>" + escHtml(r.full_name) + "</strong>") +
+               UI.td(byRole ? "Site" : "Role",
+                     byRole ? siteLabel(r) : escHtml(UI.label(r.role))) +
+               UI.td("Company", escHtml(r.company)) +
                lastReportedCell(r) +
                actionCell(r) + "</tr>";
         // record card sits right under its worker row (0051, office only)
@@ -276,46 +270,53 @@
         return tr;
       }).join("");
 
-      // site-mode header extras: work-line scope tag (BP/SP/BP+SP, derived
-      // from the scope tables — sites carry no company by design), supervisor,
-      // crew company split when mixed, machines on site, crew-vs-plant hint,
-      // drift count
-      var svPrefix = "", machineStr = "", badges = "", split = "";
+      // header: a scannable chip row (scope tag, headcount, warnings) plus one
+      // muted meta line (supervisor, company split, role/site mix, machines) —
+      // replaces the old run-on one-liner
+      var chips = [], metaBits = [];
       if (!byRole && key !== "__unassigned") {
         var dir = MP.dirByPid[list[0].current_project_id];
         if (dir) {
           var scopeT = dir.has_bored_scope && dir.has_sheet_scope ? "BP+SP"
                      : dir.has_bored_scope ? "BP"
                      : dir.has_sheet_scope ? "SP" : "";
-          if (scopeT) svPrefix += '<span class="badge badge-gray">' + scopeT + "</span> ";
+          if (scopeT) chips.push('<span class="chip chip-tag">' + scopeT + "</span>");
         }
+      }
+      chips.push('<span class="chip">' + list.length + " worker" + (list.length === 1 ? "" : "s") + "</span>");
+
+      if (!byRole && key !== "__unassigned") {
+        var sv = MP.supervisorsByPid[list[0].current_project_id];
+        if (sv) metaBits.push("Supervisor " + escHtml(sv));
         var bpN = list.filter(function (r) { return r.company === "HF-BP"; }).length;
         if (bpN && bpN < list.length) {
-          split = " · HF-BP " + bpN + " · Hai Fu " + (list.length - bpN);
+          metaBits.push("HF-BP " + bpN + " · Hai Fu " + (list.length - bpN));
         }
-        var sv = MP.supervisorsByPid[list[0].current_project_id];
-        if (sv) svPrefix += "SV " + escHtml(sv) + " · ";
+      }
+      metaBits.push(byRole ? siteSummary(list) : roleSummary(list));
+      if (!byRole && key !== "__unassigned") {
         var mach = MP.machinesBySite[key] || [];
         if (mach.length) {
-          machineStr = " · " + mach.map(function (m) { return escHtml(m.code); }).join(", ");
+          metaBits.push("Machines " + mach.map(function (m) { return escHtml(m.code); }).join(", "));
           var missing = {};
           mach.forEach(function (m) {
             var trade = MACHINE_TRADE[m.type];
             if (trade && !list.some(function (r) { return r.role === trade; })) missing[trade] = true;
           });
           Object.keys(missing).forEach(function (t) {
-            badges += ' <span class="badge badge-anomaly">no ' + t.replace(/_/g, " ") + "</span>";
+            chips.push('<span class="chip chip-warn">no ' + t.replace(/_/g, " ") + "</span>");
           });
         }
       }
       var driftN = list.filter(isDrift).length;
-      if (driftN) badges += ' <span class="badge badge-anomaly">' + driftN + " drift</span>";
+      if (driftN) chips.push('<span class="chip chip-warn">' + driftN + " drift &#9888;</span>");
 
       return '<details class="zone" data-group="' + esc(key) + '"' + (isOpen ? " open" : "") + ">" +
-             '<summary><span class="zone-name">' + escHtml(title) + "</span>" +
-             '<span class="zone-count">' + svPrefix + list.length + " worker" + (list.length === 1 ? "" : "s") +
-             split + " · " + (byRole ? siteSummary(list) : roleSummary(list)) + machineStr + badges + "</span></summary>" +
-             '<div class="table-wrap"><table>' +
+             '<summary class="zone-rich">' +
+             '<div class="group-head"><span class="zone-name">' + escHtml(title) + "</span> " +
+             chips.join(" ") + "</div>" +
+             '<div class="group-meta">' + metaBits.join(" · ") + "</div></summary>" +
+             '<div class="table-wrap table-stack"><table>' +
              "<thead><tr><th>Code</th><th>Name</th><th>" + (byRole ? "Site" : "Role") + "</th><th>Company</th>" +
              "<th>Last reported</th>" +
              (MP.canMove ? "<th>Actions</th>" : "") + "</tr></thead>" +
@@ -328,17 +329,17 @@
       var isOpen = MP.open.__left === true;         // default COLLAPSED
       var rows = list.map(function (r) {
         return '<tr data-search="' + rowSearchAttr(r) + '">' +
-               "<td>" + (r.employee_code ? escHtml(r.employee_code) : "—") + "</td>" +
-               "<td><strong>" + escHtml(r.full_name) + "</strong></td>" +
-               "<td>" + escHtml(String(r.role || "").replace(/_/g, " ")) + "</td>" +
-               "<td>" + escHtml(r.company) + "</td>" +
-               '<td><button type="button" data-action="reactivate" data-staff="' + r.staff_id +
-               '" data-name="' + esc(r.full_name) + '">reactivate</button></td></tr>';
+               UI.td("Code", r.employee_code ? escHtml(r.employee_code) : "—") +
+               UI.td("Name", "<strong>" + escHtml(r.full_name) + "</strong>") +
+               UI.td("Role", escHtml(UI.label(r.role))) +
+               UI.td("Company", escHtml(r.company)) +
+               UI.td("", '<button type="button" data-action="reactivate" data-staff="' + r.staff_id +
+               '" data-name="' + esc(r.full_name) + '">reactivate</button>') + "</tr>";
       }).join("");
       return '<details class="zone" data-group="__left"' + (isOpen ? " open" : "") + ">" +
              '<summary><span class="zone-name">Recently left</span>' +
              '<span class="zone-count">' + list.length + " shown · reactivate = undo a mistake</span></summary>" +
-             '<div class="table-wrap"><table>' +
+             '<div class="table-wrap table-stack"><table>' +
              "<thead><tr><th>Code</th><th>Name</th><th>Role</th><th>Company</th><th></th></tr></thead>" +
              "<tbody>" + rows + "</tbody></table></div></details>";
     }
@@ -363,18 +364,19 @@
         return '<tr data-search="' +
                esc(((p.full_name || "") + " " + (p.to_project_code || "") + " " +
                     (p.to_project_name || "")).toLowerCase()) + '">' +
-               "<td><strong>" + escHtml(p.full_name) + "</strong></td>" +
-               "<td>&rarr; " + dest +
-               (p.remarks ? ' <span class="muted">(' + escHtml(p.remarks) + ")</span>" : "") + "</td>" +
-               '<td class="' + (late ? "drift" : "muted-line") + '">' + when +
-               (late ? " — " + days + " day" + (days === 1 ? "" : "s") + " ago" : "") + "</td>" +
-               "<td>" + escHtml(p.created_by_name || "") + "</td>" +
+               UI.td("Who", "<strong>" + escHtml(p.full_name) + "</strong>") +
+               UI.td("Move", "&rarr; " + dest +
+                 (p.remarks ? ' <span class="muted">(' + escHtml(p.remarks) + ")</span>" : "")) +
+               UI.td("Planned", when +
+                 (late ? " — " + days + " day" + (days === 1 ? "" : "s") + " ago" : ""),
+                 late ? "drift" : "muted-line") +
+               UI.td("By", escHtml(p.created_by_name || "")) +
                (MP.canMove
-                 ? '<td><span class="move-ctl">' +
+                 ? UI.td("", '<span class="move-ctl">' +
                    '<button type="button" data-action="plan-execute" data-plan="' + p.plan_id +
                    '" data-label="' + esc(label) + '">Execute now</button>' +
                    '<button type="button" data-action="plan-cancel" data-plan="' + p.plan_id +
-                   '" data-label="' + esc(label) + '">Cancel</button></span></td>'
+                   '" data-label="' + esc(label) + '">Cancel</button></span>')
                  : "") +
                "</tr>";
       }).join("");
@@ -383,7 +385,7 @@
              '<span class="zone-count">' + MP.plans.length + " planned" +
              (overdue ? " · " + overdue + " overdue" : "") +
              " · plans never move anyone — Execute does</span></summary>" +
-             '<div class="table-wrap"><table>' +
+             '<div class="table-wrap table-stack"><table>' +
              "<thead><tr><th>Who</th><th>Move</th><th>Planned</th><th>By</th>" +
              (MP.canMove ? "<th></th>" : "") + "</tr></thead>" +
              "<tbody>" + rows + "</tbody></table></div></details>";
@@ -396,13 +398,13 @@
                '<button type="button" data-action="add-form">+ Add worker</button></div>';
       }
       var roleOpts = ROLES.map(function (r) {
-        return '<option value="' + r + '">' + r.replace(/_/g, " ") + "</option>";
+        return '<option value="' + r + '">' + UI.label(r) + "</option>";
       }).join("");
       var coOpts = COMPANIES.map(function (c) {
         return '<option value="' + c + '">' + c + "</option>";
       }).join("");
       var desOpts = DESIGNATIONS.map(function (x) {
-        return '<option value="' + x + '">' + x.replace(/_/g, " ") + "</option>";
+        return '<option value="' + x + '">' + UI.label(x) + "</option>";
       }).join("");
       return '<div class="claim-form">' +
         "<strong>New worker</strong>" +
@@ -431,7 +433,7 @@
       var d = MP.editing.d;
       var roleOpts = ROLES.map(function (r) {
         return '<option value="' + r + '"' + (r === d.role ? " selected" : "") + ">" +
-               r.replace(/_/g, " ") + "</option>";
+               UI.label(r) + "</option>";
       }).join("");
       var coOpts = COMPANIES.map(function (c) {
         return '<option value="' + c + '"' + (c === d.company_code ? " selected" : "") + ">" + c + "</option>";
@@ -439,7 +441,7 @@
       var desOpts = (d.designation ? "" : '<option value="" selected>(unchanged)</option>') +
         DESIGNATIONS.map(function (x) {
           return '<option value="' + x + '"' + (x === d.designation ? " selected" : "") + ">" +
-                 x.replace(/_/g, " ") + "</option>";
+                 UI.label(x) + "</option>";
         }).join("");
       return '<div class="claim-form">' +
         "<strong>Edit worker</strong>" +
@@ -505,8 +507,8 @@
 
       var head =
         '<div class="pc-head"><strong>' + escHtml(r.full_name) + "</strong> " +
-        escHtml(String(r.role || "").replace(/_/g, " ")) + " · " + escHtml(r.company) +
-        (d.designation ? ' <span class="badge badge-gray">' + escHtml(d.designation) + "</span>" : "") +
+        escHtml(UI.label(r.role)) + " · " + escHtml(r.company) +
+        (d.designation ? ' <span class="badge badge-gray">' + escHtml(UI.label(d.designation)) + "</span>" : "") +
         (chips.length ? ' <span class="pc-chips">' + chips.join(" · ") + "</span>" : "") + "</div>";
 
       var where =
@@ -581,7 +583,7 @@
 
       document.getElementById("error").innerHTML =
         (MP.err ? '<div class="banner banner-red">Could not save: ' + escHtml(MP.err) + "</div>" : "") +
-        (MP.okMsg ? '<div class="banner banner-amber">' + escHtml(MP.okMsg) + "</div>" : "");
+        (MP.okMsg ? UI.okBanner(MP.okMsg) : "");
 
       // company chips narrow the lists (the headline totals above stay global)
       var shown = MP.companyFilter === "all" ? act
@@ -600,7 +602,7 @@
           var ia = ROLES.indexOf(a), ib = ROLES.indexOf(b);
           return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
         }).map(function (k) {
-          return groupBlock("role:" + k, k.replace(/_/g, " "), byRole[k], "role");
+          return groupBlock("role:" + k, UI.label(k), byRole[k], "role");
         }).join("");
       } else {
         var bySite = {};
@@ -679,11 +681,7 @@
     // the EFFECTIVE date (when it really happened; entry time in the tooltip),
     // rows are editable/deletable, and old worker history can be backfilled
     // ("Add past move…" — machines backfill from their own record card).
-    function mlDate(d) {
-      if (!d) return "—";
-      return new Intl.DateTimeFormat("en-MY", { day: "2-digit", month: "short", year: "numeric" })
-        .format(new Date(d + "T00:00:00"));
-    }
+    var mlDate = UI.dstr;
 
     function mlEditForm(transferId, date, remarks) {
       return '<div class="claim-form">' +
@@ -859,6 +857,7 @@
     }
 
     window.onShellReady = async function () {
+      document.getElementById("groups").innerHTML = UI.empty("Loading the roster…");
       try {
         var profile = await Dash.getMyProfile();
         MP.canMove = !!(profile &&

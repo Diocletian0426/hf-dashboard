@@ -26,7 +26,7 @@
     <div class="mp-controls" id="controls"></div>
     <div id="raise-host"></div>
 
-    <div class="table-wrap">
+    <div class="table-wrap table-stack">
       <table>
         <thead>
           <tr>
@@ -47,19 +47,10 @@
   <script src="shell.js"></script>
 
   <script>
-    function esc(s) { return String(s === null || s === undefined ? "" : s).replace(/"/g, "&quot;"); }
-    function escHtml(s) {
-      return String(s === null || s === undefined ? "" : s)
-        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    }
-    function dstr(d) {
-      if (!d) return "—";
-      return new Intl.DateTimeFormat("en-MY", { day: "2-digit", month: "short", year: "numeric" })
-        .format(new Date(d + "T00:00:00"));
-    }
+    var esc = UI.esc, escHtml = UI.escHtml, dstr = UI.dstr;
     function daysSince(dateStr) {
       if (!dateStr) return null;
-      return Math.round((new Date(Dash.todayKL()) - new Date(String(dateStr).slice(0, 10))) / 86400000);
+      return UI.daysSince(String(dateStr).slice(0, 10));
     }
 
     var STALE_DAYS = 7;   // same rule as the project hub's attention panel
@@ -135,10 +126,10 @@
           return '<option value="' + esc(n) + '"' + (IS.pic === n ? " selected" : "") + ">" + escHtml(n) + "</option>";
         })).join("");
       var priOpts = ['<option value="all">any priority</option>'].concat(PRIORITIES.map(function (p) {
-        return '<option value="' + p + '"' + (IS.priority === p ? " selected" : "") + ">" + p + "</option>";
+        return '<option value="' + p + '"' + (IS.priority === p ? " selected" : "") + ">" + UI.label(p) + "</option>";
       })).join("");
       var catOpts = ['<option value="all">any category</option>'].concat(CATEGORIES.map(function (c) {
-        return '<option value="' + c + '"' + (IS.category === c ? " selected" : "") + ">" + c + "</option>";
+        return '<option value="' + c + '"' + (IS.category === c ? " selected" : "") + ">" + UI.label(c) + "</option>";
       })).join("");
 
       document.getElementById("controls").innerHTML =
@@ -175,10 +166,10 @@
                escHtml(p.project_code + " — " + (p.project_name || "")) + "</option>";
       }).join("");
       var catOpts = CATEGORIES.map(function (c) {
-        return '<option value="' + c + '">' + c + "</option>";
+        return '<option value="' + c + '">' + UI.label(c) + "</option>";
       }).join("");
       var priOpts = PRIORITIES.map(function (p) {
-        return '<option value="' + p + '"' + (p === "medium" ? " selected" : "") + ">" + p + "</option>";
+        return '<option value="' + p + '"' + (p === "medium" ? " selected" : "") + ">" + UI.label(p) + "</option>";
       }).join("");
       var picOpts = ['<option value="">— no PIC yet —</option>'].concat(
         IS.staff.map(function (s) {
@@ -208,9 +199,7 @@
       if (!list.length) return '<div class="muted-line">No updates recorded yet.</div>';
       return list.map(function (u) {
         return '<div class="pc-line"><strong>' + Dash.klDateTime(u.created_at) + "</strong> " +
-               (u.new_status
-                 ? '<span class="badge badge-' + escHtml(u.new_status) + '">' + escHtml(u.new_status) + "</span> "
-                 : "") +
+               (u.new_status ? UI.badge(u.new_status) + " " : "") +
                escHtml(u.comment || "") +
                (u.updated_by_name ? ' <span class="muted">— ' + escHtml(u.updated_by_name) + "</span>" : "") +
                "</div>";
@@ -247,10 +236,10 @@
         '<label>note <input type="text" id="iu-comment" size="34" placeholder="what happened / what was done"></label>' +
         '<label>status <select id="iu-status">' +
           '<option value="">no change</option>' +
-          '<option value="in_progress">in progress</option>' +
-          '<option value="resolved">resolved</option>' +
-          '<option value="closed">closed</option>' +
-          '<option value="open">reopen</option></select></label>' +
+          '<option value="in_progress">In progress</option>' +
+          '<option value="resolved">Resolved</option>' +
+          '<option value="closed">Closed</option>' +
+          '<option value="open">Reopen</option></select></label>' +
         '<label>when it was actually done <input type="date" id="iu-date" value="' + Dash.todayKL() +
           '" title="stamps the real resolved date — backdate if it was fixed earlier"></label>' +
         '<button type="button" data-action="update-save" data-issue="' + i.issue_id + '">Save update</button>' +
@@ -289,7 +278,7 @@
       document.getElementById("raise-host").innerHTML = raiseForm();
       document.getElementById("error").innerHTML =
         (IS.err ? '<div class="banner banner-red">Could not save: ' + escHtml(IS.err) + "</div>" : "") +
-        (IS.ok ? '<div class="banner banner-amber">' + escHtml(IS.ok) + "</div>" : "");
+        (IS.ok ? UI.okBanner(IS.ok) : "");
 
       var rows = visibleRows();
       var tbody = document.getElementById("rows");
@@ -301,19 +290,20 @@
         var stale = isStale(i);
         var staleD = stale ? daysSince(lastActivityDate(i)) : null;
         return '<tr class="claim-row" data-issue="' + i.issue_id + '" title="Click to open the trail">' +
-          '<td class="num"><span class="claim-caret">' + (IS.open[i.issue_id] ? "&#9662;" : "&#9656;") +
+          '<td class="num" data-label="#"><span class="claim-caret">' + (IS.open[i.issue_id] ? "&#9662;" : "&#9656;") +
             "</span> <strong>" + (i.issue_number || "") + "</strong></td>" +
-          "<td>" + (i.project_code || "") + "</td>" +
-          '<td class="wrap">' + escHtml(i.title || "") + "</td>" +
-          "<td>" + (i.category || "") + "</td>" +
-          '<td><span class="badge badge-' + (i.priority || "low") + '">' + (i.priority || "") + "</span></td>" +
-          '<td><span class="badge badge-' + (i.status || "gray") + '">' + (i.status || "") + "</span></td>" +
-          "<td>" + (i.assigned_to_name_resolved || "—") + "</td>" +
-          '<td class="num' + (i.days_open > 14 ? " neg" : "") + '">' +
-            (i.days_open === null || i.days_open === undefined ? "" : i.days_open) + "</td>" +
-          '<td class="wrap">' + escHtml(i.latest_action || "—") +
-            (stale ? ' <span class="badge badge-anomaly">no update ' + staleD + "d</span>" : "") + "</td>" +
-          "<td>" + (i.machine_code || "") + "</td>" +
+          UI.td("Project", escHtml(i.project_code || "")) +
+          UI.td("Title", escHtml(i.title || ""), "wrap") +
+          UI.td("Category", escHtml(UI.label(i.category))) +
+          UI.td("Priority", i.priority ? UI.badge(i.priority) : "") +
+          UI.td("Status", i.status ? UI.badge(i.status) : "") +
+          UI.td("PIC", escHtml(i.assigned_to_name_resolved || "—")) +
+          UI.td("Days open",
+            (i.days_open === null || i.days_open === undefined ? "" : String(i.days_open)),
+            "num" + (i.days_open > 14 ? " neg" : "")) +
+          UI.td("Latest action", escHtml(i.latest_action || "—") +
+            (stale ? ' <span class="badge badge-anomaly">no update ' + staleD + "d</span>" : ""), "wrap") +
+          UI.td("Machine", escHtml(i.machine_code || "")) +
         "</tr>" + detailRow(i);
       }).join("");
     }

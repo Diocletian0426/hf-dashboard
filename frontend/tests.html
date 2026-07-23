@@ -48,36 +48,20 @@
   <script src="shell.js"></script>
 
   <script>
-    function esc(s) { return String(s === null || s === undefined ? "" : s).replace(/"/g, "&quot;"); }
-    function escHtml(s) {
-      return String(s === null || s === undefined ? "" : s)
-        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    }
-    // '2026-07-03' -> '03 Jul 2026'
-    function dstr(d) {
-      if (!d) return "—";
-      return new Intl.DateTimeFormat("en-MY", { day: "2-digit", month: "short", year: "numeric" })
-        .format(new Date(d + "T00:00:00"));
-    }
+    var esc = UI.esc, escHtml = UI.escHtml, dstr = UI.dstr;
 
     var TQ = { rows: [], types: [], dir: [], can: false, codeToId: {},
                projFilter: "all", typeFilter: "all" };
 
-    // same rule as the hub: curing done + idle past the grace = escalated red
-    var TEST_GRACE_DAYS = 7;
+    // canonical bucket logic + grace live in ui.js (the local copy had
+    // drifted from the hub's — one source of truth now)
+    var TEST_GRACE_DAYS = UI.TEST_GRACE_DAYS;
+    var testBuckets = UI.testBuckets;
 
-    // canonical bucket logic (copied from project.html — house pattern)
-    function testBuckets(tests) {
-      var b = { missed: [], booked: [], curing: [], toArrange: [], notBooked: [] };
-      tests.forEach(function (t) {
-        if (t.is_overdue === true) { b.missed.push(t); return; }
-        if (t.scheduled_test_date) { b.booked.push(t); return; }
-        if (t.days_until_eligible === null || t.days_until_eligible === undefined) return;
-        if (t.days_until_eligible > 0) { b.curing.push(t); return; }
-        if (-t.days_until_eligible > TEST_GRACE_DAYS) b.notBooked.push(t);
-        else b.toArrange.push(t);
-      });
-      return b;
+    // scroll position survives the reload-after-save pattern
+    function reloadKeepingPlace() {
+      UI.saveScroll();
+      window.location.reload();
     }
 
     function filtered() {
@@ -115,9 +99,9 @@
         "<strong>Record result — " + escHtml(code) + " on " + escHtml(mark) + "</strong>" +
         '<label>test date <input id="tqr-date-' + reqId + '" type="date" value="' + Dash.todayKL() + '"></label>' +
         '<label>result <select id="tqr-status-' + reqId + '">' +
-          '<option value="passed">passed</option><option value="failed">failed</option>' +
-          '<option value="inconclusive">inconclusive</option>' +
-          '<option value="pending_review">pending review</option></select></label>' +
+          '<option value="passed">Passed</option><option value="failed">Failed</option>' +
+          '<option value="inconclusive">Inconclusive</option>' +
+          '<option value="pending_review">Pending review</option></select></label>' +
         '<label>report URL <input id="tqr-url-' + reqId + '" size="22" placeholder="optional — Drive link"></label>' +
         '<label>remarks <input id="tqr-remarks-' + reqId + '" size="12" placeholder="optional"></label>' +
         '<button type="button" data-action="tq-result-save" data-req="' + reqId + '">Save result</button>' +
@@ -136,7 +120,7 @@
     }
 
     function zoneBlock(title, count, note, body, open) {
-      return '<details class="zone"' + (open ? " open" : "") + ">" +
+      return '<details class="zone chase-panel"' + (open ? " open" : "") + ">" +
              '<summary><span class="zone-name">' + title + "</span>" +
              '<span class="zone-count">' + count + (note ? " · " + note : "") + "</span></summary>" +
              '<div class="chase-body">' +
@@ -237,6 +221,7 @@
 
         renderFilters();
         render();
+        UI.restoreScroll();
 
         document.getElementById("tq-controls").addEventListener("change", function (ev) {
           if (ev.target.id === "tq-project") TQ.projFilter = ev.target.value;
@@ -259,12 +244,12 @@
           if (act === "tq-book") {
             var d = document.getElementById("tqd-" + req).value;
             if (!d) return;
-            try { await Dash.bookTest(req, d); window.location.reload(); }
+            try { await Dash.bookTest(req, d); reloadKeepingPlace(); }
             catch (e) { fail(e); }
             return;
           }
           if (act === "tq-unbook") {
-            try { await Dash.bookTest(req, null); window.location.reload(); }
+            try { await Dash.bookTest(req, null); reloadKeepingPlace(); }
             catch (e) { fail(e); }
             return;
           }
@@ -289,7 +274,7 @@
                 reportUrl: document.getElementById("tqr-url-" + req).value || null,
                 remarks: document.getElementById("tqr-remarks-" + req).value || null
               });
-              window.location.reload();
+              reloadKeepingPlace();
             } catch (e) { fail(e); }
             return;
           }
