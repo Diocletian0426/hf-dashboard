@@ -35,39 +35,13 @@
   <script src="config.js"></script>
   <script src="dashboard-client.js"></script>
   <script src="ui.js"></script>
+  <script src="claims-ui.js"></script>
   <script src="shell.js"></script>
 
   <script>
-    // ---- shared helpers (same definitions the other pages use) ----
-    function esc(s) { return String(s === null || s === undefined ? "" : s).replace(/"/g, "&quot;"); }
-    function escHtml(s) {
-      return String(s === null || s === undefined ? "" : s)
-        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    }
-    function dstr(d) {
-      if (!d) return "—";
-      return new Intl.DateTimeFormat("en-MY", { day: "2-digit", month: "short", year: "numeric" })
-        .format(new Date(d + "T00:00:00"));
-    }
-
-    var RM_FMT = new Intl.NumberFormat("en-MY", {
-      minimumFractionDigits: 2, maximumFractionDigits: 2
-    });
-    function fmtRM(v) {
-      if (v === null || v === undefined || v === "") return "—";
-      return "RM " + RM_FMT.format(Number(v));
-    }
-    function fmtPct(v) {
-      return (v === null || v === undefined || v === "") ? "—" : Number(v) + "%";
-    }
-    // claim periods read as a month, not a day ("May 2026") — the stored date
-    // is the month's last day by entry convention
-    function mstr(d) {
-      if (!d) return "—";
-      return new Intl.DateTimeFormat("en-MY", { month: "short", year: "numeric" })
-        .format(new Date(d + "T00:00:00"));
-    }
-    var CLAIM_BADGE = { submitted: "badge-pending", certified: "badge-approved", paid: "badge-gray" };
+    // ---- shared helpers + rendering live in ui.js / claims-ui.js ----
+    var esc = UI.esc, escHtml = UI.escHtml, dstr = UI.dstr;
+    var fmtRM = UI.fmtRM, fmtPct = UI.fmtPct, mstr = UI.mstr;
     // '2026-05' (month picker) -> '2026-05-31' (period_to stores the month's last day)
     function monthEnd(ym) {
       if (!ym) return null;
@@ -79,7 +53,7 @@
     // shared claims state — survives every re-render between edits
     var CL = {
       projectId: null, p: null, sum: null, register: [], bq: [],
-      linesByClaim: {}, open: {}, edit: null, err: ""
+      linesByClaim: {}, open: {}, edit: null, err: "", ok: ""
     };
     function claimByNo(no) {
       return CL.register.find(function (c) { return c.claim_no === Number(no); });
@@ -88,55 +62,8 @@
       return CL.register.reduce(function (m, c) { return Math.max(m, c.claim_no); }, 0);
     }
 
-    function claimsSummaryCards(sum) {
-      var vo = Number(sum.contract_sum_vo) || 0;
-      var gap = Number(sum.claimed_not_certified) || 0;
-      var cards = [
-        ["Contract sum" + (vo > 0 ? " · incl. VO " + fmtRM(vo) : ""), fmtRM(sum.contract_sum), ""],
-        ["Claimed to date · " + fmtPct(sum.pct_claimed), fmtRM(sum.claimed_to_date), ""],
-        ["Certified to date · " + fmtPct(sum.pct_certified), fmtRM(sum.certified_to_date), ""],
-        ["Retention held", fmtRM(sum.retention_held), ""],
-        ["Claimed, not certified", fmtRM(sum.claimed_not_certified), gap > 0 ? " stale-warn" : ""]
-      ];
-      return '<div class="cards">' + cards.map(function (c) {
-        return '<div class="card"><div class="label">' + c[0] + "</div>" +
-               '<div class="value money' + c[2] + '">' + c[1] + "</div></div>";
-      }).join("") + "</div>";
-    }
-
-    // the lines INSIDE one claim, laid out like page 2 of the paper IPC:
-    // PREVIOUS qty | THIS CLAIM qty | CUMULATIVE qty per BQ item
-    function claimLinesTable(lines) {
-      if (!lines.length) {
-        return '<div class="muted-line" style="padding:8px 12px">No lines recorded for this claim.</div>';
-      }
-      var certAny = false, totalThis = 0, totalCert = 0;
-      var rows = lines.map(function (l) {
-        totalThis += Number(l.amount_claimed) || 0;
-        totalCert += Number(l.amount_certified) || 0;
-        if (l.qty_certified !== null) certAny = true;
-        return "<tr>" +
-          "<td>" + escHtml(l.item_code || "") + "</td>" +
-          '<td class="wrap">' + escHtml(l.description) + "</td>" +
-          "<td>" + escHtml(l.unit || "") + "</td>" +
-          '<td class="num">' + (l.rate === null ? "—" : fmtRM(l.rate)) + "</td>" +
-          '<td class="num">' + (Number(l.prev_qty_claimed) ? l.prev_qty_claimed : "—") + "</td>" +
-          '<td class="num"><strong>' + l.qty_claimed + "</strong></td>" +
-          '<td class="num">' + l.cum_qty_claimed + "</td>" +
-          '<td class="num">' + fmtRM(l.amount_claimed) + "</td>" +
-          '<td class="num">' + (l.qty_certified === null ? "—" : l.qty_certified) + "</td>" +
-        "</tr>";
-      }).join("");
-      return '<table class="claim-lines">' +
-             "<thead><tr><th>#</th><th>Description</th><th>Unit</th>" +
-             '<th class="num">Rate</th><th class="num">Previous</th>' +
-             '<th class="num">This claim</th><th class="num">Cumulative</th>' +
-             '<th class="num">Amount</th><th class="num">Certified qty</th></tr></thead>' +
-             "<tbody>" + rows + "</tbody>" +
-             '<tfoot><tr><td colspan="7">This claim total</td>' +
-             '<td class="num">' + fmtRM(totalThis) + "</td>" +
-             '<td class="num">' + (certAny ? fmtRM(totalCert) : "—") + "</td></tr></tfoot></table>";
-    }
+    var claimsSummaryCards = ClaimsUI.summaryCards;
+    var claimLinesTable = ClaimsUI.linesTable;
 
     // EDIT LINES: one qty input per BQ item (blank/0 = not claimed this claim);
     // per-line amount and the claim total recompute live as you type.
@@ -247,70 +174,20 @@
       return '<div class="claim-actions">' + b.join("") + "</div>";
     }
 
+    // register rows come from the shared renderer; the fold-open cell is this
+    // page's working surface (action bar / edit-lines / certify / claim info)
     function claimRegisterTable() {
-      if (!CL.register.length) {
-        return '<div class="muted-line">No claims submitted yet.</div>';
-      }
-      var rows = CL.register.map(function (c) {
-        var isOpen = !!CL.open[c.claim_no];
+      return ClaimsUI.registerTable(CL.register, CL.open, function (c) {
         var editing = (CL.edit && CL.edit.claimNo === c.claim_no) ? CL.edit.mode : null;
-        var main = '<tr class="claim-row" data-claim="' + c.claim_no +
-          '" title="Click to open this claim' + "'" + 's lines">' +
-          '<td><span class="claim-caret">' + (isOpen ? "&#9662;" : "&#9656;") + "</span> <strong>" + c.claim_no + "</strong></td>" +
-          "<td>" + mstr(c.period_to) + "</td>" +
-          '<td class="num">' + fmtRM(c.claimed_amount) + "</td>" +
-          '<td class="num">' + fmtRM(c.certified_amount) + "</td>" +
-          '<td class="num">' + fmtPct(c.pct_certified_vs_claimed) + "</td>" +
-          '<td><span class="badge ' + (CLAIM_BADGE[c.status] || "badge-gray") + '">' +
-            escHtml(c.status) + "</span></td>" +
-          "<td>" + dstr(c.submitted_date) + "</td>" +
-          "<td>" + dstr(c.certified_date) + "</td>" +
-        "</tr>";
-        var inner;
-        if (editing === "lines")        inner = claimLinesEditTable(c);
-        else if (editing === "certify") inner = claimCertifyTable(c);
-        else if (editing === "header")  inner = claimHeaderForm(c) + claimLinesTable(CL.linesByClaim[c.claim_no] || []);
-        else inner = claimActionsBar(c) + claimLinesTable(CL.linesByClaim[c.claim_no] || []);
-        var detail = '<tr class="claim-lines-row"' + (isOpen ? "" : ' style="display:none"') +
-                     '><td colspan="8">' + inner + "</td></tr>";
-        return main + detail;
-      }).join("");
-      return '<div class="table-wrap"><table>' +
-             "<thead><tr><th>#</th><th>Period</th>" +
-             '<th class="num">Claimed</th><th class="num">Certified</th>' +
-             '<th class="num">% certified</th><th>Status</th>' +
-             "<th>Submitted</th><th>Certified on</th></tr></thead>" +
-             "<tbody>" + rows + "</tbody></table></div>";
+        if (editing === "lines")   return claimLinesEditTable(c);
+        if (editing === "certify") return claimCertifyTable(c);
+        if (editing === "header")  return claimHeaderForm(c) + claimLinesTable(CL.linesByClaim[c.claim_no] || []);
+        return claimActionsBar(c) + claimLinesTable(CL.linesByClaim[c.claim_no] || []);
+      });
     }
 
     function bqStatusBlock(bq) {
-      if (!bq.length) return "";
-      var rows = bq.map(function (b) {
-        var desc = escHtml(b.description) +
-          (b.remarks ? ' <span class="muted-line">(' + escHtml(b.remarks) + ")</span>" : "") +
-          (b.is_variation ? ' <span class="badge badge-anomaly">VO</span>' : "");
-        return "<tr>" +
-          "<td>" + escHtml(b.item_code || "") + "</td>" +
-          '<td class="wrap">' + desc + "</td>" +
-          "<td>" + escHtml(b.unit || "") + "</td>" +
-          '<td class="num">' + (b.rate === null ? "—" : fmtRM(b.rate)) + "</td>" +
-          '<td class="num">' + b.contract_qty + "</td>" +
-          '<td class="num">' + fmtRM(b.amount) + "</td>" +
-          '<td class="num">' + b.cum_qty_claimed + "</td>" +
-          '<td class="num">' + (b.cum_qty_certified === null ? "—" : b.cum_qty_certified) + "</td>" +
-          '<td class="num">' + fmtPct(b.pct_certified) + "</td>" +
-        "</tr>";
-      }).join("");
-      // description wraps (td.wrap) so the whole table fits on screen —
-      // item and rate visible together, no left/right scrolling
-      return '<details class="zone"><summary><span class="zone-name">Bill of Quantities — item status</span>' +
-             '<span class="zone-count">' + bq.length + " items · BQ entry stays a working-session job</span></summary>" +
-             '<div class="table-wrap"><table>' +
-             "<thead><tr><th>#</th><th>Description</th><th>Unit</th>" +
-             '<th class="num">Rate</th><th class="num">Contract</th><th class="num">Amount</th>' +
-             '<th class="num">Claimed</th><th class="num">Certified</th>' +
-             '<th class="num">% cert</th></tr></thead>' +
-             "<tbody>" + rows + "</tbody></table></div></details>";
+      return ClaimsUI.bqTable(bq, "BQ entry stays a working-session job");
     }
 
     async function fetchClaims() {
@@ -352,13 +229,14 @@
       var err = CL.err
         ? '<div class="banner banner-red" style="margin-bottom:10px">Could not save: ' + escHtml(CL.err) + "</div>"
         : "";
+      var ok = (!CL.err && CL.ok) ? UI.okBanner(CL.ok) : "";
       var newBtn = (CL.edit && CL.edit.mode === "new")
         ? newClaimForm()
         : '<div class="claim-actions" style="padding:0 0 10px">' +
           '<button type="button" data-action="new-claim-form">+ New claim</button></div>';
 
       el.innerHTML =
-        err + (CL.sum ? claimsSummaryCards(CL.sum) : "") + honesty + newBtn +
+        err + ok + (CL.sum ? claimsSummaryCards(CL.sum) : "") + honesty + newBtn +
         '<h2 class="section-title">Claim register (' + CL.register.length + ")</h2>" +
         claimRegisterTable() + bqStatusBlock(CL.bq);
       updateLiveTotals(el);
@@ -410,10 +288,10 @@
           retentionCapPct: document.getElementById("nc-cap").value,
           remarks: document.getElementById("nc-remarks").value || null
         });
-        CL.err = "";
+        CL.err = ""; CL.ok = "Claim #" + r.claim_no + " created — enter its quantities below.";
         CL.edit = { mode: "lines", claimNo: r.claim_no };   // straight into qty entry
         CL.open[r.claim_no] = true;
-      } catch (e) { CL.err = (e && e.message) || String(e); }
+      } catch (e) { CL.err = (e && e.message) || String(e); CL.ok = ""; }
       await refreshClaims();
     }
 
@@ -423,8 +301,8 @@
       try {
         for (var i = 0; i < changes.length; i++)
           await Dash.setClaimLine(c.claim_id, changes[i].item, changes[i].qty);
-        CL.err = ""; CL.edit = null;
-      } catch (e) { CL.err = (e && e.message) || String(e); }
+        CL.err = ""; CL.ok = "Claim #" + c.claim_no + " quantities saved."; CL.edit = null;
+      } catch (e) { CL.err = (e && e.message) || String(e); CL.ok = ""; }
       await refreshClaims();
     }
 
@@ -436,8 +314,8 @@
         for (var i = 0; i < changes.length; i++)
           await Dash.certifyClaimLine(c.claim_id, changes[i].item, changes[i].qty);
         await Dash.setClaimStatus(c.claim_id, "certified", date);
-        CL.err = ""; CL.edit = null;
-      } catch (e) { CL.err = (e && e.message) || String(e); }
+        CL.err = ""; CL.ok = "Claim #" + c.claim_no + " certified."; CL.edit = null;
+      } catch (e) { CL.err = (e && e.message) || String(e); CL.ok = ""; }
       await refreshClaims();
     }
 
@@ -451,21 +329,30 @@
           retentionCapPct: document.getElementById("cf-cap").value,
           remarks: document.getElementById("cf-remarks").value || null
         });
-        CL.err = ""; CL.edit = null;
-      } catch (e) { CL.err = (e && e.message) || String(e); }
+        CL.err = ""; CL.ok = "Claim #" + c.claim_no + " info saved."; CL.edit = null;
+      } catch (e) { CL.err = (e && e.message) || String(e); CL.ok = ""; }
       await refreshClaims();
     }
 
     async function actStatus(c, status, date) {
-      try { await Dash.setClaimStatus(c.claim_id, status, date); CL.err = ""; }
-      catch (e) { CL.err = (e && e.message) || String(e); }
+      try {
+        await Dash.setClaimStatus(c.claim_id, status, date);
+        CL.err = "";
+        CL.ok = "Claim #" + c.claim_no +
+                (status === "paid" ? " marked paid." : " moved back to certified.");
+      }
+      catch (e) { CL.err = (e && e.message) || String(e); CL.ok = ""; }
       await refreshClaims();
     }
 
     async function actDelete(c) {
       if (!window.confirm("Delete claim #" + c.claim_no + " and all its lines? This cannot be undone.")) return;
-      try { await Dash.deleteClaim(c.claim_id); CL.err = ""; CL.edit = null; delete CL.open[c.claim_no]; }
-      catch (e) { CL.err = (e && e.message) || String(e); }
+      try {
+        await Dash.deleteClaim(c.claim_id);
+        CL.err = ""; CL.ok = "Claim #" + c.claim_no + " deleted."; CL.edit = null;
+        delete CL.open[c.claim_no];
+      }
+      catch (e) { CL.err = (e && e.message) || String(e); CL.ok = ""; }
       await refreshClaims();
     }
 
@@ -474,6 +361,7 @@
       if (btn) {
         var act = btn.getAttribute("data-action");
         var c = btn.getAttribute("data-claim") ? claimByNo(btn.getAttribute("data-claim")) : null;
+        if (act !== "cancel-edit") CL.ok = "";   // stale "saved" notes don't linger
         if (act === "new-claim-form")    { CL.edit = { mode: "new" }; renderClaims(); }
         else if (act === "cancel-edit")  { CL.edit = null; renderClaims(); }
         else if (act === "edit-lines")   { CL.edit = { mode: "lines",   claimNo: c.claim_no }; CL.open[c.claim_no] = true; renderClaims(); }

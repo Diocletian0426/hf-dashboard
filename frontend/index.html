@@ -32,10 +32,10 @@
     // ---- how stale is a site's last report? ----
     function reportHealth(lastDate) {
       if (!lastDate) return { cls: "status-bad", text: "never reported" };
-      var days = Math.round((new Date(Dash.todayKL()) - new Date(lastDate)) / 86400000);
-      if (days <= 1) return { cls: "status-ok",   text: lastDate + " ✓" };
-      if (days <= 3) return { cls: "status-warn", text: lastDate + " (" + days + " days ago)" };
-      return { cls: "status-bad", text: lastDate + " (" + days + " days ago!)" };
+      var days = UI.daysSince(lastDate);
+      if (days <= 1) return { cls: "status-ok",   text: UI.dstr(lastDate) + " ✓" };
+      if (days <= 3) return { cls: "status-warn", text: UI.dstr(lastDate) + " (" + days + " days ago)" };
+      return { cls: "status-bad", text: UI.dstr(lastDate) + " (" + days + " days ago!)" };
     }
 
     function projectCard(p) {
@@ -45,7 +45,7 @@
       var daysLeft = p.days_remaining;
 
       var activity = p.last_report_date
-        ? '<div class="pcard-line muted-line">On ' + p.last_report_date + ": bored " +
+        ? '<div class="pcard-line muted-line">On ' + UI.dstr(p.last_report_date) + ": bored " +
           (p.piles_bored_on_last_report || 0) + " · cast " + (p.piles_cast_on_last_report || 0) + "</div>"
         : "";
 
@@ -77,6 +77,7 @@
 
     window.onShellReady = async function () {
       var cardsEl = document.getElementById("cards");
+      cardsEl.innerHTML = UI.empty("Loading today's site picture…");
       try {
         var pulseP = Dash.getProjectPulse();
         var leaveP = Dash.getLeaveRequests(Dash.currentYearKL(), "pending").catch(function () { return null; });
@@ -87,13 +88,13 @@
         var latest = dates.length ? dates[dates.length - 1] : null;
         var reportedOnLatest = pulse.filter(function (p) { return p.last_report_date === latest; }).length;
         document.getElementById("freshness").textContent = latest
-          ? "Latest site report: " + latest + " — " + reportedOnLatest + " of " + pulse.length +
+          ? "Latest site report: " + UI.dstr(latest) + " — " + reportedOnLatest + " of " + pulse.length +
             " active sites reported that day. Site reports arrive nightly (~10:30pm)."
           : "No site reports found yet.";
 
         cardsEl.innerHTML = pulse.length
           ? pulse.map(projectCard).join("")
-          : '<div class="empty">No active projects.</div>';
+          : UI.empty("No active projects.", "Completed and on-hold projects live on the Projects page.");
 
         // ---- needs-attention totals ----
         var silent   = pulse.filter(function (p) { return reportHealth(p.last_report_date).cls !== "status-ok"; }).length;
@@ -115,8 +116,8 @@
                  "</div>";
         }).join("");
       } catch (e) {
-        document.getElementById("error").innerHTML =
-          '<div class="banner banner-red">Could not load: ' + (e.message || e) + "</div>";
+        cardsEl.innerHTML = "";
+        document.getElementById("error").innerHTML = UI.errorBanner(e.message || e);
       }
     };
   </script>
