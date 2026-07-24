@@ -113,10 +113,7 @@
     }
 
     // how fresh is the picture? days between the last report and today (KL)
-    function daysSince(dateStr) {
-      if (!dateStr) return null;
-      return Math.round((new Date(Dash.todayKL()) - new Date(dateStr)) / 86400000);
-    }
+    var daysSince = UI.daysSince;
 
     function staleNote(machines) {
       var silent3 = 0, never = 0, newest = "";
@@ -160,10 +157,14 @@
     }
 
     // ================= NEEDS ATTENTION (element 2) =================
-    function esc(s) { return String(s === null || s === undefined ? "" : s).replace(/"/g, "&quot;"); }
-    function escHtml(s) {
-      return String(s === null || s === undefined ? "" : s)
-        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    var esc = UI.esc, escHtml = UI.escHtml;
+
+    // open site blocks + scroll survive the reload-after-save pattern
+    var OPEN = UI.openState("sites");
+    function reloadKeepingPlace() {
+      OPEN.saveFrom(document.getElementById("sites"));
+      UI.saveScroll();
+      window.location.reload();
     }
 
     function attnChip(machineCode, label, tip) {
@@ -259,7 +260,7 @@
       document.querySelectorAll("details.zone").forEach(function (d) { d.open = open; });
     }
 
-    function typeLabel(t) { return String(t || "").replace(/_/g, " "); }
+    var typeLabel = UI.label;   // machine types read in plain language
 
     // state badge + report date; date turns amber when 3+ days stale
     function lastReportCell(m) {
@@ -270,7 +271,7 @@
       var dateHtml = m.last_status_date
         ? ' <span class="' + (d !== null && d >= 3 ? "stale-warn" : "muted") + '">' + m.last_status_date + "</span>"
         : "";
-      return '<span class="badge badge-' + cls + '">' + escHtml(m.last_status) + "</span>" + dateHtml;
+      return UI.badge(m.last_status, "badge-" + cls) + dateHtml;
     }
 
     // same meaning as the pile page Comment column: the machine's problem
@@ -288,12 +289,7 @@
     }
 
     // ================= RECORD CARD (element 4) =================
-    // '2026-07-03' -> '03 Jul 2026'
-    function dstr(d) {
-      if (!d) return "—";
-      return new Intl.DateTimeFormat("en-MY", { day: "2-digit", month: "short", year: "numeric" })
-        .format(new Date(d + "T00:00:00"));
-    }
+    var dstr = UI.dstr;
     function numOr(v, unit) {
       return (v === null || v === undefined) ? "—" : Math.round(Number(v)) + (unit ? " " + unit : "");
     }
@@ -320,7 +316,7 @@
         if (r.cost_total) bits.push("RM " + Number(r.cost_total).toFixed(2));
         if (r.performed_by_name) bits.push("by " + escHtml(r.performed_by_name));
         return '<div class="pc-line"><strong>' + dstr(r.service_date) + "</strong> " +
-               '<span class="badge ' + cls + '">' + escHtml(r.service_type || "?") + "</span> " +
+               '<span class="badge ' + cls + '">' + escHtml(UI.label(r.service_type || "?")) + "</span> " +
                escHtml(r.description || "") +
                (bits.length ? ' <span class="pc-meta-inline">· ' + bits.join(" · ") + "</span>" : "") +
                (r.remarks ? '<div class="pc-meta">' + escHtml(r.remarks) + "</div>" : "") +
@@ -340,7 +336,7 @@
         if (a.refuel_l) bits.push("refuel " + Math.round(a.refuel_l) + " L");
         if (a.diesel_balance_l !== null && a.diesel_balance_l !== undefined) bits.push("balance " + Math.round(a.diesel_balance_l) + " L");
         return '<div class="pc-line"><strong>' + dstr(a.log_date) + "</strong> " +
-               '<span class="badge ' + cls + '">' + escHtml(a.status || "?") + "</span>" +
+               '<span class="badge ' + cls + '">' + escHtml(UI.label(a.status || "?")) + "</span>" +
                (bits.length ? ' <span class="pc-meta-inline">' + bits.join(" · ") + "</span>" : "") +
                (a.remarks ? '<div class="pc-meta">' + escHtml(a.remarks) + "</div>" : "") +
                "</div>";
@@ -358,14 +354,14 @@
         var st = i.status || "";
         var cls = (st === "open") ? "open" : (st === "in_progress") ? "in_progress" : "resolved";
         var meta = [dstr(i.raised_date) + (i.resolved_date ? " → resolved " + dstr(i.resolved_date) : "")];
-        if (i.priority) meta.push(escHtml(i.priority));
+        if (i.priority) meta.push(escHtml(UI.label(i.priority)));
         if (i.raised_by_name_resolved) meta.push("raised by " + escHtml(i.raised_by_name_resolved));
         var latest = i.latest_action
           ? '<div class="pc-latest">latest action: ' + escHtml(i.latest_action) +
             (i.latest_action_date ? " (" + Dash.klDateTime(i.latest_action_date) + ")" : "") + "</div>"
           : "";
         return '<div class="pc-issue"><strong>#' + i.issue_number + "</strong> " + escHtml(i.title || "") +
-               ' <span class="badge badge-' + cls + '">' + escHtml(st) + "</span>" +
+               ' <span class="badge badge-' + cls + '">' + escHtml(UI.label(st)) + "</span>" +
                '<div class="pc-meta">' + meta.join(" · ") + "</div>" + latest + "</div>";
       }).join("");
     }
@@ -403,10 +399,10 @@
     function mcEditForm(m) {
       var typeOpts = MACHINE_TYPES.map(function (t) {
         return '<option value="' + t + '"' + (t === m.machine_type ? " selected" : "") + ">" +
-               t.replace(/_/g, " ") + "</option>";
+               UI.label(t) + "</option>";
       }).join("");
       var stOpts = MACHINE_STATUSES.map(function (s) {
-        return '<option value="' + s + '"' + (s === m.machine_status ? " selected" : "") + ">" + s + "</option>";
+        return '<option value="' + s + '"' + (s === m.machine_status ? " selected" : "") + ">" + UI.label(s) + "</option>";
       }).join("");
       return '<div class="claim-form">' +
         "<strong>Edit " + escHtml(m.machine_code) + "</strong>" +
@@ -724,7 +720,7 @@
       '<th title="Latest daily report: state and date (amber date = 3+ days old)">Last report</th>' +
       '<th class="num" title="Diesel consumed, last 7 days (L)">Diesel 7d</th>' +
       '<th title="On this site since (from the transfer group)">Mobilised</th>' +
-      '<th title="Has any problem been recorded against this machine? Hover a Yes for the list.">Comment</th>' +
+      '<th title="Has any problem been recorded against this machine? Hover a Yes for the list.">Problems</th>' +
       "</tr></thead>";
 
     function siteTables(machines, allIssuesByMachine, serviceByMachine, activityByMachine) {
@@ -750,26 +746,32 @@
         if (dir) {
           var t = dir.has_bored_scope && dir.has_sheet_scope ? "BP+SP"
                 : dir.has_bored_scope ? "BP" : dir.has_sheet_scope ? "SP" : "";
-          if (t) scopeTag = '<span class="badge badge-gray">' + t + "</span> ";
+          if (t) scopeTag = '<span class="chip chip-tag">' + t + "</span>";
         }
         var rows = list.map(function (m) {
           return '<tr class="machine-row" data-machine="' + esc(m.machine_code) + '" title="Click to open the full record">' +
-            '<td><span class="row-caret">&#9656;</span><strong>' + escHtml(m.machine_code) + "</strong></td>" +
-            "<td>" + escHtml(typeLabel(m.machine_type)) + "</td>" +
-            '<td class="wrap">' + escHtml([m.brand, m.model].filter(Boolean).join(" ")) + "</td>" +
-            "<td>" + lastReportCell(m) + "</td>" +
-            '<td class="num">' + (m.last_status ? Math.round(m.diesel_last_7_days || 0) : "—") + "</td>" +
-            "<td>" + (m.mobilised_date || "—") + "</td>" +
-            "<td>" + commentCell(allIssuesByMachine[m.machine_code]) + "</td>" +
+            UI.td("Machine", '<span class="row-caret">&#9656;</span><strong>' + escHtml(m.machine_code) + "</strong>") +
+            UI.td("Type", escHtml(typeLabel(m.machine_type))) +
+            UI.td("Brand / model", escHtml([m.brand, m.model].filter(Boolean).join(" ")), "wrap") +
+            UI.td("Last report", lastReportCell(m)) +
+            UI.td("Diesel 7d", (m.last_status ? String(Math.round(m.diesel_last_7_days || 0)) : "—"), "num") +
+            UI.td("Mobilised", m.mobilised_date || "—") +
+            UI.td("Problems", commentCell(allIssuesByMachine[m.machine_code])) +
           "</tr>" +
           machineCard(m, serviceByMachine[m.machine_code], activityByMachine[m.machine_code],
                       allIssuesByMachine[m.machine_code]);
         }).join("");
-        return '<details class="zone" open>' +
+        var breakdown = list.filter(function (m) { return m.last_status === "breakdown"; }).length;
+        var chips = [];
+        if (scopeTag) chips.push(scopeTag);
+        chips = chips.concat([
+          '<span class="chip">' + list.length + " machine" + (list.length === 1 ? "" : "s") + "</span>",
+          '<span class="chip' + (operating ? " chip-ok" : "") + '">' + operating + " operating</span>"]);
+        if (breakdown) chips.push('<span class="chip chip-bad">' + breakdown + " breakdown</span>");
+        return '<details class="zone" open data-group="' + esc(k) + '">' +
                '<summary><span class="zone-name">' + title + "</span>" +
-               '<span class="zone-count">' + scopeTag + list.length + " machine" + (list.length === 1 ? "" : "s") +
-               " · " + operating + " operating</span></summary>" +
-               '<div class="table-wrap zone-table"><table>' + THEAD +
+               '<span class="group-head">' + chips.join(" ") + "</span></summary>" +
+               '<div class="table-wrap zone-table table-stack"><table>' + THEAD +
                "<tbody>" + rows + "</tbody></table></div>" +
                "</details>";
       }).join("");
@@ -822,7 +824,7 @@
         var host = document.getElementById("add-machine");
         if (host.innerHTML) { host.innerHTML = ""; return; }   // toggle
         var typeOpts = MACHINE_TYPES.map(function (t) {
-          return '<option value="' + t + '">' + t.replace(/_/g, " ") + "</option>";
+          return '<option value="' + t + '">' + UI.label(t) + "</option>";
         }).join("");
         var siteOpts = '<option value="">— unassigned —</option>' +
           MOVE.projects.filter(function (p) {
@@ -861,7 +863,7 @@
               projectId: document.getElementById("am-site").value || null,
               serviceIntervalHours: document.getElementById("am-interval").value
             });
-            window.location.reload();               // appears under its site
+            reloadKeepingPlace();               // appears under its site
           } catch (e) {
             var msg = (e && e.message) || String(e);
             document.getElementById("error").innerHTML =
@@ -932,7 +934,7 @@
               mobilisedDate: document.getElementById("me-mobilised").value || null,
               clearMobilised: document.getElementById("me-clearmobilised").checked
             });
-            window.location.reload();
+            reloadKeepingPlace();
           } catch (e) { fail(e); }
           return;
         }
@@ -949,7 +951,7 @@
               vendor: document.getElementById("ms-vendor").value || null,
               remarks: document.getElementById("ms-remarks").value || null
             });
-            window.location.reload();
+            reloadKeepingPlace();
           } catch (e) { fail(e); }
           return;
         }
@@ -960,7 +962,7 @@
           try {
             await Dash.setMachineHourMeter(id, hv,
               document.getElementById("mh-date").value || null);
-            window.location.reload();
+            reloadKeepingPlace();
           } catch (e) { fail(e); }
           return;
         }
@@ -984,7 +986,7 @@
           await Dash.moveMachine(id, sel.value === "unassign" ? null : sel.value,
             remEl && remEl.value ? remEl.value : null,
             dateEl && dateEl.value ? dateEl.value : null);
-          window.location.reload();
+          reloadKeepingPlace();
         } catch (e) {
           document.getElementById("error").innerHTML =
             '<div class="banner banner-red">Could not move: ' + escHtml((e && e.message) || e) + "</div>";
@@ -1028,7 +1030,7 @@
               toProjectId: dest === "unassign" ? null : dest,
               remarks: document.getElementById("mp-remarks-" + mid).value || null
             });
-            window.location.reload();
+            reloadKeepingPlace();
           } catch (e) { fail(e); }
           return;
         }
@@ -1038,13 +1040,13 @@
         if (act === "mp-execute") {
           if (!window.confirm("Execute now — " + label +
               "? The machine moves immediately (this applies the real move).")) return;
-          try { await Dash.executeMovementPlan(planId); window.location.reload(); }
+          try { await Dash.executeMovementPlan(planId); reloadKeepingPlace(); }
           catch (e) { fail(e); }
           return;
         }
         if (act === "mp-cancel") {
           if (!window.confirm("Cancel the planned move " + label + "?")) return;
-          try { await Dash.cancelMovementPlan(planId); window.location.reload(); }
+          try { await Dash.cancelMovementPlan(planId); reloadKeepingPlace(); }
           catch (e) { fail(e); }
           return;
         }
@@ -1086,13 +1088,13 @@
               effectiveDate: document.getElementById("th-date-" + mid).value || null,
               remarks: document.getElementById("th-remarks-" + mid).value || null
             });
-            window.location.reload();
+            reloadKeepingPlace();
           } catch (e) { fail(e); }
           return;
         }
         if (act === "th-del") {
           if (!window.confirm("Delete this history row? This cannot be undone.")) return;
-          try { await Dash.deleteTransfer(btn.getAttribute("data-transfer-id")); window.location.reload(); }
+          try { await Dash.deleteTransfer(btn.getAttribute("data-transfer-id")); reloadKeepingPlace(); }
           catch (e) { fail(e); }
           return;
         }
@@ -1107,7 +1109,7 @@
               effectiveDate: d,
               remarks: document.getElementById("tha-remarks-" + mid).value || null
             });
-            window.location.reload();
+            reloadKeepingPlace();
           } catch (e) { fail(e); }
           return;
         }
@@ -1115,6 +1117,7 @@
     }
 
     window.onShellReady = async function () {
+      document.getElementById("sites").innerHTML = UI.empty("Loading the fleet…");
       try {
         var results = await Promise.all([
           Dash.getMachines(),
@@ -1187,6 +1190,16 @@
         document.getElementById("sites").innerHTML =
           siteTables(machines, allIssuesByMachine, serviceByMachine, activityByMachine);
         document.getElementById("zone-tools").hidden = false;
+
+        // coming back from a save? restore open site blocks + scroll position
+        var savedOpen = OPEN.load();
+        if (Object.keys(savedOpen).length) {
+          document.querySelectorAll("#sites details.zone[data-group]").forEach(function (d) {
+            d.open = !!savedOpen[d.getAttribute("data-group")];
+          });
+          OPEN.saveMap({});   // one-shot — don't keep overriding future visits
+        }
+        UI.restoreScroll();
         wireAttentionJumps();
         wireCardToggles();
         wireMachineMoves();

@@ -205,17 +205,8 @@ button { font-family: var(--font); }
 .ctx-tabs a:hover { background: var(--surface-2); color: var(--ink); }
 .ctx-tabs a.active { background: var(--brand-soft); color: var(--brand-ink); font-weight: 600; }
 
-/* legacy pre-refresh shell classes (no longer emitted; removed after grep in
-   the final round) */
-.nav-inner {
-  display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
-  background: var(--nav-bg); color: #fff; padding: 8px 18px;
-  min-height: var(--nav-h);
-}
-.nav-user {
-  font-size: var(--fs-sm); color: var(--nav-ink);
-  display: flex; align-items: center; gap: 10px;
-}
+/* (legacy .nav-inner/.nav-user removed — no page emits them since the
+   round-2 shell rewrite; grep-verified in the final round) */
 
 /* ============================== 4. LAYOUT ================================= */
 
