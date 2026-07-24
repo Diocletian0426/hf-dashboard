@@ -68,20 +68,10 @@
   <script src="shell.js"></script>
 
   <script>
-    // ---- helpers (same definitions the v1 page used) ----
-    var STAGES = [
-      ["Planned", ["planned"]],
-      ["Boring",  ["casing_installed", "boring_in_progress"]],
-      ["Bored",   ["bored_complete"]],
-      ["Cage",    ["cage_in_progress", "cage_installed"]],
-      ["Cast",    ["casting_in_progress", "cast_complete"]],
-      ["Trimmed", ["head_trimmed"]]
-    ];
-    function stageOf(status) {
-      for (var i = 0; i < STAGES.length; i++)
-        if (STAGES[i][1].indexOf(status) !== -1) return STAGES[i][0];
-      return "Planned";
-    }
+    // ---- helpers: canonical copies live in ui.js (window.UI) ----
+    var STAGES = UI.PILE_STAGES, stageOf = UI.stageOf;
+    // open zones + scroll position survive the reload-after-save pattern
+    var OPEN = UI.openState("zones");
     function stageBadge(r) {
       var s = r.construction_status || "";
       var cls = (s === "cast_complete" || s === "head_trimmed") ? "approved"
@@ -100,14 +90,14 @@
     }
     function testBadge(r) {
       var t = r.testing_status || "";
-      if (t === "passed") return '<span class="badge badge-passed">passed</span>';
-      if (t === "failed") return '<span class="badge badge-failed">failed</span>';
+      if (t === "passed") return '<span class="badge badge-passed">Passed</span>';
+      if (t === "failed") return '<span class="badge badge-failed">Failed</span>';
       if (t === "not_assigned" || t === "") return "—";
-      return '<span class="badge badge-gray">' + t + "</span>";
+      return UI.badge(t, "badge-gray");
     }
     function n(v) { return v === null || v === undefined ? null : Number(v); }
     function f(v, dp) { return v === null ? "—" : v.toFixed(dp === undefined ? 1 : dp); }
-    function esc(s) { return String(s === null || s === undefined ? "" : s).replace(/"/g, "&quot;"); }
+    var esc = UI.esc;
     function depthCell(r) {
       var design   = n(r.design_depth_m);
       var actual   = n(r.actual_depth_m);
@@ -133,17 +123,7 @@
 
     // ================= RECORD CARD (step 3) helpers =================
 
-    // like esc() but for HTML text (esc() only handles the quote inside title="")
-    function escHtml(s) {
-      return String(s === null || s === undefined ? "" : s)
-        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    }
-    // '2026-07-03' -> '03 Jul 2026'
-    function dstr(d) {
-      if (!d) return "—";
-      return new Intl.DateTimeFormat("en-MY", { day: "2-digit", month: "short", year: "numeric" })
-        .format(new Date(d + "T00:00:00"));
-    }
+    var escHtml = UI.escHtml, dstr = UI.dstr;
     // number + unit, or em-dash when the database has nothing
     function numCell(v, dp, unit) {
       var x = n(v);
@@ -183,7 +163,7 @@
       s = s || "";
       var known = ["scheduled", "completed", "passed", "failed", "pending", "rejected"];
       var cls = known.indexOf(s) !== -1 ? s : "gray";
-      return '<span class="badge badge-' + cls + '">' + escHtml(s || "—") + "</span>";
+      return '<span class="badge badge-' + cls + '">' + (s ? escHtml(UI.label(s)) : "—") + "</span>";
     }
 
     // ================= TEST OPERATIONS (step 6, 0052) =================
@@ -297,7 +277,7 @@
           '<div id="tosf"></div>'
         : "";
       if (!rows && !control) return "";
-      return '<details class="zone"><summary><span class="zone-name">Test spec</span>' +
+      return '<details class="zone chase-panel"><summary><span class="zone-name">Test spec</span>' +
              '<span class="zone-count">' + TOPS.specs.length + " test type" + (TOPS.specs.length === 1 ? "" : "s") +
              " · contract percentages vs live coverage</span></summary>" +
              '<div class="chase-body">' +
@@ -319,6 +299,14 @@
         '<button type="button" data-action="to-form-cancel" data-host="tosf">Cancel</button>' +
         '<span class="muted-line">saving an existing type updates its percentage</span>' +
         "</div>";
+    }
+
+    // saves which zones are open + how far down the page is, THEN reloads —
+    // so the office doesn't lose their place after every save
+    function reloadKeepingPlace() {
+      OPEN.saveFrom(document.getElementById("zones"));
+      UI.saveScroll();
+      window.location.reload();
     }
 
     // test-op buttons live in the spec panel AND the record cards — one
@@ -343,12 +331,12 @@
         if (act === "to-book") {
           var d = document.getElementById("tob-" + btn.getAttribute("data-req")).value;
           if (!d) return;
-          try { await Dash.bookTest(btn.getAttribute("data-req"), d); window.location.reload(); }
+          try { await Dash.bookTest(btn.getAttribute("data-req"), d); reloadKeepingPlace(); }
           catch (e) { fail(e); }
           return;
         }
         if (act === "to-unbook") {
-          try { await Dash.bookTest(btn.getAttribute("data-req"), null); window.location.reload(); }
+          try { await Dash.bookTest(btn.getAttribute("data-req"), null); reloadKeepingPlace(); }
           catch (e) { fail(e); }
           return;
         }
@@ -370,7 +358,7 @@
               reportUrl: document.getElementById("tor-url-" + req).value || null,
               remarks: document.getElementById("tor-remarks-" + req).value || null
             });
-            window.location.reload();
+            reloadKeepingPlace();
           } catch (e) { fail(e); }
           return;
         }
@@ -380,7 +368,7 @@
           try {
             await Dash.setPileTestRequirement(btn.getAttribute("data-pile-id"),
               btn.getAttribute("data-type"), true);
-            window.location.reload();
+            reloadKeepingPlace();
           } catch (e) { fail(e); }
           return;
         }
@@ -398,7 +386,7 @@
           var pid2 = btn.getAttribute("data-pile-id");
           var sel = document.getElementById("tor-type-" + pid2);
           if (!sel || !sel.value) return;
-          try { await Dash.setPileTestRequirement(pid2, sel.value); window.location.reload(); }
+          try { await Dash.setPileTestRequirement(pid2, sel.value); reloadKeepingPlace(); }
           catch (e) { fail(e); }
           return;
         }
@@ -422,7 +410,7 @@
               percentage: pct,
               remarks: document.getElementById("tos-remarks").value || null
             });
-            window.location.reload();
+            reloadKeepingPlace();
           } catch (e) { fail(e); }
           return;
         }
@@ -432,7 +420,7 @@
           try {
             await Dash.setProjectTestSpec(TOPS.projectId, btn.getAttribute("data-type"),
               { remove: true });
-            window.location.reload();
+            reloadKeepingPlace();
           } catch (e) { fail(e); }
           return;
         }
@@ -451,15 +439,15 @@
         var st = i.status || "";
         var cls = (st === "open") ? "open" : (st === "in_progress") ? "in_progress" : "resolved";
         var meta = [dstr(i.raised_date) + (i.resolved_date ? " → resolved " + dstr(i.resolved_date) : "")];
-        if (i.priority) meta.push(escHtml(i.priority));
-        if (i.category) meta.push(escHtml(i.category));
+        if (i.priority) meta.push(escHtml(UI.label(i.priority)));
+        if (i.category) meta.push(escHtml(UI.label(i.category)));
         if (i.raised_by_name_resolved) meta.push("raised by " + escHtml(i.raised_by_name_resolved));
         var latest = i.latest_action
           ? '<div class="pc-latest">latest action: ' + escHtml(i.latest_action) +
             (i.latest_action_date ? " (" + Dash.klDateTime(i.latest_action_date) + ")" : "") + "</div>"
           : "";
         return '<div class="pc-issue"><strong>#' + i.issue_number + "</strong> " + escHtml(i.title || "") +
-               ' <span class="badge badge-' + cls + '">' + escHtml(st) + "</span>" +
+               ' <span class="badge badge-' + cls + '">' + escHtml(UI.label(st)) + "</span>" +
                '<div class="pc-meta">' + meta.join(" · ") + "</div>" + latest + "</div>";
       }).join("");
     }
@@ -513,15 +501,9 @@
     // ================= PIPELINE STRIP (step 5) =================
     // Planned = grey (no progress ink); boring stages = blues deepening
     // with progress; Cast/Trimmed switch to green — same "green = cast"
-    // language as the stage badges. Palette validated (CVD-safe on white).
-    var STAGE_COLORS = {
-      "Planned": "#e5e7eb",
-      "Boring":  "#5598e7",
-      "Bored":   "#2a78d6",
-      "Cage":    "#1c5cab",
-      "Cast":    "#1baf7a",
-      "Trimmed": "#008300"
-    };
+    // language as the stage badges. Palette validated (CVD-safe on white);
+    // the canonical copy lives in ui.js.
+    var STAGE_COLORS = UI.STAGE_COLORS;
 
     function pipelineStrip(piles) {
       var counts = {};
@@ -657,7 +639,7 @@
       '<th class="num" title="Latest reported depth (site reports, provisional) / design depth (drawing)">Depth — reported / design (m)</th>' +
       '<th title="Bore-log record state">Bore log</th>' +
       "<th>Testing</th>" +
-      '<th title="Has any problem been recorded against this pile? Hover a Yes for the list.">Comment</th>' +
+      '<th title="Has any problem been recorded against this pile? Hover a Yes for the list.">Problems</th>' +
       "</tr></thead>";
 
     window.onShellReady = async function () {
@@ -740,14 +722,24 @@
             "</tr>" +
             pileCard(r, issuesByPile[r.pile_mark_no], testsByPile[r.pile_mark_no]);
           }).join("");
-          return '<details class="zone" open data-zone="' + esc(z) + '">' +
+          return '<details class="zone" open data-zone="' + esc(z) + '" data-group="' + esc(z) + '">' +
                  '<summary><span class="zone-name">' + z + '</span>' +
                  '<span class="zone-count">' + zoneSummary(zr) + "</span></summary>" +
-                 '<div class="table-wrap zone-table"><table>' + THEAD +
+                 '<div class="table-wrap zone-table table-sticky-first"><table>' + THEAD +
                  "<tbody>" + rows + "</tbody></table></div>" +
                  "</details>";
         }).join("");
         document.getElementById("zone-tools").hidden = false;
+
+        // coming back from a save? restore which zones were open + the scroll
+        var savedOpen = OPEN.load();
+        if (Object.keys(savedOpen).length) {
+          zonesEl.querySelectorAll("details.zone[data-group]").forEach(function (d) {
+            d.open = !!savedOpen[d.getAttribute("data-group")];
+          });
+          OPEN.saveMap({});   // one-shot — don't keep overriding future visits
+        }
+        UI.restoreScroll();
 
         // pipeline strip + records-to-chase panel + test spec above the tables
         document.getElementById("pipeline").innerHTML = pipelineStrip(piles);

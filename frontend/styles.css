@@ -107,12 +107,14 @@ button { font-family: var(--font); }
 .muted { color: var(--ink-3); font-size: var(--fs-xs); }
 
 /* =========================== 3. SHELL / NAV =============================== */
-/* The bar is injected by shell.js into <header id="nav">. */
+/* The bar is injected by shell.js into <header id="nav">:
+   .topbar (brand + links + user menu) and, on project-scoped pages,
+   .ctxbar ("Projects › switcher · Hub | Piles | Claims"). */
 
 #nav { position: sticky; top: 0; z-index: 50; }
 
-.nav-inner {
-  display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+.topbar {
+  display: flex; align-items: center; gap: var(--sp-4);
   background: var(--nav-bg); color: #fff;
   padding: 8px 18px;
   min-height: var(--nav-h);
@@ -122,22 +124,98 @@ button { font-family: var(--font); }
   font-weight: 800; letter-spacing: 0.2px; font-size: 15px;
   color: #fff; text-decoration: none; white-space: nowrap;
 }
-.nav-links { display: flex; gap: 2px; flex-wrap: wrap; flex: 1; }
+.nav-links { display: flex; gap: 2px; flex-wrap: wrap; flex: 1; align-items: center; }
 .nav-links a {
   color: var(--nav-ink); text-decoration: none;
   padding: 7px 12px; border-radius: var(--r-sm); font-size: var(--fs-md);
 }
 .nav-links a:hover { background: var(--nav-hover); color: #fff; }
 .nav-links a.active { background: var(--brand); color: #fff; font-weight: 600; }
-.nav-user {
-  font-size: var(--fs-sm); color: var(--nav-ink);
-  display: flex; align-items: center; gap: 10px;
+
+/* hamburger (phones only) */
+.nav-burger {
+  display: none; flex-direction: column; justify-content: center; gap: 4px;
+  width: 38px; height: 38px; padding: 8px;
+  background: transparent; border: 1px solid #334155; border-radius: var(--r-sm);
+  cursor: pointer; flex: none;
 }
+.nav-burger span {
+  display: block; height: 2px; border-radius: 2px; background: var(--nav-ink);
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+#nav.nav-open .nav-burger span:nth-child(1) { transform: translateY(6px) rotate(45deg); }
+#nav.nav-open .nav-burger span:nth-child(2) { opacity: 0; }
+#nav.nav-open .nav-burger span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
+
+/* user menu (desktop) — native <details> dropdown, initials chip */
+.user-menu { position: relative; flex: none; }
+.user-menu > summary {
+  list-style: none; cursor: pointer; user-select: none;
+  width: 34px; height: 34px; border-radius: 50%;
+  background: var(--brand); color: #fff;
+  font-size: 12.5px; font-weight: 700; letter-spacing: 0.5px;
+  display: flex; align-items: center; justify-content: center;
+}
+.user-menu > summary::-webkit-details-marker { display: none; }
+.user-menu > summary:hover { background: var(--brand-ink); }
+.user-pop {
+  position: absolute; right: 0; top: calc(100% + 8px); z-index: 60;
+  background: var(--surface); color: var(--ink);
+  border: 1px solid var(--line); border-radius: var(--r-md);
+  box-shadow: var(--shadow-2); padding: var(--sp-3) var(--sp-4);
+  min-width: 200px;
+}
+.user-pop .user-name { font-weight: 600; font-size: var(--fs-md); white-space: nowrap; }
+.user-pop .user-desig { color: var(--ink-2); font-size: var(--fs-xs); margin: 2px 0 10px; }
+.user-pop .btn-plain { color: var(--danger-ink); border-color: var(--line-strong); width: 100%; }
+.user-pop .btn-plain:hover { background: var(--danger-soft); border-color: #fecaca; }
+
+/* user block inside the phone menu */
+.nav-user-mobile { display: none; }
+.nav-who { color: #fff; font-size: var(--fs-md); font-weight: 600; }
+.nav-desig { display: block; color: var(--nav-ink); font-size: var(--fs-xs); font-weight: 400; }
+
 .btn-plain {
   background: transparent; color: #fca5a5; border: 1px solid #334155;
   border-radius: var(--r-sm); padding: 5px 12px; cursor: pointer; font-size: var(--fs-sm);
 }
 .btn-plain:hover { background: var(--nav-hover); border-color: #475569; }
+
+/* ---- project context bar ---- */
+.ctxbar {
+  display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap;
+  background: var(--surface); border-bottom: 1px solid var(--line);
+  padding: 8px 18px; font-size: var(--fs-sm);
+  box-shadow: var(--shadow-1);
+}
+.ctx-root { color: var(--ink-2); text-decoration: none; font-weight: 600; white-space: nowrap; }
+.ctx-root:hover { color: var(--brand-ink); text-decoration: underline; }
+.ctx-sep { color: var(--ink-3); }
+.ctx-switch {
+  padding: 5px 8px; border: 1px solid var(--line-strong); border-radius: var(--r-sm);
+  font-size: var(--fs-sm); background: var(--surface); color: var(--ink);
+  max-width: 340px;
+}
+.ctx-tabs { display: inline-flex; gap: 2px; margin-left: var(--sp-2); }
+.ctx-tabs a {
+  color: var(--ink-2); text-decoration: none;
+  padding: 5px 12px; border-radius: var(--r-sm); font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+.ctx-tabs a:hover { background: var(--surface-2); color: var(--ink); }
+.ctx-tabs a.active { background: var(--brand-soft); color: var(--brand-ink); font-weight: 600; }
+
+/* legacy pre-refresh shell classes (no longer emitted; removed after grep in
+   the final round) */
+.nav-inner {
+  display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+  background: var(--nav-bg); color: #fff; padding: 8px 18px;
+  min-height: var(--nav-h);
+}
+.nav-user {
+  font-size: var(--fs-sm); color: var(--nav-ink);
+  display: flex; align-items: center; gap: 10px;
+}
 
 /* ============================== 4. LAYOUT ================================= */
 
@@ -662,11 +740,40 @@ summary.zone-rich::before { float: left; margin: 4px 8px 0 0; }
 }
 .table-sticky-first table th:first-child { z-index: 3; background: var(--surface-2); }
 .table-sticky-first table tbody tr:hover td:first-child { background: #f4f7fb; }
+/* full-width expandable rows (record cards, claim lines) opt back out */
+.table-sticky-first table tr.pile-card-row > td,
+.table-sticky-first table tr.claim-lines-row > td {
+  position: static; box-shadow: none; background: #fbfcfe;
+}
 
 /* ============================ 8. RESPONSIVE =============================== */
 
 @media (max-width: 900px) {
   main { padding: var(--sp-4) var(--sp-3) 40px; }
+
+  /* nav collapses to burger + slide-down panel */
+  .nav-burger { display: flex; }
+  .user-menu { display: none; }
+  .topbar .nav-links { display: none; }
+  #nav.nav-open .nav-links {
+    display: flex; flex-direction: column; align-items: stretch; gap: 2px;
+    position: fixed; top: var(--nav-h); left: 0; right: 0; z-index: 55;
+    background: var(--nav-bg); padding: var(--sp-2) var(--sp-3) var(--sp-4);
+    box-shadow: var(--shadow-2);
+    max-height: calc(100vh - var(--nav-h)); overflow-y: auto;
+  }
+  #nav.nav-open .nav-links a { padding: 12px 14px; font-size: 15px; }
+  #nav.nav-open .nav-user-mobile {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: var(--sp-3); margin-top: var(--sp-3); padding: var(--sp-3) 14px 0;
+    border-top: 1px solid #1e293b;
+  }
+
+  /* context bar: switcher grows, tabs scroll */
+  .ctxbar { padding: 8px 12px; }
+  .ctx-switch { flex: 1; min-width: 160px; max-width: none; }
+  .ctx-tabs { margin-left: 0; width: 100%; overflow-x: auto; }
+  .ctx-tabs a { padding: 8px 14px; }
 }
 
 @media (max-width: 760px) {
