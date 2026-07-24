@@ -129,11 +129,14 @@
       var x = n(v);
       return x === null ? "—" : f(x, dp) + (unit ? " " + unit : "");
     }
-    // as_built_steel is JSON from the bore log (cage sections); summarise it
+    // as-built steel from the bore log: {by_size:{T20:kg,…}, total_kg} —
+    // show the tonnage; legacy array payloads fall back to a section count
     function steelCell(js) {
       if (js === null || js === undefined) return "—";
       if (typeof js === "string") { try { js = JSON.parse(js); } catch (e) { return "recorded"; } }
       if (Array.isArray(js)) return js.length + " cage section" + (js.length === 1 ? "" : "s");
+      if (js && js.total_kg !== null && js.total_kg !== undefined)
+        return f(Number(js.total_kg) / 1000, 2) + " t";
       return "recorded";
     }
     // reported depth + variance vs design (red when short of design)
@@ -470,8 +473,10 @@
                numCell(r.diameter_mm, 0, "mm"),
                numCell(r.as_built_diameter_mm, 0, "mm")) +
         cmpRow("Depth / length", numCell(r.design_depth_m, 2, "m"), depthReportedCell(r), numCell(r.verified_pile_length_m, 2, "m")) +
-        cmpRow("Rock socket", numCell(r.design_socket_length_m, 2, "m"), numCell(r.socket_rock_length_m, 2, "m"), numCell(r.verified_cored_socket_m, 2, "m")) +
-        cmpRow("Concrete", numCell(r.design_concrete_m3, 1, "m³"), numCell(r.concrete_volume_m3, 1, "m³"), concreteVerifiedCell(r)) +
+        // site never reports socket/concrete — those columns were dropped in
+        // 0029; the site cells are honestly blank (verified side fills them)
+        cmpRow("Rock socket", numCell(r.design_socket_length_m, 2, "m"), "—", numCell(r.verified_cored_socket_m, 2, "m")) +
+        cmpRow("Concrete", numCell(r.design_concrete_m3, 1, "m³"), "—", concreteVerifiedCell(r)) +
         cmpRow("Steel", numCell(r.design_steel_total_t, 2, "t"), "—", steelCell(r.as_built_steel)) +
         cmpRow("Cast date", "—", dstr(r.cast_date), dstr(r.verified_cast_date)) +
         "</tbody></table></div>";
