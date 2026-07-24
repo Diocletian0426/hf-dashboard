@@ -1,0 +1,54 @@
+# =============================================================================
+# Deploy the dashboard to GitHub Pages.
+# =============================================================================
+# Publishes ONLY the frontend/ folder, so frontend/ becomes the site root:
+# the office opens https://diocletian0426.github.io/hf-dashboard/ and lands
+# straight on the app (index.html redirects to login when signed out).
+#
+# Runs on every push to main. Settings -> Pages -> Source must stay
+# "GitHub Actions" (not "Deploy from a branch") for this to be the publisher.
+#
+# The published site is viewable by anyone with the URL — fine by design:
+# the pages hold no data, config.js carries only the PUBLISHABLE key, and all
+# data access still requires an office sign-in (the database is the guard).
+# =============================================================================
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:      # manual "Run workflow" button, for redeploys
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Syntax-check all JS (house rule)
+        run: node tools/check-js.js
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload frontend/ as the site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

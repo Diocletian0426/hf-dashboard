@@ -27,6 +27,19 @@ node tools/check-js.js       # syntax-check all JS + inline scripts — run befo
 Open http://localhost:8123/login.html and sign in with an office account
 (accounts are created by the office — no self-registration).
 
+## Hosting (GitHub Pages)
+
+Every push to `main` auto-publishes the `frontend/` folder via
+`.github/workflows/pages.yml`, so `frontend/` IS the site root — the office
+opens **https://diocletian0426.github.io/hf-dashboard/** and lands on the app
+(signed-out visitors are redirected to login). Repo Settings → Pages → Source
+must stay **"GitHub Actions"**.
+
+The published site is viewable by anyone with the URL — fine by design: the
+pages hold no data, `config.js` carries only the *publishable* key, and all
+data access still requires an office sign-in (the database is the guard).
+Note the repo itself is public (free-plan requirement for Pages).
+
 ## Page map
 
 | Page | What it is |
