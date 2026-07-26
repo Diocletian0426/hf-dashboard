@@ -1312,40 +1312,28 @@
       // ---- cage layout ----
       if (hasCages) {
         var secs = (spec && Array.isArray(spec.sections)) ? spec.sections : [];
-        // collapse CONSECUTIVE IDENTICAL cages into one row — a long pile
-        // repeats the same middle cage and one row per repeat reads as noise
-        var groups = [];
-        sb.by_cage.forEach(function (c) {
+        // ONE ROW PER PHYSICAL CAGE (owner call) — this table gets read side
+        // by side with the drawing's cage schedule, so the rows must line up
+        // 1:1 with it; repeats are NOT collapsed even when identical
+        var cageTotal = 0;
+        var rows = sb.by_cage.map(function (c) {
           var bars = (c.bars || []).map(function (b) {
             return b.count + "T" + b.dia_mm;
           }).join(" + ");
           var spiral = (c.link && c.link.dia_mm)
             ? "T" + c.link.dia_mm + (c.link.pitch_mm ? " @ " + c.link.pitch_mm : "")
             : "—";
-          var sig = bars + "|" + spiral + "|" + c.bar_len_m + "|" + c.mass_kg + "|" + c.section;
-          var last = groups[groups.length - 1];
-          if (last && last.sig === sig) { last.to = c.cage; last.n++; return; }
-          groups.push({ sig: sig, from: c.cage, to: c.cage, n: 1, bars: bars, spiral: spiral,
-                        len: c.bar_len_m, mass: Number(c.mass_kg) || 0,
-                        section: c.section, top: c.top });
-        });
-
-        var cageTotal = 0;
-        var rows = groups.map(function (g) {
-          var rowKg = g.mass * g.n;
-          cageTotal += rowKg;
-          var label = (g.n > 1 ? "Cages " + g.from + "–" + g.to + " ×" + g.n : "Cage " + g.from);
+          cageTotal += Number(c.mass_kg) || 0;
           // the section label already says where the cage sits — only fall
           // back to a "top" marker when the design carries no label
-          var sec = (secs[g.section] && secs[g.section].label)
-            ? ' <span class="muted">' + escHtml(secs[g.section].label) + "</span>"
-            : (g.top ? ' <span class="muted">top</span>' : "");
-          return "<tr><th>" + escHtml(label) + sec + "</th>" +
-            UI.td("Main bars", escHtml(g.bars || "—")) +
-            UI.td("Spiral", escHtml(g.spiral)) +
-            UI.td("Bar length", f(n(g.len), 1) + " m", "num") +
-            UI.td("kg", fmtKg(rowKg) +
-              (g.n > 1 ? ' <span class="muted">(' + fmtKg(g.mass) + " each)</span>" : ""), "num") +
+          var sec = (secs[c.section] && secs[c.section].label)
+            ? ' <span class="muted">' + escHtml(secs[c.section].label) + "</span>"
+            : (c.top ? ' <span class="muted">top</span>' : "");
+          return "<tr><th>Cage " + c.cage + sec + "</th>" +
+            UI.td("Main bars", escHtml(bars || "—")) +
+            UI.td("Spiral", escHtml(spiral)) +
+            UI.td("Bar length", f(n(c.bar_len_m), 1) + " m", "num") +
+            UI.td("kg", fmtKg(c.mass_kg), "num") +
             "</tr>";
         }).join("");
 
