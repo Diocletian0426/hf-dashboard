@@ -102,6 +102,16 @@
                                               breakdown + total t + concrete m³,
                                               same math as the generated columns
                                               (any signed-in login may call)
+   await Dash.getProjectZones(projectId)   -> the project's REGISTERED zones +
+                                              pile counts (zero-pile zones
+                                              included — the Add Piles dropdown
+                                              source; any signed-in login)
+   await Dash.addZone(projectId, zone)     -> register a zone name for the
+                                              project ('duplicate_zone' when it
+                                              exists); zones are created BEFORE
+                                              piles go into them
+   await Dash.deleteZone(projectId, zone)  -> remove a zone NO pile uses
+                                              ('zone_in_use' otherwise)
    await Dash.getManpowerBySite()                 -> active staff: name/role/company + current
                                                      site (whereabouts only — no IC/phone)
    await Dash.getProjectDirectory()               -> every project id/code/name/status (ALL
@@ -542,6 +552,19 @@
     }));
   }
 
+  function getProjectZones(projectId) {
+    return q(sb.from("v_project_zones").select("*")
+      .eq("project_id", projectId).order("zone_name"));
+  }
+
+  function addZone(projectId, zone) {
+    return q(sb.rpc("add_zone", { p_project_id: projectId, p_zone: zone }));
+  }
+
+  function deleteZone(projectId, zone) {
+    return q(sb.rpc("delete_zone", { p_project_id: projectId, p_zone: zone }));
+  }
+
   // ---- manpower (whereabouts + office-adjustable moves, 0039) ---------------
   function getManpowerBySite() {
     return q(sb.from("v_manpower_by_site").select("*").order("full_name"));
@@ -925,6 +948,9 @@
     setPileDesign: setPileDesign,
     deletePile: deletePile,
     previewPileSteel: previewPileSteel,
+    getProjectZones: getProjectZones,
+    addZone: addZone,
+    deleteZone: deleteZone,
 
     getManpowerBySite: getManpowerBySite,
     getProjectDirectory: getProjectDirectory,
