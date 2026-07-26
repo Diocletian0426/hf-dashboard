@@ -1025,7 +1025,9 @@
 
     function wirePileWrites() {
       document.getElementById("main").addEventListener("click", async function (ev) {
-        var btn = ev.target.closest('button[data-action^="pw-"]');
+        // pw-  = add/edit form actions · pwz- = Zones panel actions (the
+        // selector must name BOTH prefixes — "pwz-" does not match "pw-")
+        var btn = ev.target.closest('button[data-action^="pw-"], button[data-action^="pwz-"]');
         if (!btn) return;
         var act = btn.getAttribute("data-action");
         if (act === "pw-add") { pwOpenAdd(); return; }
