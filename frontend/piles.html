@@ -458,11 +458,15 @@
     var PW = { model: null, extra: {}, editing: null, lockedSpec: null,
                zones: [], batches: [], previewSeq: 0, previewTimer: null };
 
+    // errors land NEXT TO the button the user just pressed (owner spec) —
+    // the top-of-page banner is only the fallback when no form is open
     function pwFail(e) {
       var msg = (e && e.message) || String(e);
       if (e && e.details) msg += ": " + e.details;
-      document.getElementById("error").innerHTML =
-        '<div class="banner banner-red">Could not save: ' + escHtml(msg) + "</div>";
+      var html = '<div class="banner banner-red">Could not save: ' + escHtml(msg) + "</div>";
+      var inline = document.getElementById("pw-error") || document.getElementById("pwz-error");
+      if (inline) { inline.innerHTML = html; return; }
+      document.getElementById("error").innerHTML = html;
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
 
@@ -749,7 +753,8 @@
         '<div id="pw-preview" class="pc-line muted-line"></div>';
     }
 
-    // zone dropdown (registered zones only) + inline create + empty-zone chips
+    // zone dropdown (registered zones only). The creator row appears only in
+    // the ADD flow — editing a pile is REALLOCATION between existing zones.
     function pwZoneOptionsHtml(selected) {
       return PW.zones.map(function (z) {
         return '<option value="' + esc(z.zone_name) + '"' +
@@ -758,29 +763,47 @@
           "</option>";
       }).join("");
     }
-    function pwZoneChipsHtml() {
-      var empty = PW.zones.filter(function (z) { return Number(z.pile_count) === 0; });
-      if (!empty.length) return "";
-      return empty.map(function (z) {
-        return '<span class="chip">' + escHtml(z.zone_name) +
-          ' <button type="button" class="danger" data-action="pw-zone-del" data-zone="' + esc(z.zone_name) +
-          '" title="remove this empty zone">×</button></span>';
-      }).join(" ");
-    }
-    function pwZoneRowHtml(selected, allowNone) {
+    function pwZoneRowHtml(selected, allowNone, allowCreate) {
       var first = allowNone
         ? '<option value="">(no zone)</option>'
         : '<option value="">— choose a zone —</option>';
       return pwRow("Zone (structure area)",
-          '<select id="pw-zone-sel">' + first + pwZoneOptionsHtml(selected) + "</select> " +
-          '<button type="button" data-action="pw-zone-new">+ new zone…</button>',
+          '<select id="pw-zone-sel">' + first + pwZoneOptionsHtml(selected) + "</select>" +
+          (allowCreate ? ' <button type="button" data-action="pw-zone-new">+ new zone…</button>' : ""),
           { req: !allowNone }) +
-        '<div class="pw-row" id="pw-zone-newrow" hidden>' +
-          '<span class="pw-label">New zone name</span>' +
-          '<input id="pw-zone-name" size="18" placeholder="e.g. ABUTMENT A / PIER B">' +
-          ' <button type="button" data-action="pw-zone-create">Create zone</button></div>' +
-        '<div class="pw-row"><span class="pw-label"></span>' +
-          '<span class="pw-zone-chips" id="pw-zone-chips">' + pwZoneChipsHtml() + "</span></div>";
+        (allowCreate
+          ? '<div class="pw-row" id="pw-zone-newrow" hidden>' +
+            '<span class="pw-label">New zone name</span>' +
+            '<input id="pw-zone-name" size="18" placeholder="e.g. ABUTMENT A / PIER B">' +
+            ' <button type="button" data-action="pw-zone-create">Create zone</button></div>'
+          : "");
+    }
+
+    // ---- the Zones panel ("Zones…" button): every zone + pile count, the
+    // batch-undo delete behind a ⋮, and zone creation — zone management's
+    // ONE home. Deletion refuses server-side unless every pile in the zone
+    // is still planned with zero records.
+    function pwZonesPanelHtml() {
+      var rows = PW.zones.length ? PW.zones.map(function (z) {
+        var n = Number(z.pile_count);
+        return '<div class="pw-row"><span class="pw-label">' + escHtml(z.zone_name) + "</span>" +
+          '<span class="pw-unit">' + n + " pile" + (n === 1 ? "" : "s") + "</span>" +
+          '<button type="button" data-action="pwz-menu" title="zone actions">&#8942;</button>' +
+          '<span hidden><button type="button" class="danger" data-action="pwz-del" ' +
+            'data-zone="' + esc(z.zone_name) + '" data-count="' + n + '">Delete zone' +
+            (n ? " + " + n + " pile" + (n === 1 ? "" : "s") : "") + "…</button></span>" +
+          "</div>";
+      }).join("") : '<div class="muted-line">No zones registered yet — create the first one below.</div>';
+      return '<div class="claim-form pw-form">' +
+        "<strong>Zones — set up the structure areas before adding piles</strong>" +
+        rows +
+        '<div class="pw-row"><span class="pw-label">New zone name</span>' +
+          '<input id="pwz-name" size="18" placeholder="e.g. ABUTMENT A / PIER B">' +
+          ' <button type="button" data-action="pwz-create">Create zone</button></div>' +
+        '<div id="pwz-error"></div>' +
+        '<button type="button" data-action="pw-cancel" data-host="pwz-host">Close</button>' +
+        '<span class="muted-line">deleting a zone also removes its piles — allowed only while every pile is still planned with no records</span>' +
+        "</div>";
     }
 
     function pwBatchRowHtml(b, i, total) {
@@ -811,8 +834,9 @@
         "<strong>Add piles — every pile in this save gets the same design</strong>" +
         '<div class="pw-group"><div class="pw-group-title pw-req" style="display:inline-block">Pile marks</div>' +
         '<div id="pw-batches">' + pwBatchesHtml() + "</div></div>" +
-        pwZoneRowHtml(null, false) +
+        pwZoneRowHtml(null, false, true) +
         pwDesignFieldsHtml(null) +
+        '<div id="pw-error"></div>' +
         '<button type="button" data-action="pw-add-save">Create piles</button>' +
         '<button type="button" data-action="pw-cancel" data-host="pw-host">Cancel</button>' +
         '<span class="muted-line">fields marked * are required · steel &amp; concrete compute in the database the moment the piles save</span>' +
@@ -825,8 +849,9 @@
         pwRow("Pile mark",
           '<input id="pw-mark" size="14" value="' + esc(String(r.pile_mark_no || "")) + '">',
           { req: true }) +
-        pwZoneRowHtml(r.zone || "", true) +
+        pwZoneRowHtml(r.zone || "", true, false) +
         pwDesignFieldsHtml(r) +
+        '<div id="pw-error"></div>' +
         '<button type="button" data-action="pw-edit-save" data-pile-id="' + r.pile_id + '">Save pile</button>' +
         '<button type="button" data-action="pw-cancel" data-host="pwf-' + r.pile_id + '">Cancel</button>' +
         '<span class="muted-line">saving replaces the whole design — blank fields clear</span>' +
@@ -878,14 +903,33 @@
       pwSchedulePreview();
     }
 
+    // only ONE pile-write surface open at a time (add form / zones panel /
+    // an edit form) — they share input ids and it keeps the page calm
+    function pwCloseAll() {
+      var ah = document.getElementById("pw-host");
+      if (ah) ah.innerHTML = "";
+      var zh = document.getElementById("pwz-host");
+      if (zh) zh.innerHTML = "";
+      document.querySelectorAll('[id^="pwf-"]').forEach(function (d) { d.innerHTML = ""; });
+      PW.editing = null;
+    }
+
     function pwOpenAdd() {
       var host = document.getElementById("pw-host");
       if (!host) return;
       if (host.innerHTML) { host.innerHTML = ""; PW.editing = null; return; }
-      document.querySelectorAll('[id^="pwf-"]').forEach(function (d) { d.innerHTML = ""; });
+      pwCloseAll();
       PW.model = pwDefaultModel(); PW.extra = {}; PW.lockedSpec = null; PW.editing = null;
       PW.batches = [{ prefix: "", from: "", to: "" }];
       host.innerHTML = pwAddFormHtml();
+    }
+
+    function pwOpenZones() {
+      var host = document.getElementById("pwz-host");
+      if (!host) return;
+      if (host.innerHTML) { host.innerHTML = ""; return; }
+      pwCloseAll();
+      host.innerHTML = pwZonesPanelHtml();
     }
 
     function pwOpenEdit(pileId) {
@@ -893,9 +937,7 @@
       var host = document.getElementById("pwf-" + pileId);
       if (!r || !host) return;
       if (host.innerHTML) { host.innerHTML = ""; PW.editing = null; return; }
-      var ah = document.getElementById("pw-host");
-      if (ah) ah.innerHTML = "";
-      document.querySelectorAll('[id^="pwf-"]').forEach(function (d) { if (d !== host) d.innerHTML = ""; });
+      pwCloseAll();
       var spec = r.design_reinforcement;
       if (typeof spec === "string") { try { spec = JSON.parse(spec); } catch (e) { spec = null; } }
       PW.extra = {}; PW.lockedSpec = null; PW.editing = pileId;
@@ -993,6 +1035,44 @@
           PW.editing = null;
           return;
         }
+        if (act === "pwz-open") { pwOpenZones(); return; }
+        if (act === "pwz-menu") {
+          var strip = btn.nextElementSibling;
+          if (strip) strip.hidden = !strip.hidden;
+          return;
+        }
+        if (act === "pwz-create") {
+          var pnEl = document.getElementById("pwz-name");
+          var pzn = (pnEl && pnEl.value || "").trim();
+          if (!pzn) return;
+          try {
+            await Dash.addZone(TOPS.projectId, pzn);
+            PW.zones.push({ project_id: TOPS.projectId, zone_name: pzn, pile_count: 0 });
+            PW.zones.sort(function (a, b) { return a.zone_name.localeCompare(b.zone_name); });
+            var ph = document.getElementById("pwz-host");
+            if (ph) ph.innerHTML = pwZonesPanelHtml();
+          } catch (e) { pwFail(e); }
+          return;
+        }
+        if (act === "pwz-del") {
+          var dz = btn.getAttribute("data-zone");
+          var dn = Number(btn.getAttribute("data-count")) || 0;
+          if (!window.confirm("Delete zone " + dz +
+              (dn ? " AND its " + dn + " pile" + (dn === 1 ? "" : "s") : "") +
+              "? Only allowed while every pile is still planned with no records.")) return;
+          try {
+            if (dn > 0) {
+              await Dash.deleteZoneAndPiles(TOPS.projectId, dz);
+              reloadKeepingPlace();   // pile rows changed — full refresh
+            } else {
+              await Dash.deleteZone(TOPS.projectId, dz);
+              PW.zones = PW.zones.filter(function (z) { return z.zone_name !== dz; });
+              var ph2 = document.getElementById("pwz-host");
+              if (ph2) ph2.innerHTML = pwZonesPanelHtml();
+            }
+          } catch (e) { pwFail(e); }
+          return;
+        }
         if (act === "pw-zone-new") {
           var nr = document.getElementById("pw-zone-newrow");
           if (nr) nr.hidden = !nr.hidden;
@@ -1009,17 +1089,6 @@
             pwRefreshZoneUi(zn);
             var nr2 = document.getElementById("pw-zone-newrow");
             if (nr2) { nr2.hidden = true; nameEl.value = ""; }
-          } catch (e) { pwFail(e); }
-          return;
-        }
-        if (act === "pw-zone-del") {
-          var dz = btn.getAttribute("data-zone");
-          if (!window.confirm("Remove the empty zone " + dz + "?")) return;
-          try {
-            await Dash.deleteZone(TOPS.projectId, dz);
-            PW.zones = PW.zones.filter(function (z) { return z.zone_name !== dz; });
-            var sel = document.getElementById("pw-zone-sel");
-            pwRefreshZoneUi(sel && sel.value !== dz ? sel.value : "");
           } catch (e) { pwFail(e); }
           return;
         }
@@ -1094,7 +1163,7 @@
       marksCountLine();
     }
 
-    // rebuild the zone select + empty-zone chips in place (form state survives)
+    // rebuild the zone select in place (the rest of the form state survives)
     function pwRefreshZoneUi(selected) {
       var sel = document.getElementById("pw-zone-sel");
       if (sel) {
@@ -1102,8 +1171,19 @@
         sel.innerHTML = first + pwZoneOptionsHtml(selected || "");
         sel.value = selected || "";
       }
-      var chips = document.getElementById("pw-zone-chips");
-      if (chips) chips.innerHTML = pwZoneChipsHtml();
+    }
+
+    // accordion: only one record card open at a time (owner spec) — closing
+    // a card also discards any half-open edit form inside it
+    function closeOtherCards(exceptCard) {
+      document.querySelectorAll("tr.pile-card-row").forEach(function (c) {
+        if (c === exceptCard || c.hidden) return;
+        c.hidden = true;
+        var row = c.previousElementSibling;
+        if (row) row.classList.remove("open");
+        var host = c.querySelector('[id^="pwf-"]');
+        if (host && host.innerHTML) { host.innerHTML = ""; PW.editing = null; }
+      });
     }
 
     // the pile's problem track record — every issue ever linked to it,
@@ -1559,6 +1639,7 @@
         if (det) det.open = true;
         var card = row.nextElementSibling;
         if (card && card.classList.contains("pile-card-row") && card.hidden) {
+          closeOtherCards(card);
           card.hidden = false;
           row.classList.add("open");
         }
@@ -1649,11 +1730,14 @@
         }
         TOPS.testsByPile = testsByPile;   // the require-test picker filters against these
 
-        // "+ Add piles" renders BEFORE the empty-project return — a project
-        // with zero piles is exactly where the button matters most
+        // "+ Add piles" + "Zones" render BEFORE the empty-project return — a
+        // project with zero piles is exactly where these buttons matter most
         document.getElementById("pileadd").innerHTML = TOPS.can
-          ? '<div class="claim-actions"><button type="button" data-action="pw-add">+ Add piles…</button></div>' +
-            '<div id="pw-host"></div>'
+          ? '<div class="claim-actions">' +
+            '<button type="button" data-action="pw-add">+ Add piles…</button>' +
+            '<button type="button" data-action="pwz-open">Zones…</button>' +
+            "</div>" +
+            '<div id="pwz-host"></div><div id="pw-host"></div>'
           : "";
         wirePileWrites();
 
@@ -1732,6 +1816,7 @@
             if (pd) pd.open = true;
             var pcard = pileRow.nextElementSibling;
             if (pcard && pcard.classList.contains("pile-card-row")) {
+              closeOtherCards(pcard);
               pcard.hidden = false;
               pileRow.classList.add("open");
             }
@@ -1741,12 +1826,14 @@
           }
         }
 
-        // click a pile row -> toggle the record card row that sits under it
+        // click a pile row -> toggle its record card (accordion: opening one
+        // closes any other, so the page never balloons)
         zonesEl.addEventListener("click", function (ev) {
           var tr = ev.target.closest("tr.pile-row");
           if (!tr) return;
           var card = tr.nextElementSibling;
           if (!card || !card.classList.contains("pile-card-row")) return;
+          if (card.hidden) closeOtherCards(card);
           card.hidden = !card.hidden;
           tr.classList.toggle("open", !card.hidden);
         });

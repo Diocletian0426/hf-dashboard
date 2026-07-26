@@ -112,6 +112,13 @@
                                               piles go into them
    await Dash.deleteZone(projectId, zone)  -> remove a zone NO pile uses
                                               ('zone_in_use' otherwise)
+   await Dash.deleteZoneAndPiles(projectId, zone)
+                                           -> batch-undo: delete the zone AND
+                                              its piles — refused unless EVERY
+                                              pile is still planned with zero
+                                              records ('zone_piles_started' /
+                                              'zone_piles_in_use', offending
+                                              mark in .details); all-or-nothing
    await Dash.getManpowerBySite()                 -> active staff: name/role/company + current
                                                      site (whereabouts only — no IC/phone)
    await Dash.getProjectDirectory()               -> every project id/code/name/status (ALL
@@ -565,6 +572,10 @@
     return q(sb.rpc("delete_zone", { p_project_id: projectId, p_zone: zone }));
   }
 
+  function deleteZoneAndPiles(projectId, zone) {
+    return q(sb.rpc("delete_zone_and_piles", { p_project_id: projectId, p_zone: zone }));
+  }
+
   // ---- manpower (whereabouts + office-adjustable moves, 0039) ---------------
   function getManpowerBySite() {
     return q(sb.from("v_manpower_by_site").select("*").order("full_name"));
@@ -951,6 +962,7 @@
     getProjectZones: getProjectZones,
     addZone: addZone,
     deleteZone: deleteZone,
+    deleteZoneAndPiles: deleteZoneAndPiles,
 
     getManpowerBySite: getManpowerBySite,
     getProjectDirectory: getProjectDirectory,
