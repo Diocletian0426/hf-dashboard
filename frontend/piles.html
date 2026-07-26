@@ -56,10 +56,17 @@
          working: by-size split, cage table, and the parameters the numbers
          were computed from (cover/lap/stock/starter + the concrete formula
          with values substituted). -->
+    <!-- PILE WRITES (step 8, 0055): "+ Add piles" bulk form (marks list +
+         one shared design spec, guided cage builder with an advanced raw-JSON
+         mode and a live steel/concrete preview computed by the database).
+         Record cards gain edit… (identity + design) and a guarded delete
+         (planned piles with no records only). Office/management only,
+         database-enforced. -->
     <div id="pipeline"></div>
     <div id="chase"></div>
     <div id="testspec"></div>
     <div id="pilequantities"></div>
+    <div id="pileadd"></div>
     <div class="zone-tools" id="zone-tools" hidden>
       <button type="button" onclick="setAllZones(true)">Expand all</button>
       <button type="button" onclick="setAllZones(false)">Collapse all</button>
@@ -439,6 +446,532 @@
       });
     }
 
+    // ================= PILE WRITES (step 8, 0055) =================
+    // Add / edit / delete piles and their design specs. PW.model is the
+    // guided builder's source of truth (a JS object mirroring the
+    // reinforcement JSON); PW.extra keeps unknown keys (spacers, notes, …)
+    // from an imported spec so round-trips never drop them. The database
+    // re-checks the caller and re-validates everything on every call.
+    var PW = { model: null, extra: {}, adv: false, editing: null,
+               previewSeq: 0, previewTimer: null };
+
+    function pwFail(e) {
+      var msg = (e && e.message) || String(e);
+      if (e && e.details) msg += ": " + e.details;
+      document.getElementById("error").innerHTML =
+        '<div class="banner banner-red">Could not save: ' + escHtml(msg) + "</div>";
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    // "ABT A1-A6, ABT B1-B6" -> 12 marks. Ranges accept "P1-P6" and
+    // "P1-ABT P6" forms; zero padding survives ("P01-P12" -> P01…P12).
+    function expandMarks(text) {
+      var out = [], overflow = false;
+      String(text || "").split(/[,\n]/).forEach(function (tok) {
+        tok = tok.trim();
+        if (!tok) return;
+        var m = tok.match(/^(.*?)(\d+)\s*[-–]\s*(?:(.*?)(\d+))$/);
+        // the range's right prefix must be empty or a suffix of the left one:
+        // "ABT A1-A6" (right "A"), "ABT A1-ABT A6", "P01-P12", "1-6" all
+        // expand; "ABT A1-B6" stays a literal mark (never guess across series)
+        var samePrefix = m && (m[3] === "" ||
+          m[1].toUpperCase().slice(-m[3].length) === m[3].toUpperCase());
+        if (m && samePrefix && Number(m[4]) >= Number(m[2])) {
+          var a = Number(m[2]), b = Number(m[4]);
+          var pad = (m[2].charAt(0) === "0") ? m[2].length : 0;
+          for (var i = a; i <= b; i++) {
+            var num = String(i);
+            while (num.length < pad) num = "0" + num;
+            out.push((m[1] + num).trim());
+          }
+        } else {
+          out.push(tok);
+        }
+      });
+      var seen = {}, marks = [];
+      out.forEach(function (mk) { if (!seen[mk]) { seen[mk] = true; marks.push(mk); } });
+      if (marks.length > 200) { overflow = true; marks = marks.slice(0, 200); }
+      return { marks: marks, overflow: overflow };
+    }
+
+    function marksCountLine() {
+      var el = document.getElementById("pw-marks");
+      var out = document.getElementById("pw-marks-count");
+      if (!el || !out) return;
+      var ex = expandMarks(el.value);
+      if (!ex.marks.length) { out.innerHTML = ""; return; }
+      var preview = ex.marks.length <= 6 ? ex.marks.join(", ")
+        : ex.marks.slice(0, 3).join(", ") + " … " + ex.marks[ex.marks.length - 1];
+      out.innerHTML = ex.overflow
+        ? '<span class="stale-warn">more than 200 marks — trim the list</span>'
+        : ex.marks.length + " mark" + (ex.marks.length === 1 ? "" : "s") + ": " + escHtml(preview);
+    }
+
+    // ---- the guided cage model <-> reinforcement JSON ----
+    function pwDefaultModel() {
+      return { cover_mm: "", lap: "", stock_m: 12, starter_mm: "", fy: "",
+               spec_source: "",
+               sections: [{ label: "", main_bars: [{ count: "", dia_mm: "" }],
+                            link: { dia_mm: "", pitch_mm: "" } }] };
+    }
+
+    // accept only the shape the guided form can express; anything else
+    // (multi links per section, exotic layer keys) -> null = advanced-only
+    function pwParseToModel(j) {
+      if (!j || typeof j !== "object" || Array.isArray(j)) return null;
+      if (!Array.isArray(j.sections) || !j.sections.length) return null;
+      var model = pwDefaultModel();
+      model.sections = [];
+      var extra = {};
+      var known = ["cover_mm", "lap", "stock_m", "starter_mm", "fy", "spec_source", "sections", "links"];
+      Object.keys(j).forEach(function (k) {
+        if (known.indexOf(k) === -1) extra[k] = j[k];
+      });
+      model.cover_mm = j.cover_mm !== undefined ? j.cover_mm : "";
+      model.lap = j.lap || "";
+      model.stock_m = j.stock_m !== undefined ? j.stock_m : "";
+      model.starter_mm = j.starter_mm !== undefined ? j.starter_mm : "";
+      model.fy = j.fy !== undefined ? j.fy : "";
+      model.spec_source = j.spec_source || "";
+      var topLink = (Array.isArray(j.links) && j.links.length === 1) ? j.links[0]
+                  : (j.links === undefined ? null : false);
+      if (topLink === false) return null;         // multi top-level links: too complex
+      for (var i = 0; i < j.sections.length; i++) {
+        var s = j.sections[i];
+        if (!s || typeof s !== "object" || !Array.isArray(s.main_bars) || !s.main_bars.length) return null;
+        var sec = { label: s.label || "", main_bars: [], link: { dia_mm: "", pitch_mm: "" } };
+        for (var k2 = 0; k2 < s.main_bars.length; k2++) {
+          var b = s.main_bars[k2];
+          if (!b || typeof b !== "object") return null;
+          sec.main_bars.push({ count: b.count !== undefined ? b.count : "",
+                               dia_mm: b.dia_mm !== undefined ? b.dia_mm : "" });
+        }
+        var lk = null;
+        if (Array.isArray(s.links)) {
+          if (s.links.length !== 1) return null;  // two pitch zones in one section: advanced
+          lk = s.links[0];
+        } else if (topLink) {
+          lk = topLink;                            // fallback spec applies
+        }
+        if (lk) sec.link = { dia_mm: lk.dia_mm !== undefined ? lk.dia_mm : "",
+                             pitch_mm: lk.pitch_mm !== undefined ? lk.pitch_mm : "" };
+        model.sections.push(sec);
+      }
+      return { model: model, extra: extra };
+    }
+
+    function pwNum(v) {
+      return (v === "" || v === null || v === undefined || isNaN(Number(v))) ? null : Number(v);
+    }
+
+    // model -> the JSON the database stores (guided mode always emits
+    // per-section links — explicit beats the top-level fallback)
+    function pwBuildReinfJson() {
+      var m = PW.model;
+      if (!m) return null;
+      var j = {};
+      Object.keys(PW.extra).forEach(function (k) { j[k] = PW.extra[k]; });
+      if (pwNum(m.cover_mm) !== null) j.cover_mm = pwNum(m.cover_mm);
+      if (String(m.lap || "").trim()) j.lap = String(m.lap).trim();
+      if (pwNum(m.stock_m) !== null) j.stock_m = pwNum(m.stock_m);
+      if (pwNum(m.starter_mm) !== null) j.starter_mm = pwNum(m.starter_mm);
+      if (pwNum(m.fy) !== null) j.fy = pwNum(m.fy);
+      if (String(m.spec_source || "").trim()) j.spec_source = String(m.spec_source).trim();
+      var sections = [];
+      var any = false;
+      m.sections.forEach(function (s) {
+        var sec = {};
+        if (String(s.label || "").trim()) sec.label = String(s.label).trim();
+        sec.main_bars = [];
+        s.main_bars.forEach(function (b) {
+          if (pwNum(b.count) !== null || pwNum(b.dia_mm) !== null) {
+            var bar = {};
+            if (pwNum(b.count) !== null) bar.count = pwNum(b.count);
+            if (pwNum(b.dia_mm) !== null) bar.dia_mm = pwNum(b.dia_mm);
+            sec.main_bars.push(bar);
+            any = true;
+          }
+        });
+        if (pwNum(s.link.dia_mm) !== null && pwNum(s.link.pitch_mm) !== null) {
+          sec.links = [{ type: "spiral", dia_mm: pwNum(s.link.dia_mm), pitch_mm: pwNum(s.link.pitch_mm) }];
+        }
+        sections.push(sec);
+      });
+      if (!any && !Object.keys(j).length) return null;   // entirely empty spec
+      j.sections = sections;
+      return j;
+    }
+
+    // the reinforcement the form will SAVE (guided model or advanced JSON);
+    // throws {message, details} on malformed advanced JSON
+    function pwCurrentReinf() {
+      if (!PW.adv) return pwBuildReinfJson();
+      var txt = (document.getElementById("pw-json") || {}).value || "";
+      if (!txt.trim()) return null;
+      try { return JSON.parse(txt); }
+      catch (e) { throw { message: "bad_reinforcement", details: "not valid JSON — " + e.message }; }
+    }
+
+    // ---- form HTML ----
+    function pwLayerRow(si, li, b, layerCount) {
+      return '<span class="pw-layer">' +
+        '<input type="number" min="1" max="100" style="width:5em" placeholder="count" ' +
+          'data-rf="sections.' + si + '.main_bars.' + li + '.count" value="' + esc(String(b.count)) + '"> × T' +
+        '<input type="number" min="6" max="75" style="width:4.5em" placeholder="dia" ' +
+          'data-rf="sections.' + si + '.main_bars.' + li + '.dia_mm" value="' + esc(String(b.dia_mm)) + '">' +
+        (layerCount > 1
+          ? ' <button type="button" class="danger" data-action="pw-layer-del" data-sec="' + si +
+            '" data-layer="' + li + '" title="remove this bar layer">×</button>'
+          : "") +
+        "</span>";
+    }
+
+    function pwReinfBuilderHtml() {
+      var m = PW.model;
+      if (PW.adv) {
+        var txt = "";
+        try {
+          var j = pwBuildReinfJson();
+          txt = j ? JSON.stringify(j, null, 2) : "";
+        } catch (e) { txt = ""; }
+        if (PW.advText !== null && PW.advText !== undefined) txt = PW.advText;
+        return '<div class="pc-line"><strong>Reinforcement — raw JSON</strong> ' +
+          '<button type="button" data-action="pw-adv">back to guided form</button></div>' +
+          '<textarea id="pw-json" rows="12" style="width:100%;font-family:monospace" ' +
+          'placeholder=\'{"lap":"40D","cover_mm":50,"starter_mm":1300,"sections":[…]}\'>' +
+          escHtml(txt) + "</textarea>";
+      }
+      var secs = m.sections.map(function (s, si) {
+        var layers = s.main_bars.map(function (b, li) {
+          return pwLayerRow(si, li, b, s.main_bars.length);
+        }).join(" ");
+        return '<div class="pw-section">' +
+          '<div class="pc-line"><strong>Section ' + (si + 1) + "</strong> " +
+          '<input placeholder="label (optional, e.g. R1 top 12m)" size="20" ' +
+            'data-rf="sections.' + si + '.label" value="' + esc(String(s.label)) + '">' +
+          (m.sections.length > 1
+            ? ' <button type="button" class="danger" data-action="pw-sec-del" data-sec="' + si + '">remove section</button>'
+            : "") + "</div>" +
+          '<div class="pc-line">Main bars: ' + layers +
+          ' <button type="button" data-action="pw-layer-add" data-sec="' + si + '">+ layer</button></div>' +
+          '<div class="pc-line">Spiral: T' +
+          '<input type="number" min="6" max="75" style="width:4.5em" placeholder="dia" ' +
+            'data-rf="sections.' + si + '.link.dia_mm" value="' + esc(String(s.link.dia_mm)) + '"> @ ' +
+          '<input type="number" min="25" max="1000" style="width:5em" placeholder="pitch" ' +
+            'data-rf="sections.' + si + '.link.pitch_mm" value="' + esc(String(s.link.pitch_mm)) + '"> mm</div>' +
+          "</div>";
+      }).join("");
+      return '<div class="pc-line"><strong>Reinforcement</strong> ' +
+        '<span class="muted">(sections top-down, one per cage; the last repeats for deeper cages)</span> ' +
+        '<button type="button" data-action="pw-adv">advanced: edit raw JSON</button></div>' +
+        '<div class="pc-line">' +
+        '<label>cover <input type="number" min="20" max="150" style="width:4.5em" data-rf="cover_mm" value="' + esc(String(m.cover_mm)) + '"> mm</label> ' +
+        '<label>lap <input style="width:4em" placeholder="e.g. 40D" data-rf="lap" value="' + esc(String(m.lap)) + '"></label> ' +
+        '<label>stock <input type="number" min="1" style="width:4em" data-rf="stock_m" value="' + esc(String(m.stock_m)) + '"> m</label> ' +
+        '<label>starter <input type="number" min="0" style="width:5em" data-rf="starter_mm" value="' + esc(String(m.starter_mm)) + '"> mm</label> ' +
+        '<label>fy <input type="number" min="1" style="width:4.5em" data-rf="fy" value="' + esc(String(m.fy)) + '"></label></div>' +
+        '<div class="pc-line"><label>spec source <input size="34" placeholder="drawing no + rev, e.g. ST04 rev A" ' +
+          'data-rf="spec_source" value="' + esc(String(m.spec_source)) + '"></label></div>' +
+        secs +
+        '<div class="pc-line"><button type="button" data-action="pw-sec-add">+ add section (segmented cage)</button></div>';
+    }
+
+    // the shared dimensions + drawing + spec + preview block
+    function pwDesignFieldsHtml(r) {
+      r = r || {};
+      var dia = r.design_diameter_mm !== undefined && r.design_diameter_mm !== null
+        ? r.design_diameter_mm : (r.diameter_mm || "");
+      return '<div class="pc-line">' +
+        '<label>Ø <input type="number" id="pw-dia" min="300" max="3000" step="50" style="width:5.5em" value="' + esc(String(dia)) + '"> mm</label> ' +
+        '<label>design depth <input type="number" id="pw-depth" min="0" step="0.1" style="width:5.5em" value="' + esc(String(r.design_depth_m || "")) + '"> m</label> ' +
+        '<label>socket <input type="number" id="pw-socket" min="0" step="0.1" style="width:5em" value="' + esc(String(r.design_socket_length_m || "")) + '"> m</label> ' +
+        '<label>grade <input id="pw-grade" size="7" placeholder="G32/40" value="' + esc(String(r.design_concrete_grade || "")) + '"></label> ' +
+        '<label>capacity <input type="number" id="pw-capacity" min="0" style="width:6em" value="' + esc(String(r.design_pile_capacity_kn || "")) + '"> kN</label></div>' +
+        '<div class="pc-line">' +
+        '<label>drawing no <input id="pw-dwgno" size="18" value="' + esc(String(r.drawing_no || "")) + '"></label> ' +
+        '<label>rev <input id="pw-dwgrev" size="4" value="' + esc(String(r.drawing_rev || "")) + '"></label> ' +
+        '<label>drawing date <input type="date" id="pw-dwgdate" value="' + esc(String(r.drawing_date || "")) + '"></label> ' +
+        '<label>remarks <input id="pw-remarks" size="20" value="' + esc(String(r.design_remarks || "")) + '"></label></div>' +
+        '<div id="pw-reinf">' + pwReinfBuilderHtml() + "</div>" +
+        '<div id="pw-preview" class="pc-line muted-line"></div>';
+    }
+
+    function pwAddFormHtml() {
+      var zones = {};
+      Object.keys(TOPS.pilesById).forEach(function (id) {
+        var z = TOPS.pilesById[id].zone;
+        if (z) zones[z] = true;
+      });
+      var dl = Object.keys(zones).sort().map(function (z) {
+        return '<option value="' + esc(z) + '">';
+      }).join("");
+      return '<div class="claim-form">' +
+        "<strong>Add piles — every mark gets this same design</strong>" +
+        '<label style="width:100%">pile marks <textarea id="pw-marks" rows="2" style="width:100%" ' +
+          'placeholder="ABT A1-A6, ABT B1-B6   (commas or new lines; ranges expand)"></textarea></label>' +
+        '<div id="pw-marks-count" class="muted-line"></div>' +
+        '<label>zone <input id="pw-zone" size="16" list="pw-zones" placeholder="e.g. ABUTMENT A"></label>' +
+        '<datalist id="pw-zones">' + dl + "</datalist>" +
+        pwDesignFieldsHtml(null) +
+        '<button type="button" data-action="pw-add-save">Create piles</button>' +
+        '<button type="button" data-action="pw-cancel" data-host="pw-host">Cancel</button>' +
+        '<span class="muted-line">steel &amp; concrete compute in the database the moment the piles save</span>' +
+        "</div>";
+    }
+
+    function pwEditFormHtml(r) {
+      return '<div class="claim-form">' +
+        "<strong>Edit pile — " + escHtml(r.pile_mark_no || "") + "</strong>" +
+        '<div class="pc-line">' +
+        '<label>mark <input id="pw-mark" size="12" value="' + esc(String(r.pile_mark_no || "")) + '"></label> ' +
+        '<label>zone <input id="pw-zone" size="16" value="' + esc(String(r.zone || "")) + '" placeholder="blank = no zone"></label>' +
+        "</div>" +
+        pwDesignFieldsHtml(r) +
+        '<button type="button" data-action="pw-edit-save" data-pile-id="' + r.pile_id + '">Save pile</button>' +
+        '<button type="button" data-action="pw-cancel" data-host="pwf-' + r.pile_id + '">Cancel</button>' +
+        '<span class="muted-line">saving replaces the whole design — blank fields clear</span>' +
+        "</div>";
+    }
+
+    // ---- live preview (the database computes; 400 ms debounce) ----
+    function pwSchedulePreview() {
+      if (PW.previewTimer) clearTimeout(PW.previewTimer);
+      PW.previewTimer = setTimeout(pwRunPreview, 400);
+    }
+    async function pwRunPreview() {
+      var out = document.getElementById("pw-preview");
+      if (!out) return;
+      var dia = pwNum((document.getElementById("pw-dia") || {}).value);
+      var depth = pwNum((document.getElementById("pw-depth") || {}).value);
+      if (dia === null || depth === null) { out.innerHTML = ""; return; }
+      var reinf;
+      try { reinf = pwCurrentReinf(); }
+      catch (e) {
+        out.innerHTML = '<span class="stale-warn">' + escHtml(e.details || e.message) + "</span>";
+        return;
+      }
+      var seq = ++PW.previewSeq;
+      try {
+        var res = await Dash.previewPileSteel(dia, depth, reinf);
+        if (seq !== PW.previewSeq) return;    // a newer keystroke superseded us
+        var steel = res.steel_total_t !== null && res.steel_total_t !== undefined
+          ? Number(res.steel_total_t).toFixed(3) + " t steel" : "steel — (see warnings)";
+        var warn = (res.steel && res.steel.warnings && res.steel.warnings.length)
+          ? ' <span class="stale-warn">&#9888; ' + res.steel.warnings.map(escHtml).join(" · ") + "</span>" : "";
+        out.innerHTML = "&asymp; <strong>" + steel + "</strong> · " +
+          Number(res.concrete_m3).toFixed(2) + " m³ concrete per pile" + warn;
+      } catch (e2) {
+        if (seq !== PW.previewSeq) return;
+        out.innerHTML = '<span class="stale-warn">' +
+          escHtml(((e2 && e2.message) || "preview failed") + (e2 && e2.details ? ": " + e2.details : "")) + "</span>";
+      }
+    }
+
+    // path writer for data-rf inputs: "sections.0.main_bars.1.count"
+    function pwSetPath(path, value) {
+      var parts = path.split(".");
+      var node = PW.model;
+      for (var i = 0; i < parts.length - 1; i++) node = node[parts[i]];
+      node[parts[parts.length - 1]] = value;
+    }
+
+    function pwRerenderBuilder() {
+      var host = document.getElementById("pw-reinf");
+      if (host) host.innerHTML = pwReinfBuilderHtml();
+      pwSchedulePreview();
+    }
+
+    function pwOpenAdd() {
+      var host = document.getElementById("pw-host");
+      if (!host) return;
+      if (host.innerHTML) { host.innerHTML = ""; PW.editing = null; return; }
+      document.querySelectorAll('[id^="pwf-"]').forEach(function (d) { d.innerHTML = ""; });
+      PW.model = pwDefaultModel(); PW.extra = {}; PW.adv = false; PW.advText = null; PW.editing = null;
+      host.innerHTML = pwAddFormHtml();
+    }
+
+    function pwOpenEdit(pileId) {
+      var r = TOPS.pilesById[pileId];
+      var host = document.getElementById("pwf-" + pileId);
+      if (!r || !host) return;
+      if (host.innerHTML) { host.innerHTML = ""; PW.editing = null; return; }
+      var ah = document.getElementById("pw-host");
+      if (ah) ah.innerHTML = "";
+      document.querySelectorAll('[id^="pwf-"]').forEach(function (d) { if (d !== host) d.innerHTML = ""; });
+      var spec = r.design_reinforcement;
+      if (typeof spec === "string") { try { spec = JSON.parse(spec); } catch (e) { spec = null; } }
+      PW.extra = {}; PW.adv = false; PW.advText = null; PW.editing = pileId;
+      if (spec) {
+        var parsed = pwParseToModel(spec);
+        if (parsed) { PW.model = parsed.model; PW.extra = parsed.extra; }
+        else {
+          // shape too complex for the guided form — keep it verbatim as JSON
+          PW.model = pwDefaultModel(); PW.adv = true;
+          PW.advText = JSON.stringify(spec, null, 2);
+        }
+      } else {
+        PW.model = pwDefaultModel();
+      }
+      host.innerHTML = pwEditFormHtml(r);
+      if (PW.adv) {
+        var note = document.getElementById("pw-preview");
+        if (note) note.innerHTML = '<span class="muted">spec shape is beyond the guided form — editing as JSON</span>';
+      }
+      pwSchedulePreview();
+    }
+
+    async function pwSaveAdd() {
+      var ex = expandMarks((document.getElementById("pw-marks") || {}).value);
+      if (!ex.marks.length || ex.overflow) {
+        pwFail({ message: ex.overflow ? "too_many_marks" : "bad_marks",
+                 details: ex.overflow ? "maximum 200 piles per save" : "enter at least one pile mark" });
+        return;
+      }
+      var reinf;
+      try { reinf = pwCurrentReinf(); } catch (e) { pwFail(e); return; }
+      try {
+        await Dash.addPiles(TOPS.projectId, {
+          marks: ex.marks,
+          diameterMm: (document.getElementById("pw-dia") || {}).value,
+          zone: (document.getElementById("pw-zone") || {}).value || null,
+          depthM: (document.getElementById("pw-depth") || {}).value,
+          socketM: (document.getElementById("pw-socket") || {}).value,
+          grade: (document.getElementById("pw-grade") || {}).value || null,
+          capacityKn: (document.getElementById("pw-capacity") || {}).value,
+          reinforcement: reinf,
+          drawingNo: (document.getElementById("pw-dwgno") || {}).value || null,
+          drawingRev: (document.getElementById("pw-dwgrev") || {}).value || null,
+          drawingDate: (document.getElementById("pw-dwgdate") || {}).value || null,
+          remarks: (document.getElementById("pw-remarks") || {}).value || null
+        });
+        reloadKeepingPlace();
+      } catch (e2) { pwFail(e2); }
+    }
+
+    async function pwSaveEdit(pileId) {
+      var r = TOPS.pilesById[pileId];
+      if (!r) return;
+      var reinf;
+      try { reinf = pwCurrentReinf(); } catch (e) { pwFail(e); return; }
+      var newMark = ((document.getElementById("pw-mark") || {}).value || "").trim();
+      var newZone = ((document.getElementById("pw-zone") || {}).value || "").trim();
+      var newDia = pwNum((document.getElementById("pw-dia") || {}).value);
+      try {
+        // identity first (only when something identity-ish changed); the one Ø
+        // field drives both the register diameter and the design diameter
+        var idOpts = {};
+        if (newMark && newMark !== r.pile_mark_no) idOpts.mark = newMark;
+        if (newZone !== (r.zone || "")) {
+          if (newZone) idOpts.zone = newZone; else idOpts.clearZone = true;
+        }
+        if (newDia !== null && Number(r.diameter_mm) !== newDia) idOpts.diameterMm = newDia;
+        if (Object.keys(idOpts).length) await Dash.updatePileIdentity(pileId, idOpts);
+
+        await Dash.setPileDesign(pileId, {
+          diameterMm: (document.getElementById("pw-dia") || {}).value,
+          depthM: (document.getElementById("pw-depth") || {}).value,
+          socketM: (document.getElementById("pw-socket") || {}).value,
+          grade: (document.getElementById("pw-grade") || {}).value || null,
+          capacityKn: (document.getElementById("pw-capacity") || {}).value,
+          reinforcement: reinf,
+          drawingNo: (document.getElementById("pw-dwgno") || {}).value || null,
+          drawingRev: (document.getElementById("pw-dwgrev") || {}).value || null,
+          drawingDate: (document.getElementById("pw-dwgdate") || {}).value || null,
+          remarks: (document.getElementById("pw-remarks") || {}).value || null
+        });
+        reloadKeepingPlace();
+      } catch (e2) { pwFail(e2); }
+    }
+
+    function wirePileWrites() {
+      document.getElementById("main").addEventListener("click", async function (ev) {
+        var btn = ev.target.closest('button[data-action^="pw-"]');
+        if (!btn) return;
+        var act = btn.getAttribute("data-action");
+        if (act === "pw-add") { pwOpenAdd(); return; }
+        if (act === "pw-cancel") {
+          var h = document.getElementById(btn.getAttribute("data-host"));
+          if (h) h.innerHTML = "";
+          PW.editing = null;
+          return;
+        }
+        if (act === "pw-adv") {
+          if (PW.adv) {
+            // JSON -> guided, only when the shape fits the form
+            var txt = (document.getElementById("pw-json") || {}).value || "";
+            if (txt.trim()) {
+              var j;
+              try { j = JSON.parse(txt); }
+              catch (e) {
+                pwFail({ message: "bad_reinforcement", details: "fix the JSON before switching back — " + e.message });
+                return;
+              }
+              var parsed = pwParseToModel(j);
+              if (!parsed) {
+                var pv = document.getElementById("pw-preview");
+                if (pv) pv.innerHTML = '<span class="stale-warn">this shape is beyond the guided form — keep editing as JSON</span>';
+                return;
+              }
+              PW.model = parsed.model; PW.extra = parsed.extra;
+            }
+            PW.adv = false; PW.advText = null;
+          } else {
+            PW.advText = null;   // serialize the current model fresh
+            PW.adv = true;
+          }
+          pwRerenderBuilder();
+          return;
+        }
+        if (act === "pw-sec-add") {
+          PW.model.sections.push({ label: "", main_bars: [{ count: "", dia_mm: "" }],
+                                   link: { dia_mm: "", pitch_mm: "" } });
+          pwRerenderBuilder();
+          return;
+        }
+        if (act === "pw-sec-del") {
+          PW.model.sections.splice(Number(btn.getAttribute("data-sec")), 1);
+          pwRerenderBuilder();
+          return;
+        }
+        if (act === "pw-layer-add") {
+          PW.model.sections[Number(btn.getAttribute("data-sec"))].main_bars.push({ count: "", dia_mm: "" });
+          pwRerenderBuilder();
+          return;
+        }
+        if (act === "pw-layer-del") {
+          PW.model.sections[Number(btn.getAttribute("data-sec"))]
+            .main_bars.splice(Number(btn.getAttribute("data-layer")), 1);
+          pwRerenderBuilder();
+          return;
+        }
+        if (act === "pw-add-save") { await pwSaveAdd(); return; }
+        if (act === "pw-edit") { pwOpenEdit(btn.getAttribute("data-pile-id")); return; }
+        if (act === "pw-edit-save") { await pwSaveEdit(btn.getAttribute("data-pile-id")); return; }
+        if (act === "pw-delete") {
+          var mark = btn.getAttribute("data-mark") || "";
+          if (!window.confirm("Delete pile " + mark +
+              "? Only planned piles with no records can be deleted.")) return;
+          try { await Dash.deletePile(btn.getAttribute("data-pile-id")); reloadKeepingPlace(); }
+          catch (e2) { pwFail(e2); }
+          return;
+        }
+      });
+
+      // guided-builder fields write into the model; marks textarea recounts;
+      // dimension + JSON edits re-preview
+      document.getElementById("main").addEventListener("input", function (ev) {
+        var t = ev.target;
+        if (t.id === "pw-marks") { marksCountLine(); return; }
+        if (t.id === "pw-json") { PW.advText = t.value; pwSchedulePreview(); return; }
+        if (t.id === "pw-dia" || t.id === "pw-depth") { pwSchedulePreview(); return; }
+        var rf = t.getAttribute && t.getAttribute("data-rf");
+        if (rf && PW.model) {
+          pwSetPath(rf, t.value);
+          pwSchedulePreview();
+        }
+      });
+    }
+
     // the pile's problem track record — every issue ever linked to it,
     // newest first, resolved ones kept (that is the point: memory)
     function issueListHtml(list) {
@@ -613,9 +1146,20 @@
       if (r.design_concrete_grade) chips.push("Grade " + escHtml(r.design_concrete_grade));
       if (r.drawing_no) chips.push("Drawing " + escHtml(r.drawing_no) + (r.drawing_rev ? " rev " + escHtml(r.drawing_rev) : ""));
 
+      var writeCtl = TOPS.can
+        ? ' <span class="move-ctl">' +
+          '<button type="button" data-action="pw-edit" data-pile-id="' + r.pile_id + '">edit…</button>' +
+          (r.construction_status === "planned"
+            ? '<button type="button" class="danger" data-action="pw-delete" data-pile-id="' + r.pile_id +
+              '" data-mark="' + esc(r.pile_mark_no || "") + '">delete</button>'
+            : "") +
+          "</span>"
+        : "";
       var head =
         '<div class="pc-head"><strong>' + escHtml(r.pile_mark_no || "") + "</strong> " + stageBadge(r) +
-        (chips.length ? ' <span class="pc-chips">' + chips.join(" · ") + "</span>" : "") + "</div>";
+        (chips.length ? ' <span class="pc-chips">' + chips.join(" · ") + "</span>" : "") +
+        writeCtl + "</div>" +
+        '<div id="pwf-' + r.pile_id + '"></div>';
       var steelDetail = steelDetailHtml(r);
 
       var dims =
@@ -968,9 +1512,19 @@
         }
         TOPS.testsByPile = testsByPile;   // the require-test picker filters against these
 
+        // "+ Add piles" renders BEFORE the empty-project return — a project
+        // with zero piles is exactly where the button matters most
+        document.getElementById("pileadd").innerHTML = TOPS.can
+          ? '<div class="claim-actions"><button type="button" data-action="pw-add">+ Add piles…</button></div>' +
+            '<div id="pw-host"></div>'
+          : "";
+        wirePileWrites();
+
         var zonesEl = document.getElementById("zones");
         if (!piles.length) {
-          zonesEl.innerHTML = '<div class="table-wrap"><table><tbody><tr><td class="empty">No piles registered for this project yet.</td></tr></tbody></table></div>';
+          zonesEl.innerHTML = '<div class="table-wrap"><table><tbody><tr><td class="empty">No piles registered for this project yet.' +
+            (TOPS.can ? " Use the &quot;+ Add piles&quot; button above to register them." : "") +
+            "</td></tr></tbody></table></div>";
           return;
         }
 
