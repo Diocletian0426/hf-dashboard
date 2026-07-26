@@ -763,46 +763,30 @@
           "</option>";
       }).join("");
     }
-    function pwZoneRowHtml(selected, allowNone, allowCreate) {
+    function pwZoneRowHtml(selected, allowNone) {
       var first = allowNone
         ? '<option value="">(no zone)</option>'
         : '<option value="">— choose a zone —</option>';
       return pwRow("Zone (structure area)",
-          '<select id="pw-zone-sel">' + first + pwZoneOptionsHtml(selected) + "</select>" +
-          (allowCreate ? ' <button type="button" data-action="pw-zone-new">+ new zone…</button>' : ""),
-          { req: !allowNone }) +
-        (allowCreate
-          ? '<div class="pw-row" id="pw-zone-newrow" hidden>' +
-            '<span class="pw-label">New zone name</span>' +
-            '<input id="pw-zone-name" size="18" placeholder="e.g. ABUTMENT A / PIER B">' +
-            ' <button type="button" data-action="pw-zone-create">Create zone</button></div>'
-          : "");
+          '<select id="pw-zone-sel">' + first + pwZoneOptionsHtml(selected) + "</select>",
+          { req: !allowNone,
+            hint: allowNone ? null
+              : "missing a zone? create it first with the Create zone… button, then come back" });
     }
 
-    // ---- the Zones panel ("Zones…" button): every zone + pile count, the
-    // batch-undo delete behind a ⋮, and zone creation — zone management's
-    // ONE home. Deletion refuses server-side unless every pile in the zone
-    // is still planned with zero records.
-    function pwZonesPanelHtml() {
-      var rows = PW.zones.length ? PW.zones.map(function (z) {
-        var n = Number(z.pile_count);
-        return '<div class="pw-row"><span class="pw-label">' + escHtml(z.zone_name) + "</span>" +
-          '<span class="pw-unit">' + n + " pile" + (n === 1 ? "" : "s") + "</span>" +
-          '<button type="button" data-action="pwz-menu" title="zone actions">&#8942;</button>' +
-          '<span hidden><button type="button" class="danger" data-action="pwz-del" ' +
-            'data-zone="' + esc(z.zone_name) + '" data-count="' + n + '">Delete zone' +
-            (n ? " + " + n + " pile" + (n === 1 ? "" : "s") : "") + "…</button></span>" +
-          "</div>";
-      }).join("") : '<div class="muted-line">No zones registered yet — create the first one below.</div>';
+    // ---- "Create zone…" button: one small form, one job. Zone deletion
+    // lives on each zone block's ⋮ menu; the zone blocks themselves (incl.
+    // freshly created zero-pile zones) are the zone list.
+    function pwZoneCreateFormHtml() {
       return '<div class="claim-form pw-form">' +
-        "<strong>Zones — set up the structure areas before adding piles</strong>" +
-        rows +
-        '<div class="pw-row"><span class="pw-label">New zone name</span>' +
+        "<strong>Create a zone (structure area)</strong>" +
+        '<div class="pw-row"><span class="pw-label pw-req">Zone name</span>' +
           '<input id="pwz-name" size="18" placeholder="e.g. ABUTMENT A / PIER B">' +
-          ' <button type="button" data-action="pwz-create">Create zone</button></div>' +
+        "</div>" +
         '<div id="pwz-error"></div>' +
-        '<button type="button" data-action="pw-cancel" data-host="pwz-host">Close</button>' +
-        '<span class="muted-line">deleting a zone also removes its piles — allowed only while every pile is still planned with no records</span>' +
+        '<button type="button" data-action="pwz-create">Create zone</button>' +
+        '<button type="button" data-action="pw-cancel" data-host="pwz-host">Cancel</button>' +
+        '<span class="muted-line">the zone appears as its own block below — then use + Add piles to fill it</span>' +
         "</div>";
     }
 
@@ -834,7 +818,7 @@
         "<strong>Add piles — every pile in this save gets the same design</strong>" +
         '<div class="pw-group"><div class="pw-group-title pw-req" style="display:inline-block">Pile marks</div>' +
         '<div id="pw-batches">' + pwBatchesHtml() + "</div></div>" +
-        pwZoneRowHtml(null, false, true) +
+        pwZoneRowHtml(null, false) +
         pwDesignFieldsHtml(null) +
         '<div id="pw-error"></div>' +
         '<button type="button" data-action="pw-add-save">Create piles</button>' +
@@ -849,7 +833,7 @@
         pwRow("Pile mark",
           '<input id="pw-mark" size="14" value="' + esc(String(r.pile_mark_no || "")) + '">',
           { req: true }) +
-        pwZoneRowHtml(r.zone || "", true, false) +
+        pwZoneRowHtml(r.zone || "", true) +
         pwDesignFieldsHtml(r) +
         '<div id="pw-error"></div>' +
         '<button type="button" data-action="pw-edit-save" data-pile-id="' + r.pile_id + '">Save pile</button>' +
@@ -929,7 +913,7 @@
       if (!host) return;
       if (host.innerHTML) { host.innerHTML = ""; return; }
       pwCloseAll();
-      host.innerHTML = pwZonesPanelHtml();
+      host.innerHTML = pwZoneCreateFormHtml();
     }
 
     function pwOpenEdit(pileId) {
@@ -1039,6 +1023,7 @@
         }
         if (act === "pwz-open") { pwOpenZones(); return; }
         if (act === "pwz-menu") {
+          ev.preventDefault();   // the ⋮ sits inside a <summary> — don't toggle the fold
           var strip = btn.nextElementSibling;
           if (strip) strip.hidden = !strip.hidden;
           return;
@@ -1049,49 +1034,26 @@
           if (!pzn) return;
           try {
             await Dash.addZone(TOPS.projectId, pzn);
-            PW.zones.push({ project_id: TOPS.projectId, zone_name: pzn, pile_count: 0 });
-            PW.zones.sort(function (a, b) { return a.zone_name.localeCompare(b.zone_name); });
-            var ph = document.getElementById("pwz-host");
-            if (ph) ph.innerHTML = pwZonesPanelHtml();
+            reloadKeepingPlace();   // the new zone appears as its own block
           } catch (e) { pwFail(e); }
           return;
         }
         if (act === "pwz-del") {
+          ev.preventDefault();   // inside a <summary> too
           var dz = btn.getAttribute("data-zone");
           var dn = Number(btn.getAttribute("data-count")) || 0;
           if (!window.confirm("Delete zone " + dz +
               (dn ? " AND its " + dn + " pile" + (dn === 1 ? "" : "s") : "") +
               "? Only allowed while every pile is still planned with no records.")) return;
           try {
-            if (dn > 0) {
-              await Dash.deleteZoneAndPiles(TOPS.projectId, dz);
-              reloadKeepingPlace();   // pile rows changed — full refresh
-            } else {
-              await Dash.deleteZone(TOPS.projectId, dz);
-              PW.zones = PW.zones.filter(function (z) { return z.zone_name !== dz; });
-              var ph2 = document.getElementById("pwz-host");
-              if (ph2) ph2.innerHTML = pwZonesPanelHtml();
-            }
-          } catch (e) { pwFail(e); }
-          return;
-        }
-        if (act === "pw-zone-new") {
-          var nr = document.getElementById("pw-zone-newrow");
-          if (nr) nr.hidden = !nr.hidden;
-          return;
-        }
-        if (act === "pw-zone-create") {
-          var nameEl = document.getElementById("pw-zone-name");
-          var zn = (nameEl && nameEl.value || "").trim();
-          if (!zn) return;
-          try {
-            await Dash.addZone(TOPS.projectId, zn);
-            PW.zones.push({ project_id: TOPS.projectId, zone_name: zn, pile_count: 0 });
-            PW.zones.sort(function (a, b) { return a.zone_name.localeCompare(b.zone_name); });
-            pwRefreshZoneUi(zn);
-            var nr2 = document.getElementById("pw-zone-newrow");
-            if (nr2) { nr2.hidden = true; nameEl.value = ""; }
-          } catch (e) { pwFail(e); }
+            if (dn > 0) await Dash.deleteZoneAndPiles(TOPS.projectId, dz);
+            else await Dash.deleteZone(TOPS.projectId, dz);
+            reloadKeepingPlace();
+          } catch (e) {
+            // no form is open when deleting from a zone header — the top
+            // banner fallback in pwFail handles visibility
+            pwFail(e);
+          }
           return;
         }
         if (act === "pw-batch-add") {
@@ -1163,16 +1125,6 @@
       var host = document.getElementById("pw-batches");
       if (host) host.innerHTML = pwBatchesHtml();
       marksCountLine();
-    }
-
-    // rebuild the zone select in place (the rest of the form state survives)
-    function pwRefreshZoneUi(selected) {
-      var sel = document.getElementById("pw-zone-sel");
-      if (sel) {
-        var first = sel.options.length ? sel.options[0].outerHTML : '<option value="">— choose a zone —</option>';
-        sel.innerHTML = first + pwZoneOptionsHtml(selected || "");
-        sel.value = selected || "";
-      }
     }
 
     // accordion: only one record card open at a time (owner spec) — closing
@@ -1737,23 +1689,27 @@
         document.getElementById("pileadd").innerHTML = TOPS.can
           ? '<div class="claim-actions">' +
             '<button type="button" data-action="pw-add">+ Add piles…</button>' +
-            '<button type="button" data-action="pwz-open">Zones…</button>' +
+            '<button type="button" data-action="pwz-open">Create zone…</button>' +
             "</div>" +
             '<div id="pwz-host"></div><div id="pw-host"></div>'
           : "";
         wirePileWrites();
 
         var zonesEl = document.getElementById("zones");
-        if (!piles.length) {
+        if (!piles.length && !PW.zones.length) {
+          // truly empty project — no piles AND no registered zones yet
           zonesEl.innerHTML = '<div class="table-wrap"><table><tbody><tr><td class="empty">No piles registered for this project yet.' +
-            (TOPS.can ? " Use the &quot;+ Add piles&quot; button above to register them." : "") +
+            (TOPS.can ? " Create a zone first, then use &quot;+ Add piles&quot; to fill it." : "") +
             "</td></tr></tbody></table></div>";
           return;
         }
 
-        // one table block per zone
+        // one table block per zone — REGISTERED zones render even with zero
+        // piles (a freshly created zone must be visible, and its ⋮ menu is
+        // where zone deletion lives)
         var zones = {};
         piles.forEach(function (r) { var z = r.zone || "Unzoned"; (zones[z] = zones[z] || []).push(r); });
+        PW.zones.forEach(function (z) { zones[z.zone_name] = zones[z.zone_name] || []; });
 
         zonesEl.innerHTML = Object.keys(zones).sort().map(function (z) {
           var zr = zones[z];
@@ -1768,11 +1724,22 @@
             "</tr>" +
             pileCard(r, issuesByPile[r.pile_mark_no], testsByPile[r.pile_mark_no]);
           }).join("");
+          // ⋮ per zone (office only; "Unzoned" is not a registered zone) —
+          // reveals the guarded "Delete zone + piles" action
+          var zoneMenu = (TOPS.can && z !== "Unzoned")
+            ? ' <button type="button" class="zone-menu" data-action="pwz-menu" title="zone actions">&#8942;</button>' +
+              '<span hidden><button type="button" class="danger" data-action="pwz-del" ' +
+                'data-zone="' + esc(z) + '" data-count="' + zr.length + '">Delete zone' +
+                (zr.length ? " + " + zr.length + " pile" + (zr.length === 1 ? "" : "s") : "") + "…</button></span>"
+            : "";
+          var body = zr.length
+            ? '<div class="table-wrap zone-table table-sticky-first"><table>' + THEAD +
+              "<tbody>" + rows + "</tbody></table></div>"
+            : '<div class="muted-line" style="padding:6px 0 2px 18px">No piles in this zone yet — use &quot;+ Add piles…&quot; to fill it.</div>';
           return '<details class="zone" open data-zone="' + esc(z) + '" data-group="' + esc(z) + '">' +
                  '<summary><span class="zone-name">' + z + '</span>' +
-                 '<span class="zone-count">' + zoneSummary(zr) + "</span></summary>" +
-                 '<div class="table-wrap zone-table table-sticky-first"><table>' + THEAD +
-                 "<tbody>" + rows + "</tbody></table></div>" +
+                 '<span class="zone-count">' + zoneSummary(zr) + "</span>" + zoneMenu + "</summary>" +
+                 body +
                  "</details>";
         }).join("");
         document.getElementById("zone-tools").hidden = false;

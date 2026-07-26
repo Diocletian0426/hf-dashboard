@@ -760,7 +760,13 @@ summary.zone-rich::before { float: left; margin: 4px 8px 0 0; }
   font-size: var(--fs-sm); font-weight: 600; margin-bottom: var(--sp-1);
 }
 .pw-batch { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; padding: 2px 0; }
-.pw-zone-chips { display: flex; gap: var(--sp-1); flex-wrap: wrap; }
+/* ⋮ zone-actions button on each zone block's header */
+.zone-menu {
+  background: none; border: none; cursor: pointer;
+  color: var(--ink-3); font-size: 16px; line-height: 1; padding: 0 6px;
+  align-self: center;
+}
+.zone-menu:hover { color: var(--ink); }
 @media (max-width: 760px) {
   .pw-form .pw-label { flex-basis: 100%; }
   .pw-form .pw-hint { padding-left: 0; }
