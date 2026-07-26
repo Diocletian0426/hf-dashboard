@@ -456,7 +456,17 @@
     // registered zones; "+ new zone…" creates one in place. The database
     // re-checks the caller and re-validates everything on every call.
     var PW = { model: null, extra: {}, editing: null, lockedSpec: null,
-               zones: [], batches: [], previewSeq: 0, previewTimer: null };
+               zones: [], batches: [], previewSeq: 0, previewTimer: null,
+               editDirty: false };
+
+    // guard unsaved edits: an open edit form with typed changes must not be
+    // silently discarded by opening another card / form
+    function pwConfirmDiscardEdit() {
+      if (!PW.editing || !PW.editDirty) return true;
+      var r = TOPS.pilesById[PW.editing];
+      return window.confirm("Discard your unsaved changes to pile " +
+        ((r && r.pile_mark_no) || "this pile") + "?");
+    }
 
     // errors land NEXT TO the button the user just pressed (owner spec) —
     // the top-of-page banner is only the fallback when no form is open
@@ -494,6 +504,13 @@
           return;
         }
         if (/^\d+$/.test(from) && /^\d+$/.test(to) && Number(to) >= Number(from)) {
+          // cap the span BEFORE expanding — a fat-fingered "to" (e.g. 9999999)
+          // would otherwise build millions of strings on the main thread and
+          // freeze the tab, on every keystroke, before the 200 total is checked
+          if (Number(to) - Number(from) + 1 > 200) {
+            bad = "batch " + (bi + 1) + ": that range is more than 200 piles — narrow it down";
+            return;
+          }
           var pad = (from.charAt(0) === "0") ? from.length : 0;
           for (var n2 = Number(from); n2 <= Number(to); n2++) {
             var num = String(n2);
@@ -890,19 +907,21 @@
     // only ONE pile-write surface open at a time (add form / zones panel /
     // an edit form) — they share input ids and it keeps the page calm
     function pwCloseAll() {
+      if (!pwConfirmDiscardEdit()) return false;
       var ah = document.getElementById("pw-host");
       if (ah) ah.innerHTML = "";
       var zh = document.getElementById("pwz-host");
       if (zh) zh.innerHTML = "";
       document.querySelectorAll('[id^="pwf-"]').forEach(function (d) { d.innerHTML = ""; });
-      PW.editing = null;
+      PW.editing = null; PW.editDirty = false;
+      return true;
     }
 
     function pwOpenAdd() {
       var host = document.getElementById("pw-host");
       if (!host) return;
-      if (host.innerHTML) { host.innerHTML = ""; PW.editing = null; return; }
-      pwCloseAll();
+      if (host.innerHTML) { host.innerHTML = ""; return; }
+      if (!pwCloseAll()) return;
       PW.model = pwDefaultModel(); PW.extra = {}; PW.lockedSpec = null; PW.editing = null;
       PW.batches = [{ prefix: "", from: "", to: "" }];
       host.innerHTML = pwAddFormHtml();
@@ -912,7 +931,7 @@
       var host = document.getElementById("pwz-host");
       if (!host) return;
       if (host.innerHTML) { host.innerHTML = ""; return; }
-      pwCloseAll();
+      if (!pwCloseAll()) return;
       host.innerHTML = pwZoneCreateFormHtml();
     }
 
@@ -920,8 +939,12 @@
       var r = TOPS.pilesById[pileId];
       var host = document.getElementById("pwf-" + pileId);
       if (!r || !host) return;
-      if (host.innerHTML) { host.innerHTML = ""; PW.editing = null; return; }
-      pwCloseAll();
+      // re-clicking edit on the SAME open form closes it (guard if dirty)
+      if (host.innerHTML) {
+        if (!pwConfirmDiscardEdit()) return;
+        host.innerHTML = ""; PW.editing = null; PW.editDirty = false; return;
+      }
+      if (!pwCloseAll()) return;
       var spec = r.design_reinforcement;
       if (typeof spec === "string") { try { spec = JSON.parse(spec); } catch (e) { spec = null; } }
       PW.extra = {}; PW.lockedSpec = null; PW.editing = pileId;
@@ -1105,6 +1128,9 @@
       // mark preview; dimension edits re-preview
       document.getElementById("main").addEventListener("input", function (ev) {
         var t = ev.target;
+        // any keystroke inside an open EDIT form marks it dirty (drives the
+        // unsaved-changes guard); the add form / zones panel aren't tracked
+        if (PW.editing && t.closest && t.closest('[id^="pwf-"]')) PW.editDirty = true;
         var bt = t.getAttribute && t.getAttribute("data-bt");
         if (bt) {
           var bp = bt.split(".");
@@ -1128,16 +1154,19 @@
     }
 
     // accordion: only one record card open at a time (owner spec) — closing
-    // a card also discards any half-open edit form inside it
+    // a card also discards any half-open edit form inside it (guarded when
+    // that form has unsaved changes). Returns false if the user cancelled.
     function closeOtherCards(exceptCard) {
+      if (!pwConfirmDiscardEdit()) return false;
       document.querySelectorAll("tr.pile-card-row").forEach(function (c) {
         if (c === exceptCard || c.hidden) return;
         c.hidden = true;
         var row = c.previousElementSibling;
         if (row) row.classList.remove("open");
         var host = c.querySelector('[id^="pwf-"]');
-        if (host && host.innerHTML) { host.innerHTML = ""; PW.editing = null; }
+        if (host && host.innerHTML) { host.innerHTML = ""; PW.editing = null; PW.editDirty = false; }
       });
+      return true;
     }
 
     // the pile's problem track record — every issue ever linked to it,
@@ -1593,7 +1622,7 @@
         if (det) det.open = true;
         var card = row.nextElementSibling;
         if (card && card.classList.contains("pile-card-row") && card.hidden) {
-          closeOtherCards(card);
+          if (!closeOtherCards(card)) return;
           card.hidden = false;
           row.classList.add("open");
         }
@@ -1715,7 +1744,7 @@
           var zr = zones[z];
           var rows = zr.map(function (r) {
             return '<tr class="pile-row" data-pile="' + esc(r.pile_mark_no || "") + '" title="Click to open the full record">' +
-              '<td><span class="row-caret">&#9656;</span><strong>' + (r.pile_mark_no || "") + "</strong></td>" +
+              '<td><span class="row-caret">&#9656;</span><strong>' + escHtml(r.pile_mark_no || "") + "</strong></td>" +
               "<td>" + stageBadge(r) + "</td>" +
               '<td class="num">' + depthCell(r) + "</td>" +
               "<td>" + boreChip(r) + "</td>" +
@@ -1724,9 +1753,13 @@
             "</tr>" +
             pileCard(r, issuesByPile[r.pile_mark_no], testsByPile[r.pile_mark_no]);
           }).join("");
-          // ⋮ per zone (office only; "Unzoned" is not a registered zone) —
-          // reveals the guarded "Delete zone + piles" action
-          var zoneMenu = (TOPS.can && z !== "Unzoned")
+          // ⋮ per zone (office only) — shown ONLY for a REGISTERED zone
+          // (case-insensitive): excludes the "Unzoned" bucket and any legacy/
+          // bot zone not in the registry, whose delete would just error
+          var zoneRegistered = PW.zones.some(function (zz) {
+            return String(zz.zone_name).toLowerCase() === String(z).toLowerCase();
+          });
+          var zoneMenu = (TOPS.can && zoneRegistered)
             ? ' <button type="button" class="zone-menu" data-action="pwz-menu" title="zone actions">&#8942;</button>' +
               '<span hidden><button type="button" class="danger" data-action="pwz-del" ' +
                 'data-zone="' + esc(z) + '" data-count="' + zr.length + '">Delete zone' +
@@ -1737,7 +1770,7 @@
               "<tbody>" + rows + "</tbody></table></div>"
             : '<div class="muted-line" style="padding:6px 0 2px 18px">No piles in this zone yet — use &quot;+ Add piles…&quot; to fill it.</div>';
           return '<details class="zone" open data-zone="' + esc(z) + '" data-group="' + esc(z) + '">' +
-                 '<summary><span class="zone-name">' + z + '</span>' +
+                 '<summary><span class="zone-name">' + escHtml(z) + '</span>' +
                  '<span class="zone-count">' + zoneSummary(zr) + "</span>" + zoneMenu + "</summary>" +
                  body +
                  "</details>";
@@ -1784,8 +1817,7 @@
             var pd = pileRow.closest("details");
             if (pd) pd.open = true;
             var pcard = pileRow.nextElementSibling;
-            if (pcard && pcard.classList.contains("pile-card-row")) {
-              closeOtherCards(pcard);
+            if (pcard && pcard.classList.contains("pile-card-row") && closeOtherCards(pcard)) {
               pcard.hidden = false;
               pileRow.classList.add("open");
             }
@@ -1802,7 +1834,7 @@
           if (!tr) return;
           var card = tr.nextElementSibling;
           if (!card || !card.classList.contains("pile-card-row")) return;
-          if (card.hidden) closeOtherCards(card);
+          if (card.hidden && !closeOtherCards(card)) return;   // user kept a dirty edit
           card.hidden = !card.hidden;
           tr.classList.toggle("open", !card.hidden);
         });
