@@ -1195,29 +1195,53 @@
     }
 
     // ================= QUANTITIES DETAIL (step 7, 0054) =================
-    // Steel by bar size + the parameters behind each number. The design-side
-    // by-size split is rolled up from steel_breakdown.by_cage[] (bars mass
-    // per diameter; each cage's spiral mass under its link diameter) — the
-    // as-built side arrives ready-made as {by_size, total_kg}.
+    // Steel by bar size + the cage layout. The design-side split is rolled up
+    // from steel_breakdown.by_cage[] (bar mass per diameter = MAIN, each
+    // cage's spiral mass under its link diameter = SPIRAL) — the as-built
+    // side arrives ready-made as {by_size, total_kg}.
+    //
+    // Deliberately NOT shown (owner call 2026-07-26 — findings, not working):
+    // the concrete formula, Ø + depth (all three are already rows in the
+    // card's own table right above), per-cage coverage/overlap and splice-lap
+    // counts. Every one of them is still in steel_breakdown for an audit.
     function jparse(js) {
       if (js === null || js === undefined) return null;
       if (typeof js === "string") { try { return JSON.parse(js); } catch (e) { return null; } }
       return js;
     }
-    function designBySize(sb) {
+    // {main:{Txx:kg}, spiral:{Txx:kg}} — a size used in BOTH roles (rare, but
+    // legal) lands in both maps, which is what a reader ordering steel wants
+    function designBySizeRoles(sb) {
       sb = jparse(sb);
       if (!sb || !Array.isArray(sb.by_cage)) return null;
-      var out = {};
-      function add(dia, kg) {
+      var main = {}, spiral = {};
+      function add(map, dia, kg) {
         if (dia === null || dia === undefined || !kg) return;
         var k = "T" + Number(dia);
-        out[k] = (out[k] || 0) + Number(kg);
+        map[k] = (map[k] || 0) + Number(kg);
       }
       sb.by_cage.forEach(function (c) {
-        (c.bars || []).forEach(function (b) { add(b.dia_mm, b.mass_kg); });
-        if (c.link) add(c.link.dia_mm, c.links_kg);
+        (c.bars || []).forEach(function (b) { add(main, b.dia_mm, b.mass_kg); });
+        if (c.link) add(spiral, c.link.dia_mm, c.links_kg);
       });
-      return Object.keys(out).length ? out : null;
+      if (!Object.keys(main).length && !Object.keys(spiral).length) return null;
+      return { main: main, spiral: spiral };
+    }
+    // flat {Txx: kg} — what the project-level quantities panel rolls up
+    function designBySize(sb) {
+      var roles = designBySizeRoles(sb);
+      if (!roles) return null;
+      return mergeBySize(mergeBySize({}, roles.main), roles.spiral);
+    }
+    function sumMap(map) {
+      var t = 0;
+      Object.keys(map || {}).forEach(function (k) { t += Number(map[k] || 0); });
+      return t;
+    }
+    // whole kg — the model is ~2% from a QS take, so 0.1 kg is false precision
+    function fmtKg(kg) {
+      if (kg === null || kg === undefined || isNaN(Number(kg))) return "—";
+      return Math.round(Number(kg)).toLocaleString("en-MY");
     }
     function mergeBySize(into, map) {
       if (!map) return into;
@@ -1240,8 +1264,8 @@
       }).join(" · ");
     }
 
-    // per-pile fold-open: by-size split, parameters, the cage table — the
-    // full working behind the card's Concrete and Steel numbers
+    // per-pile fold-open: what the steel is (by bar size + role), how the cage
+    // is built, and the spec it came from — findings first, provenance last
     function steelDetailHtml(r) {
       var sb = jparse(r.steel_breakdown);
       var spec = jparse(r.design_reinforcement);
@@ -1250,64 +1274,96 @@
       if (!sb && !ab && !spec) return "";
 
       var parts = [];
+      var a = (sb && sb.assumptions) ? sb.assumptions : {};
+      var hasCages = !!(sb && Array.isArray(sb.by_cage) && sb.by_cage.length);
 
-      var dMap = designBySize(sb);
-      if (dMap) {
-        parts.push('<div class="pc-line">Design by size: ' + bySizeLine(dMap) +
-          (sb && sb.spacers_kg ? ' <span class="muted">(+ spacers ' + fmtT(sb.spacers_kg) + ")</span>" : "") +
-          (sb && sb.additional_kg ? ' <span class="muted">(+ manual allowance ' + fmtT(sb.additional_kg) + ")</span>" : "") +
-          "</div>");
+      // ---- steel totals, split by the role the bar plays on site ----
+      var roles = designBySizeRoles(sb);
+      if (roles) {
+        var mainKg = sumMap(roles.main), spiralKg = sumMap(roles.spiral);
+        var extraKg = Number((sb && sb.additional_kg) || 0);
+        var spacerKg = Number((sb && sb.spacers_kg) || 0);
+        var totalKg = (sb && sb.total_kg !== null && sb.total_kg !== undefined)
+          ? Number(sb.total_kg) : (mainKg + spiralKg + extraKg + spacerKg);
+        parts.push('<div class="pc-line"><strong>Steel ' + fmtT(totalKg) + "</strong>" +
+          ' <span class="muted">design total for this pile</span></div>');
+        if (Object.keys(roles.main).length) {
+          parts.push('<div class="pc-line"><span class="muted">Main bars</span> <strong>' +
+            fmtT(mainKg) + "</strong> · " + bySizeLine(roles.main) + "</div>");
+        }
+        if (Object.keys(roles.spiral).length) {
+          parts.push('<div class="pc-line"><span class="muted">Spiral</span> <strong>' +
+            fmtT(spiralKg) + "</strong> · " + bySizeLine(roles.spiral) + "</div>");
+        }
+        if (extraKg > 0) {
+          parts.push('<div class="pc-line"><span class="muted">Additional rebar allowance</span> <strong>' +
+            fmtT(extraKg) + "</strong></div>");
+        }
+        if (spacerKg > 0) {
+          parts.push('<div class="pc-line"><span class="muted">Steel spacers</span> <strong>' +
+            fmtT(spacerKg) + "</strong></div>");
+        }
       }
       if (ab && ab.by_size) {
-        parts.push('<div class="pc-line">As-built by size (bore log): ' + bySizeLine(ab.by_size) + "</div>");
+        parts.push('<div class="pc-line"><span class="muted">As-built (bore log)</span> ' +
+          bySizeLine(ab.by_size) + "</div>");
       }
 
-      var ps = [];
-      var dia = (r.design_diameter_mm !== null && r.design_diameter_mm !== undefined)
-        ? r.design_diameter_mm : r.diameter_mm;
-      if (dia) ps.push("Ø " + dia + " mm");
-      if (r.design_depth_m !== null && r.design_depth_m !== undefined)
-        ps.push("depth " + f(n(r.design_depth_m), 2) + " m");
-      var a = (sb && sb.assumptions) ? sb.assumptions : {};
-      if (a.cover_mm !== null && a.cover_mm !== undefined) ps.push("cover " + a.cover_mm + " mm");
-      if (a.lap_factor) ps.push("lap " + a.lap_factor + "D");
-      if (a.stock_m) ps.push("stock " + a.stock_m + " m");
-      if (a.starter_mm) ps.push("starter " + f(Number(a.starter_mm) / 1000, 1) + " m");
-      if (spec && spec.fy) ps.push("fy " + spec.fy);
-      if (ps.length) parts.push('<div class="pc-line">Parameters: ' + escHtml(ps.join(" · ")) + "</div>");
-      if (spec && spec.spec_source)
-        parts.push('<div class="pc-line muted-line">Spec source: ' + escHtml(spec.spec_source) + "</div>");
-
-      if (dia && r.design_depth_m !== null && r.design_depth_m !== undefined &&
-          r.design_concrete_m3 !== null && r.design_concrete_m3 !== undefined) {
-        parts.push('<div class="pc-line">Concrete: π/4 × ' + f(Number(dia) / 1000, 3) + "² × " +
-          f(n(r.design_depth_m), 2) + " m = <strong>" + f(n(r.design_concrete_m3), 2) + " m³</strong>" +
-          ' <span class="muted">(generated in the database)</span></div>');
-      }
-
-      if (sb && Array.isArray(sb.by_cage) && sb.by_cage.length) {
+      // ---- cage layout ----
+      if (hasCages) {
         var secs = (spec && Array.isArray(spec.sections)) ? spec.sections : [];
-        var rows = sb.by_cage.map(function (c) {
+        // collapse CONSECUTIVE IDENTICAL cages into one row — a long pile
+        // repeats the same middle cage and one row per repeat reads as noise
+        var groups = [];
+        sb.by_cage.forEach(function (c) {
           var bars = (c.bars || []).map(function (b) {
             return b.count + "T" + b.dia_mm;
-          }).join(" + ") + ((c.bars || []).length > 1 ? " (" + c.bars.length + " layers)" : "");
-          var spiral = c.link
-            ? "T" + c.link.dia_mm + " @ " + c.link.pitch_mm +
-              (c.link.splice_laps ? ' <span class="muted">(' + c.link.splice_laps + " splice laps)</span>" : "")
+          }).join(" + ");
+          var spiral = (c.link && c.link.dia_mm)
+            ? "T" + c.link.dia_mm + (c.link.pitch_mm ? " @ " + c.link.pitch_mm : "")
             : "—";
-          var sec = (secs[c.section] && secs[c.section].label)
-            ? ' <span class="muted">' + escHtml(secs[c.section].label) + "</span>" : "";
-          return "<tr><th>Cage " + c.cage + (c.top ? " (top)" : "") + sec + "</th>" +
-            "<td>" + escHtml(bars) + "</td>" +
-            "<td>" + spiral + "</td>" +
-            '<td class="num">' + f(n(c.bar_len_m), 1) + " / " + f(n(c.coverage_m), 1) + " / " +
-              f(n(c.overlap_m), 2) + "</td>" +
-            '<td class="num">' + (c.mass_kg !== undefined && c.mass_kg !== null
-              ? Number(c.mass_kg).toLocaleString("en-MY") : "—") + "</td></tr>";
+          var sig = bars + "|" + spiral + "|" + c.bar_len_m + "|" + c.mass_kg + "|" + c.section;
+          var last = groups[groups.length - 1];
+          if (last && last.sig === sig) { last.to = c.cage; last.n++; return; }
+          groups.push({ sig: sig, from: c.cage, to: c.cage, n: 1, bars: bars, spiral: spiral,
+                        len: c.bar_len_m, mass: Number(c.mass_kg) || 0,
+                        section: c.section, top: c.top });
+        });
+
+        var cageTotal = 0;
+        var rows = groups.map(function (g) {
+          var rowKg = g.mass * g.n;
+          cageTotal += rowKg;
+          var label = (g.n > 1 ? "Cages " + g.from + "–" + g.to + " ×" + g.n : "Cage " + g.from);
+          // the section label already says where the cage sits — only fall
+          // back to a "top" marker when the design carries no label
+          var sec = (secs[g.section] && secs[g.section].label)
+            ? ' <span class="muted">' + escHtml(secs[g.section].label) + "</span>"
+            : (g.top ? ' <span class="muted">top</span>' : "");
+          return "<tr><th>" + escHtml(label) + sec + "</th>" +
+            UI.td("Main bars", escHtml(g.bars || "—")) +
+            UI.td("Spiral", escHtml(g.spiral)) +
+            UI.td("Bar length", f(n(g.len), 1) + " m", "num") +
+            UI.td("kg", fmtKg(rowKg) +
+              (g.n > 1 ? ' <span class="muted">(' + fmtKg(g.mass) + " each)</span>" : ""), "num") +
+            "</tr>";
         }).join("");
-        parts.push('<table class="pc-table"><thead><tr><th></th><th>Main bars</th><th>Spiral</th>' +
-          '<th class="num">Bar / coverage / overlap (m)</th><th class="num">kg</th></tr></thead><tbody>' +
-          rows + "</tbody></table>");
+
+        var nCages = sb.by_cage.length;
+        parts.push('<div class="pc-line" style="margin-top:8px"><strong>' + nCages + " cage" +
+          (nCages === 1 ? "" : "s") + "</strong>" +
+          (a.stock_m ? ' <span class="muted">cut from ' + a.stock_m + " m stock bars</span>" : "") +
+          "</div>");
+        // .table-stack only (NOT .table-wrap — that carries its own border +
+        // shadow and would double-border against pc-table inside the card);
+        // the stack rules are descendant selectors, so a bare div is enough
+        parts.push('<div class="table-stack" style="overflow-x:auto"><table class="pc-table">' +
+          '<thead><tr><th></th><th>Main bars</th><th>Spiral</th>' +
+          '<th class="num">Bar length</th><th class="num">kg</th></tr></thead>' +
+          "<tbody>" + rows + "</tbody>" +
+          '<tfoot><tr><th>Total</th><td colspan="3"></td>' +
+          UI.td("Total kg", "<strong>" + fmtKg(cageTotal) + "</strong>", "num") +
+          "</tr></tfoot></table></div>");
       }
 
       if (abSpec && Array.isArray(abSpec.cages) && abSpec.cages.length) {
@@ -1321,11 +1377,26 @@
           return '<div class="pc-line"><span class="muted">Cage ' + (c.seq || "?") + ":</span> " +
                  escHtml(bits.join(" · ")) + "</div>";
         }).join("");
-        parts.push('<div class="pc-line"><strong>As-built cages (bore-log sheet)</strong>' +
+        parts.push('<div class="pc-line" style="margin-top:8px"><strong>As-built cages (bore-log sheet)</strong>' +
           (abSpec.starter_bar_length_m
             ? ' <span class="muted">starter ' + f(Number(abSpec.starter_bar_length_m), 1) + " m</span>" : "") +
           "</div>" + abRows);
       }
+
+      // ---- provenance last: the spec the numbers came from ----
+      var ps = [];
+      if (a.cover_mm !== null && a.cover_mm !== undefined) ps.push("cover " + a.cover_mm + " mm");
+      if (a.lap_factor) ps.push("lap " + a.lap_factor + "D");
+      if (a.starter_mm) ps.push("starter " + f(Number(a.starter_mm) / 1000, 1) + " m");
+      if (spec && spec.fy) ps.push("fy " + spec.fy);
+      // stock length rides with the cage count when there is a cage table
+      if (!hasCages && a.stock_m) ps.push("stock " + a.stock_m + " m");
+      if (ps.length) {
+        parts.push('<div class="pc-line muted-line" style="margin-top:8px">Spec: ' +
+          escHtml(ps.join(" · ")) + "</div>");
+      }
+      if (spec && spec.spec_source)
+        parts.push('<div class="pc-line muted-line">' + escHtml(spec.spec_source) + "</div>");
 
       if (sb && Array.isArray(sb.warnings) && sb.warnings.length) {
         parts.push('<div class="pc-line stale-warn">&#9888; ' + sb.warnings.map(escHtml).join(" · ") + "</div>");
@@ -1334,7 +1405,7 @@
       if (!parts.length) return "";
       // plain <details> on purpose — details.zone would get swept up by
       // setAllZones / the open-state store
-      return "<details><summary><strong>Calculation — steel by size &amp; parameters</strong></summary>" +
+      return "<details><summary><strong>Steel &amp; cage detail</strong></summary>" +
              '<div class="chase-body">' + parts.join("") + "</div></details>";
     }
 
