@@ -39,7 +39,13 @@
     // Project DIRECTORY: the master list is v_project_directory (every project,
     // both business lines); BP progress metrics (v_project_pulse) join on top
     // where they exist. Cards open the project hub.
-    var DIR = { rows: [], progById: {}, status: "active", q: "" };
+    var DIR = { rows: [], progById: {}, qtyById: {}, status: "active", q: "" };
+
+    // quantities line numbers (0053 rollup): null -> 0 (nothing cast yet)
+    function fmtQ(v, dp) {
+      return Number(v || 0).toLocaleString("en-MY",
+        { minimumFractionDigits: dp, maximumFractionDigits: dp });
+    }
 
     function statusBadge(s) {
       var cls = s === "active" ? "badge-approved"
@@ -114,6 +120,23 @@
                '<div class="pcard-line muted-line">' + (prog.piles_completed || 0) + " of " +
                total + " piles cast</div>";
 
+        // design-vs-consumed quantities (0053) — "in the ground / design total"
+        var qty = DIR.qtyById[r.project_id];
+        if (qty && (qty.design_concrete_m3 !== null || qty.design_steel_t !== null)) {
+          var qbits = [];
+          if (qty.design_concrete_m3 !== null)
+            qbits.push("concrete " + fmtQ(qty.committed_concrete_m3, 0) + " / " +
+                       fmtQ(qty.design_concrete_m3, 0) + " m³");
+          if (qty.design_steel_t !== null)
+            qbits.push("steel " + fmtQ(qty.committed_steel_t, 1) + " / " +
+                       fmtQ(qty.design_steel_t, 1) + " t");
+          if (qty.piles_with_steel < qty.piles_registered)
+            qbits.push('<span class="stale-warn">steel spec partial</span>');
+          body += '<div class="pcard-line muted-line" title="in the ground (cast piles at ' +
+                  'design quantities) / design total — full breakdown on the project hub">' +
+                  qbits.join(" · ") + "</div>";
+        }
+
         if (prog.total_tests_required > 0)
           chips.push('<span class="chip">Tests ' + (prog.tests_completed || 0) + "/" +
                      prog.total_tests_required + "</span>");
@@ -172,13 +195,15 @@
     window.onShellReady = async function () {
       document.getElementById("cards").innerHTML = UI.empty("Loading…");
       try {
-        var res = await Promise.all([Dash.getProjectDirectory(), Dash.getProjects()]);
+        var res = await Promise.all([Dash.getProjectDirectory(), Dash.getProjects(),
+                                     Dash.getProjectQuantities()]);
         DIR.rows = res[0].slice().sort(function (a, b) {
           var aa = a.status === "active" ? 0 : 1, bb = b.status === "active" ? 0 : 1;
           if (aa !== bb) return aa - bb;
           return String(a.project_code || "").localeCompare(String(b.project_code || ""));
         });
         res[1].forEach(function (p) { DIR.progById[p.project_id] = p; });
+        res[2].forEach(function (q) { DIR.qtyById[q.project_id] = q; });
         if (!DIR.rows.some(function (r) { return r.status === "active"; })) DIR.status = "all";
         render();
 

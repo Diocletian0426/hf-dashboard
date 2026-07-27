@@ -47,10 +47,19 @@
          Record card Testing section: book / unbook / record result per test,
          remove a requirement (refused once used), "+ require test" picker.
          The thin cross-project queue lives at tests.html; rows there deep-
-         link here via &pile= (handled like the hub's &zone= jump). -->
+         link here via &pile= (handled like the hub's &zone= jump).
+
+         QUANTITIES (step 7, 0054): collapsed panel below the test spec —
+         design-vs-actual by ZONE (boring m / concrete m³ / steel t) plus a
+         project-level STEEL BY BAR SIZE table (T12/T25/T32…, design vs
+         in-ground vs as-built). Each pile's record card carries the full
+         working: by-size split, cage table, and the parameters the numbers
+         were computed from (cover/lap/stock/starter + the concrete formula
+         with values substituted). -->
     <div id="pipeline"></div>
     <div id="chase"></div>
     <div id="testspec"></div>
+    <div id="pilequantities"></div>
     <div class="zone-tools" id="zone-tools" hidden>
       <button type="button" onclick="setAllZones(true)">Expand all</button>
       <button type="button" onclick="setAllZones(false)">Collapse all</button>
@@ -129,11 +138,14 @@
       var x = n(v);
       return x === null ? "—" : f(x, dp) + (unit ? " " + unit : "");
     }
-    // as_built_steel is JSON from the bore log (cage sections); summarise it
+    // as-built steel from the bore log: {by_size:{T20:kg,…}, total_kg} —
+    // show the tonnage; legacy array payloads fall back to a section count
     function steelCell(js) {
       if (js === null || js === undefined) return "—";
       if (typeof js === "string") { try { js = JSON.parse(js); } catch (e) { return "recorded"; } }
       if (Array.isArray(js)) return js.length + " cage section" + (js.length === 1 ? "" : "s");
+      if (js && js.total_kg !== null && js.total_kg !== undefined)
+        return f(Number(js.total_kg) / 1000, 2) + " t";
       return "recorded";
     }
     // reported depth + variance vs design (red when short of design)
@@ -452,6 +464,149 @@
       }).join("");
     }
 
+    // ================= QUANTITIES DETAIL (step 7, 0054) =================
+    // Steel by bar size + the parameters behind each number. The design-side
+    // by-size split is rolled up from steel_breakdown.by_cage[] (bars mass
+    // per diameter; each cage's spiral mass under its link diameter) — the
+    // as-built side arrives ready-made as {by_size, total_kg}.
+    function jparse(js) {
+      if (js === null || js === undefined) return null;
+      if (typeof js === "string") { try { return JSON.parse(js); } catch (e) { return null; } }
+      return js;
+    }
+    function designBySize(sb) {
+      sb = jparse(sb);
+      if (!sb || !Array.isArray(sb.by_cage)) return null;
+      var out = {};
+      function add(dia, kg) {
+        if (dia === null || dia === undefined || !kg) return;
+        var k = "T" + Number(dia);
+        out[k] = (out[k] || 0) + Number(kg);
+      }
+      sb.by_cage.forEach(function (c) {
+        (c.bars || []).forEach(function (b) { add(b.dia_mm, b.mass_kg); });
+        if (c.link) add(c.link.dia_mm, c.links_kg);
+      });
+      return Object.keys(out).length ? out : null;
+    }
+    function mergeBySize(into, map) {
+      if (!map) return into;
+      Object.keys(map).forEach(function (k) { into[k] = (into[k] || 0) + Number(map[k] || 0); });
+      return into;
+    }
+    function sizeKeys(map) {
+      return Object.keys(map).sort(function (a, b) { return Number(a.slice(1)) - Number(b.slice(1)); });
+    }
+    function fmtT(kg, dp) {
+      if (kg === null || kg === undefined) return "—";
+      var d = dp === undefined ? 2 : dp;
+      return (Number(kg) / 1000).toLocaleString("en-MY",
+        { minimumFractionDigits: d, maximumFractionDigits: d }) + " t";
+    }
+    function bySizeLine(map) {
+      if (!map) return "—";
+      return sizeKeys(map).map(function (k) {
+        return "<strong>" + escHtml(k) + "</strong> " + fmtT(map[k]);
+      }).join(" · ");
+    }
+
+    // per-pile fold-open: by-size split, parameters, the cage table — the
+    // full working behind the card's Concrete and Steel numbers
+    function steelDetailHtml(r) {
+      var sb = jparse(r.steel_breakdown);
+      var spec = jparse(r.design_reinforcement);
+      var ab = jparse(r.as_built_steel);
+      var abSpec = jparse(r.asbuilt_reinforcement);
+      if (!sb && !ab && !spec) return "";
+
+      var parts = [];
+
+      var dMap = designBySize(sb);
+      if (dMap) {
+        parts.push('<div class="pc-line">Design by size: ' + bySizeLine(dMap) +
+          (sb && sb.spacers_kg ? ' <span class="muted">(+ spacers ' + fmtT(sb.spacers_kg) + ")</span>" : "") +
+          "</div>");
+      }
+      if (ab && ab.by_size) {
+        parts.push('<div class="pc-line">As-built by size (bore log): ' + bySizeLine(ab.by_size) + "</div>");
+      }
+
+      var ps = [];
+      var dia = (r.design_diameter_mm !== null && r.design_diameter_mm !== undefined)
+        ? r.design_diameter_mm : r.diameter_mm;
+      if (dia) ps.push("Ø " + dia + " mm");
+      if (r.design_depth_m !== null && r.design_depth_m !== undefined)
+        ps.push("depth " + f(n(r.design_depth_m), 2) + " m");
+      var a = (sb && sb.assumptions) ? sb.assumptions : {};
+      if (a.cover_mm !== null && a.cover_mm !== undefined) ps.push("cover " + a.cover_mm + " mm");
+      if (a.lap_factor) ps.push("lap " + a.lap_factor + "D");
+      if (a.stock_m) ps.push("stock " + a.stock_m + " m");
+      if (a.starter_mm) ps.push("starter " + f(Number(a.starter_mm) / 1000, 1) + " m");
+      if (spec && spec.fy) ps.push("fy " + spec.fy);
+      if (ps.length) parts.push('<div class="pc-line">Parameters: ' + escHtml(ps.join(" · ")) + "</div>");
+      if (spec && spec.spec_source)
+        parts.push('<div class="pc-line muted-line">Spec source: ' + escHtml(spec.spec_source) + "</div>");
+
+      if (dia && r.design_depth_m !== null && r.design_depth_m !== undefined &&
+          r.design_concrete_m3 !== null && r.design_concrete_m3 !== undefined) {
+        parts.push('<div class="pc-line">Concrete: π/4 × ' + f(Number(dia) / 1000, 3) + "² × " +
+          f(n(r.design_depth_m), 2) + " m = <strong>" + f(n(r.design_concrete_m3), 2) + " m³</strong>" +
+          ' <span class="muted">(generated in the database)</span></div>');
+      }
+
+      if (sb && Array.isArray(sb.by_cage) && sb.by_cage.length) {
+        var secs = (spec && Array.isArray(spec.sections)) ? spec.sections : [];
+        var rows = sb.by_cage.map(function (c) {
+          var bars = (c.bars || []).map(function (b) {
+            return b.count + "T" + b.dia_mm;
+          }).join(" + ") + ((c.bars || []).length > 1 ? " (" + c.bars.length + " layers)" : "");
+          var spiral = c.link
+            ? "T" + c.link.dia_mm + " @ " + c.link.pitch_mm +
+              (c.link.splice_laps ? ' <span class="muted">(' + c.link.splice_laps + " splice laps)</span>" : "")
+            : "—";
+          var sec = (secs[c.section] && secs[c.section].label)
+            ? ' <span class="muted">' + escHtml(secs[c.section].label) + "</span>" : "";
+          return "<tr><th>Cage " + c.cage + (c.top ? " (top)" : "") + sec + "</th>" +
+            "<td>" + escHtml(bars) + "</td>" +
+            "<td>" + spiral + "</td>" +
+            '<td class="num">' + f(n(c.bar_len_m), 1) + " / " + f(n(c.coverage_m), 1) + " / " +
+              f(n(c.overlap_m), 2) + "</td>" +
+            '<td class="num">' + (c.mass_kg !== undefined && c.mass_kg !== null
+              ? Number(c.mass_kg).toLocaleString("en-MY") : "—") + "</td></tr>";
+        }).join("");
+        parts.push('<table class="pc-table"><thead><tr><th></th><th>Main bars</th><th>Spiral</th>' +
+          '<th class="num">Bar / coverage / overlap (m)</th><th class="num">kg</th></tr></thead><tbody>' +
+          rows + "</tbody></table>");
+      }
+
+      if (abSpec && Array.isArray(abSpec.cages) && abSpec.cages.length) {
+        var abRows = abSpec.cages.map(function (c) {
+          var bits = [];
+          if (c.main_count && c.main_dia_mm) bits.push(c.main_count + "T" + c.main_dia_mm);
+          if (c.length_m) bits.push(f(Number(c.length_m), 1) + " m");
+          if (c.spiral_dia_mm) bits.push("spiral T" + c.spiral_dia_mm +
+            (c.spiral_pitch_mm ? " @ " + c.spiral_pitch_mm : ""));
+          if (c.lap_to_next_m) bits.push("lap " + f(Number(c.lap_to_next_m), 2) + " m");
+          return '<div class="pc-line"><span class="muted">Cage ' + (c.seq || "?") + ":</span> " +
+                 escHtml(bits.join(" · ")) + "</div>";
+        }).join("");
+        parts.push('<div class="pc-line"><strong>As-built cages (bore-log sheet)</strong>' +
+          (abSpec.starter_bar_length_m
+            ? ' <span class="muted">starter ' + f(Number(abSpec.starter_bar_length_m), 1) + " m</span>" : "") +
+          "</div>" + abRows);
+      }
+
+      if (sb && Array.isArray(sb.warnings) && sb.warnings.length) {
+        parts.push('<div class="pc-line stale-warn">&#9888; ' + sb.warnings.map(escHtml).join(" · ") + "</div>");
+      }
+
+      if (!parts.length) return "";
+      // plain <details> on purpose — details.zone would get swept up by
+      // setAllZones / the open-state store
+      return "<details><summary><strong>Calculation — steel by size &amp; parameters</strong></summary>" +
+             '<div class="chase-body">' + parts.join("") + "</div></details>";
+    }
+
     // the full record card — a hidden table row that sits under the pile's row
     function pileCard(r, pileIssues, pileTests) {
       var chips = [];
@@ -461,6 +616,7 @@
       var head =
         '<div class="pc-head"><strong>' + escHtml(r.pile_mark_no || "") + "</strong> " + stageBadge(r) +
         (chips.length ? ' <span class="pc-chips">' + chips.join(" · ") + "</span>" : "") + "</div>";
+      var steelDetail = steelDetailHtml(r);
 
       var dims =
         "<div><h3>Design vs site vs verified</h3>" +
@@ -470,8 +626,10 @@
                numCell(r.diameter_mm, 0, "mm"),
                numCell(r.as_built_diameter_mm, 0, "mm")) +
         cmpRow("Depth / length", numCell(r.design_depth_m, 2, "m"), depthReportedCell(r), numCell(r.verified_pile_length_m, 2, "m")) +
-        cmpRow("Rock socket", numCell(r.design_socket_length_m, 2, "m"), numCell(r.socket_rock_length_m, 2, "m"), numCell(r.verified_cored_socket_m, 2, "m")) +
-        cmpRow("Concrete", numCell(r.design_concrete_m3, 1, "m³"), numCell(r.concrete_volume_m3, 1, "m³"), concreteVerifiedCell(r)) +
+        // site never reports socket/concrete — those columns were dropped in
+        // 0029; the site cells are honestly blank (verified side fills them)
+        cmpRow("Rock socket", numCell(r.design_socket_length_m, 2, "m"), "—", numCell(r.verified_cored_socket_m, 2, "m")) +
+        cmpRow("Concrete", numCell(r.design_concrete_m3, 1, "m³"), "—", concreteVerifiedCell(r)) +
         cmpRow("Steel", numCell(r.design_steel_total_t, 2, "t"), "—", steelCell(r.as_built_steel)) +
         cmpRow("Cast date", "—", dstr(r.cast_date), dstr(r.verified_cast_date)) +
         "</tbody></table></div>";
@@ -493,9 +651,120 @@
       return '<tr class="pile-card-row" hidden><td colspan="6"><div class="pile-card">' +
              head +
              '<div class="pc-grid">' + dims + '<div class="pc-side">' + dates + bore + "</div></div>" +
+             steelDetail +
              "<div><h3>Testing</h3>" + testListHtml(pileTests, r) + "</div>" +
              "<div><h3>Track record</h3>" + issueListHtml(pileIssues) + "</div>" +
              "</div></td></tr>";
+    }
+
+    // ================= QUANTITIES PANEL (step 7) — by zone + by bar size ====
+    // Same semantics as the hub summary: "in ground" = cast piles at design
+    // quantities; boring reported = site-reported depth; per-pile working
+    // lives in each record card's Calculation fold-open.
+    function pileQuantitiesPanel(piles) {
+      if (!piles.length) return "";
+      var CAST = ["cast_complete", "head_trimmed"];
+      function isCast(r) { return CAST.indexOf(r.construction_status) !== -1; }
+      function sumBy(list, fn) {
+        var s = null;
+        list.forEach(function (r) {
+          var v = fn(r);
+          if (v === null || v === undefined || isNaN(Number(v))) return;
+          s = (s === null ? 0 : s) + Number(v);
+        });
+        return s;
+      }
+      function fmtN(v, dp) {
+        if (v === null || v === undefined) return "—";
+        return Number(v).toLocaleString("en-MY",
+          { minimumFractionDigits: dp, maximumFractionDigits: dp });
+      }
+      function pair(a, b, dp) {
+        return fmtN(a, dp) + ' <span class="muted">/ ' + fmtN(b, dp) + "</span>";
+      }
+
+      var zones = {};
+      piles.forEach(function (r) { var z = r.zone || "Unzoned"; (zones[z] = zones[z] || []).push(r); });
+
+      function zRow(name, list, bold) {
+        var cast = list.filter(isCast);
+        return "<tr>" +
+          UI.td("Zone", bold ? "<strong>" + escHtml(name) + "</strong>" : escHtml(name)) +
+          UI.td("Piles cast", cast.length + " / " + list.length, "num") +
+          UI.td("Boring m (reported / design)",
+            pair(sumBy(list, function (r) {
+                   return (r.actual_depth_m !== null && r.actual_depth_m !== undefined)
+                     ? r.actual_depth_m : r.current_depth_m;
+                 }),
+                 sumBy(list, function (r) { return r.design_depth_m; }), 1), "num") +
+          UI.td("Concrete m³ (in ground / design)",
+            pair(sumBy(cast, function (r) { return r.design_concrete_m3; }),
+                 sumBy(list, function (r) { return r.design_concrete_m3; }), 1), "num") +
+          UI.td("Steel t (in ground / design)",
+            pair(sumBy(cast, function (r) { return r.design_steel_total_t; }),
+                 sumBy(list, function (r) { return r.design_steel_total_t; }), 2), "num") +
+        "</tr>";
+      }
+
+      var zoneNames = Object.keys(zones).sort();
+      var zoneRows = zoneNames.map(function (z) { return zRow(z, zones[z], false); }).join("");
+      var totalRow = zRow("Project total", piles, true);
+
+      var zoneTable =
+        '<div class="table-wrap table-stack"><table>' +
+        '<thead><tr><th>Zone</th><th class="num">Piles cast</th>' +
+        '<th class="num">Boring m<br><span class="muted">reported / design</span></th>' +
+        '<th class="num">Concrete m³<br><span class="muted">in ground / design</span></th>' +
+        '<th class="num">Steel t<br><span class="muted">in ground / design</span></th></tr></thead>' +
+        "<tbody>" + zoneRows + totalRow + "</tbody></table></div>";
+
+      // steel by bar size (project level): design vs in-ground vs as-built
+      var dAll = {}, dCast = {}, abAll = {};
+      var withBreakdown = 0;
+      piles.forEach(function (r) {
+        var m = designBySize(r.steel_breakdown);
+        if (m) {
+          withBreakdown++;
+          mergeBySize(dAll, m);
+          if (isCast(r)) mergeBySize(dCast, m);
+        }
+        var ab = jparse(r.as_built_steel);
+        if (ab && ab.by_size) mergeBySize(abAll, ab.by_size);
+      });
+      var allKeys = sizeKeys(mergeBySize(mergeBySize({}, dAll), abAll));
+      var sizeTable = "";
+      if (allKeys.length) {
+        var sRows = allKeys.map(function (k) {
+          return "<tr>" +
+            UI.td("Size", "<strong>" + escHtml(k) + "</strong>") +
+            UI.td("Design", dAll[k] !== undefined ? fmtT(dAll[k]) : "—", "num") +
+            UI.td("In ground (cast piles)", dCast[k] !== undefined ? fmtT(dCast[k]) : "—", "num") +
+            UI.td("As-built (bore logs)", abAll[k] !== undefined ? fmtT(abAll[k]) : "—", "num") +
+          "</tr>";
+        }).join("");
+        sizeTable =
+          '<div class="pc-line" style="margin-top:8px"><strong>Steel by bar size</strong></div>' +
+          '<div class="table-wrap table-stack"><table>' +
+          '<thead><tr><th>Size</th><th class="num">Design</th>' +
+          '<th class="num">In ground</th><th class="num">As-built</th></tr></thead>' +
+          "<tbody>" + sRows + "</tbody></table></div>";
+      }
+
+      var notes = [];
+      if (withBreakdown < piles.length) {
+        notes.push('<span class="stale-warn">steel spec on ' + withBreakdown + " of " +
+                   piles.length + " piles — size totals exclude the rest</span>");
+      }
+      notes.push("in ground = cast piles at design quantities · boring reported = site-reported depth");
+      notes.push("concrete per pile = π/4 × Ø² × design depth · steel = per-pile cage model — " +
+                 "open a pile's record card for its full working");
+
+      return '<details class="zone chase-panel">' +
+             '<summary><span class="zone-name">Quantities — design vs actual</span>' +
+             '<span class="zone-count">' + zoneNames.length + " zone" + (zoneNames.length === 1 ? "" : "s") +
+             " · by zone, by bar size</span></summary>" +
+             '<div class="chase-body">' + zoneTable + sizeTable +
+             '<div class="pipe-note">' + notes.join(" · ") + "</div></div></details>";
     }
 
     // ================= PIPELINE STRIP (step 5) =================
@@ -745,6 +1014,7 @@
         document.getElementById("pipeline").innerHTML = pipelineStrip(piles);
         document.getElementById("chase").innerHTML = chaseChecklist(piles, testsByPile);
         document.getElementById("testspec").innerHTML = specPanel();
+        document.getElementById("pilequantities").innerHTML = pileQuantitiesPanel(piles);
         wireChaseJumps();
         wireTestOps();
 

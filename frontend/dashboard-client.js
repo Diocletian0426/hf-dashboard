@@ -73,6 +73,12 @@
                                                      site (whereabouts only — no IC/phone)
    await Dash.getProjectDirectory()               -> every project id/code/name/status (ALL
                                                      lines, for move pickers — pulse is BP-only)
+   await Dash.getProjectQuantities()              -> per-project design-vs-actual consumption
+                                                     rollup (0053): design/committed/verified
+                                                     boring metres, concrete m³, steel t +
+                                                     coverage counters ("committed" = cast
+                                                     piles at design quantities; bore-log
+                                                     columns fill as real logs are captured)
 
    MANPOWER WRITE COMMANDS (management/office only — database-enforced; each
    returns { ok, ... } or throws with .message = the database's error code)
@@ -451,6 +457,11 @@
     return q(sb.from("v_project_directory").select("*").order("project_code"));
   }
 
+  function getProjectQuantities() {
+    // design-vs-actual material rollup per project (0053)
+    return q(sb.from("v_project_quantities").select("*").order("project_code"));
+  }
+
   function moveStaff(staffId, projectId, remarks, effectiveDate) {
     return q(sb.rpc("move_staff", {
       p_staff_id: staffId, p_project_id: projectId || null,
@@ -817,6 +828,7 @@
 
     getManpowerBySite: getManpowerBySite,
     getProjectDirectory: getProjectDirectory,
+    getProjectQuantities: getProjectQuantities,
     moveStaff: moveStaff,
     moveMachine: moveMachine,
     getTransferLog: getTransferLog,

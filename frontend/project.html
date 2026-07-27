@@ -549,6 +549,108 @@
              '<a class="section-link" href="machines.html">machines page →</a></h2>' + body;
     }
 
+    // ---- section: quantities — design vs actual consumption (0053) ----
+    // Everything is summed client-side from the pile register rows already
+    // loaded for this page. "To date" semantics: metres = site-REPORTED bored
+    // depth (the one actual the site does report); concrete & steel = CAST
+    // piles at design quantities (site reports never carried concrete/steel —
+    // those columns were dropped in 0029); the Verified column comes from
+    // bore logs and fills in as real logs are captured.
+    function quantitiesSection(piles) {
+      if (!piles.length) return "";
+      var CAST = ["cast_complete", "head_trimmed"];
+      var cast = piles.filter(function (r) { return CAST.indexOf(r.construction_status) !== -1; });
+
+      function sum(list, f) {
+        var s = null;
+        list.forEach(function (r) {
+          var v = f(r);
+          if (v === null || v === undefined || isNaN(Number(v))) return;
+          s = (s === null ? 0 : s) + Number(v);
+        });
+        return s;
+      }
+      function fq(v, dp) {
+        if (v === null || v === undefined) return "—";
+        return Number(v).toLocaleString("en-MY",
+          { minimumFractionDigits: dp, maximumFractionDigits: dp });
+      }
+      function steelT(r) {
+        var js = r.as_built_steel;
+        if (!js) return null;
+        if (typeof js === "string") { try { js = JSON.parse(js); } catch (e) { return null; } }
+        return (js && js.total_kg !== null && js.total_kg !== undefined)
+          ? Number(js.total_kg) / 1000 : null;
+      }
+
+      var dMetres = sum(piles, function (r) { return r.design_depth_m; });
+      var dConc   = sum(piles, function (r) { return r.design_concrete_m3; });
+      var dSteel  = sum(piles, function (r) { return r.design_steel_total_t; });
+      var repMetres = sum(piles, function (r) {
+        return r.actual_depth_m !== null && r.actual_depth_m !== undefined
+          ? r.actual_depth_m : r.current_depth_m;
+      });
+      var cConc  = sum(cast, function (r) { return r.design_concrete_m3; });
+      var cSteel = sum(cast, function (r) { return r.design_steel_total_t; });
+      var vMetres = sum(piles, function (r) { return r.verified_pile_length_m; });
+      var aConc   = sum(piles, function (r) { return r.actual_concrete_m3; });
+      var tConc   = sum(piles, function (r) { return r.theoretical_concrete_m3; });
+      var abSteel = sum(piles, steelT);
+
+      var withDesign = piles.filter(function (r) {
+        return r.design_concrete_m3 !== null && r.design_concrete_m3 !== undefined;
+      }).length;
+      var withSteel = piles.filter(function (r) {
+        return r.design_steel_total_t !== null && r.design_steel_total_t !== undefined;
+      }).length;
+      var logs = piles.filter(function (r) { return r.bore_review_status === "confirmed"; }).length;
+
+      function rem(design, used) {
+        return (design === null || used === null) ? null : design - used;
+      }
+      function qRow(label, unit, dp, design, toDate, verifiedHtml, remaining) {
+        return "<tr>" +
+          UI.td("Quantity", "<strong>" + label + '</strong> <span class="muted">' + unit + "</span>") +
+          UI.td("Design total", fq(design, dp), "num") +
+          UI.td("To date", fq(toDate, dp), "num") +
+          UI.td("Verified (bore logs)", verifiedHtml, "num") +
+          UI.td("Remaining", fq(remaining, dp), "num") +
+        "</tr>";
+      }
+
+      var table =
+        '<div class="table-wrap table-stack"><table>' +
+        "<thead><tr><th></th><th class=\"num\">Design total</th><th class=\"num\">To date</th>" +
+        '<th class="num">Verified (bore logs)</th><th class="num">Remaining</th></tr></thead><tbody>' +
+        qRow("Boring", "m", 1, dMetres, repMetres, fq(vMetres, 1), rem(dMetres, repMetres)) +
+        qRow("Concrete", "m³", 1, dConc, cConc,
+             fq(aConc, 1) + (tConc !== null ? ' <span class="muted">(theo ' + fq(tConc, 1) + ")</span>" : ""),
+             rem(dConc, cConc)) +
+        qRow("Steel", "t", 2, dSteel, cSteel, fq(abSteel, 2), rem(dSteel, cSteel)) +
+        "</tbody></table></div>";
+
+      var notes = [];
+      if (withDesign < piles.length) {
+        notes.push('<span class="stale-warn">design data on ' + withDesign + " of " +
+                   piles.length + " piles — totals exclude the rest</span>");
+      }
+      if (withSteel < piles.length) {
+        notes.push('<span class="stale-warn">steel spec on ' + withSteel + " of " +
+                   piles.length + " piles</span>");
+      }
+      notes.push(logs + " bore log" + (logs === 1 ? "" : "s") +
+                 " confirmed — the Verified column fills as logs are entered");
+      notes.push("To date: boring = site-reported depth; concrete &amp; steel = cast piles at " +
+                 "design quantities (site reports don't carry them; bore logs refine)");
+
+      return '<details class="zone" open>' +
+             '<summary><span class="zone-name">Quantities — design vs actual</span>' +
+             '<span class="zone-count">concrete ' + fq(cConc, 0) + " of " + fq(dConc, 0) +
+             " m³ · steel " + fq(cSteel, 1) + " of " + fq(dSteel, 1) + " t</span></summary>" +
+             '<div class="chase-body">' + table +
+             '<div class="pipe-note">' + notes.join(" · ") + "</div></div></details>";
+    }
+
     // ---- tests: pipeline buckets — canonical copy lives in ui.js ----
     var testBuckets = UI.testBuckets;
 
@@ -763,6 +865,7 @@
         initTrend(outputRows);
         document.getElementById("sections").innerHTML =
           attentionSection(p, openIssues, machines, tb, piles) +
+          quantitiesSection(piles) +
           '<div id="claims"></div>' +
           machinesSection(machines);
 
