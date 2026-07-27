@@ -1389,20 +1389,34 @@
           "</div>" + abRows);
       }
 
-      // ---- provenance last: the spec the numbers came from ----
-      var ps = [];
-      if (a.cover_mm !== null && a.cover_mm !== undefined) ps.push("cover " + a.cover_mm + " mm");
-      if (a.lap_factor) ps.push("lap " + a.lap_factor + "D");
-      if (a.starter_mm) ps.push("starter " + f(Number(a.starter_mm) / 1000, 1) + " m");
-      if (spec && spec.fy) ps.push("fy " + spec.fy);
-      // stock length rides with the cage count when there is a cage table
-      if (!hasCages && a.stock_m) ps.push("stock " + a.stock_m + " m");
-      if (ps.length) {
-        parts.push('<div class="pc-line muted-line" style="margin-top:8px">Spec: ' +
-          escHtml(ps.join(" · ")) + "</div>");
+      // ---- provenance last: the spec these numbers were computed from.
+      // Spelled out in words + units — "cover 75 · lap 50D · fy 500" reads as
+      // shorthand only to someone who already knows the shorthand.
+      var specRows = "";
+      function specRow(label, value) {
+        return "<tr><th>" + escHtml(label) + "</th>" + UI.td("", escHtml(value)) + "</tr>";
       }
+      if (a.cover_mm !== null && a.cover_mm !== undefined)
+        specRows += specRow("Concrete cover", a.cover_mm + " mm");
+      if (a.lap_factor)
+        specRows += specRow("Lap length (× bar diameter)", a.lap_factor + "D");
+      if (a.starter_mm)
+        specRows += specRow("Starter bar length", f(Number(a.starter_mm) / 1000, 1) + " m");
+      if (spec && spec.fy)
+        specRows += specRow("Steel grade (fy)", spec.fy + " N/mm²");
+      // stock length rides with the cage count line when there IS a cage table
+      if (!hasCages && a.stock_m)
+        specRows += specRow("Stock bar length", a.stock_m + " m");
+      // the drawing the CAGE SPEC was read from (the card head chips carry the
+      // pile's own drawing no/rev — these can legitimately differ)
       if (spec && spec.spec_source)
-        parts.push('<div class="pc-line muted-line">' + escHtml(spec.spec_source) + "</div>");
+        specRows += specRow("Spec source", spec.spec_source);
+      if (specRows) {
+        parts.push('<div class="pc-line" style="margin-top:8px"><strong>Design spec</strong>' +
+          ' <span class="muted">what these numbers were computed from</span></div>' +
+          '<div class="table-stack" style="overflow-x:auto"><table class="pc-table"><tbody>' +
+          specRows + "</tbody></table></div>");
+      }
 
       if (sb && Array.isArray(sb.warnings) && sb.warnings.length) {
         parts.push('<div class="pc-line stale-warn">&#9888; ' + sb.warnings.map(escHtml).join(" · ") + "</div>");
