@@ -1257,13 +1257,6 @@
       return (Number(kg) / 1000).toLocaleString("en-MY",
         { minimumFractionDigits: d, maximumFractionDigits: d }) + " t";
     }
-    function bySizeLine(map) {
-      if (!map) return "—";
-      return sizeKeys(map).map(function (k) {
-        return "<strong>" + escHtml(k) + "</strong> " + fmtT(map[k]);
-      }).join(" · ");
-    }
-
     // per-pile fold-open: what the steel is (by bar size + role), how the cage
     // is built, and the spec it came from — findings first, provenance last
     function steelDetailHtml(r) {
@@ -1277,7 +1270,10 @@
       var a = (sb && sb.assumptions) ? sb.assumptions : {};
       var hasCages = !!(sb && Array.isArray(sb.by_cage) && sb.by_cage.length);
 
-      // ---- steel totals, split by the role the bar plays on site ----
+      // ---- steel by bar size: ONE ROW PER SIZE (the unit steel is ordered
+      // in), what it is used as, and its weight. Roll-ups sit in the footer
+      // so the body stays a clean shopping list. A size used in BOTH roles
+      // (legal, none today) gets a row per role rather than a merged figure.
       var roles = designBySizeRoles(sb);
       if (roles) {
         var mainKg = sumMap(roles.main), spiralKg = sumMap(roles.spiral);
@@ -1285,28 +1281,50 @@
         var spacerKg = Number((sb && sb.spacers_kg) || 0);
         var totalKg = (sb && sb.total_kg !== null && sb.total_kg !== undefined)
           ? Number(sb.total_kg) : (mainKg + spiralKg + extraKg + spacerKg);
-        parts.push('<div class="pc-line"><strong>Steel ' + fmtT(totalKg) + "</strong>" +
-          ' <span class="muted">design total for this pile</span></div>');
-        if (Object.keys(roles.main).length) {
-          parts.push('<div class="pc-line"><span class="muted">Main bars</span> <strong>' +
-            fmtT(mainKg) + "</strong> · " + bySizeLine(roles.main) + "</div>");
+
+        function sizeRows(map, roleLabel) {
+          return sizeKeys(map).map(function (k) {
+            return "<tr><th>" + escHtml(k) + "</th>" +
+              UI.td("Used as", roleLabel) +
+              UI.td("Tonnes", fmtT(map[k]), "num") + "</tr>";
+          }).join("");
         }
-        if (Object.keys(roles.spiral).length) {
-          parts.push('<div class="pc-line"><span class="muted">Spiral</span> <strong>' +
-            fmtT(spiralKg) + "</strong> · " + bySizeLine(roles.spiral) + "</div>");
+        function totalRow(label, kg, strong) {
+          return '<tr><th colspan="2">' + escHtml(label) + "</th>" +
+            UI.td("Tonnes", (strong ? "<strong>" : "") + fmtT(kg) + (strong ? "</strong>" : ""), "num") +
+            "</tr>";
         }
-        if (extraKg > 0) {
-          parts.push('<div class="pc-line"><span class="muted">Additional rebar allowance</span> <strong>' +
-            fmtT(extraKg) + "</strong></div>");
-        }
-        if (spacerKg > 0) {
-          parts.push('<div class="pc-line"><span class="muted">Steel spacers</span> <strong>' +
-            fmtT(spacerKg) + "</strong></div>");
-        }
+
+        var body = sizeRows(roles.main, "Main bar") + sizeRows(roles.spiral, "Spiral");
+        var foot = "";
+        if (Object.keys(roles.main).length) foot += totalRow("Main bars", mainKg);
+        if (Object.keys(roles.spiral).length) foot += totalRow("Spiral", spiralKg);
+        if (extraKg > 0) foot += totalRow("Additional rebar allowance", extraKg);
+        if (spacerKg > 0) foot += totalRow("Steel spacers", spacerKg);
+        foot += totalRow("Total steel", totalKg, true);
+
+        parts.push('<div class="table-stack" style="overflow-x:auto"><table class="pc-table">' +
+          '<thead><tr><th>Bar size</th><th>Used as</th><th class="num">Tonnes</th></tr></thead>' +
+          "<tbody>" + body + "</tbody><tfoot>" + foot + "</tfoot></table></div>");
       }
-      if (ab && ab.by_size) {
-        parts.push('<div class="pc-line"><span class="muted">As-built (bore log)</span> ' +
-          bySizeLine(ab.by_size) + "</div>");
+
+      // as-built carries no role split (fn_bore_log_steel returns by_size
+      // only) — its own small table, same shape
+      if (ab && ab.by_size && Object.keys(ab.by_size).length) {
+        var abSizeRows = sizeKeys(ab.by_size).map(function (k) {
+          return "<tr><th>" + escHtml(k) + "</th>" +
+            UI.td("Tonnes", fmtT(ab.by_size[k]), "num") + "</tr>";
+        }).join("");
+        parts.push('<div class="pc-line" style="margin-top:8px"><strong>As-built</strong>' +
+          ' <span class="muted">from the bore log</span></div>' +
+          '<div class="table-stack" style="overflow-x:auto"><table class="pc-table">' +
+          '<thead><tr><th>Bar size</th><th class="num">Tonnes</th></tr></thead>' +
+          "<tbody>" + abSizeRows + "</tbody>" +
+          ((ab.total_kg !== null && ab.total_kg !== undefined)
+            ? "<tfoot><tr><th>Total steel</th>" +
+              UI.td("Tonnes", "<strong>" + fmtT(ab.total_kg) + "</strong>", "num") + "</tr></tfoot>"
+            : "") +
+          "</table></div>");
       }
 
       // ---- cage layout ----
