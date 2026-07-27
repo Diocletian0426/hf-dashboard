@@ -69,6 +69,56 @@
    await Dash.setProjectTestSpec(projectId, testTypeId, {percentage?, remarks?, remove?})
                                            -> upsert/remove one project's spec
                                               row (percentage 0–100)
+
+   PILE REGISTER WRITES (0055; management/office only — database-enforced; each
+   returns { ok, ... } or throws with .message = the database's error code and,
+   where noted, .details = specifics)
+   -----------------------------------------------------------------------------
+   await Dash.addPiles(projectId, {marks, diameterMm, zone?, depthM?, socketM?,
+                                   grade?, capacityKn?, reinforcement?,
+                                   drawingNo?, drawingRev?, drawingDate?, remarks?})
+                                           -> BULK create: every mark gets a
+                                              piling_records row + an identical
+                                              pile_designs row; steel/concrete
+                                              compute in the database. All-or-
+                                              nothing — 'duplicate_marks' lists
+                                              the conflicting marks in .details
+   await Dash.updatePileIdentity(pileId, {mark?, zone?, clearZone?, diameterMm?})
+                                           -> partial update of mark / zone /
+                                              register Ø (null = leave unchanged)
+   await Dash.setPileDesign(pileId, {diameterMm, depthM?, socketM?, grade?,
+                                     capacityKn?, reinforcement?, drawingNo?,
+                                     drawingRev?, drawingDate?, remarks?})
+                                           -> FULL-REPLACE upsert of the design
+                                              row — always submit complete
+                                              state; omitted fields are cleared
+   await Dash.deletePile(pileId)           -> typo eraser: refuses unless the
+                                              pile is still 'planned' with zero
+                                              child records ('pile_started' /
+                                              'pile_in_use' with the blocking
+                                              table in .details)
+   await Dash.previewPileSteel(diameterMm, depthM, reinforcement)
+                                           -> what a save WOULD store: steel
+                                              breakdown + total t + concrete m³,
+                                              same math as the generated columns
+                                              (any signed-in login may call)
+   await Dash.getProjectZones(projectId)   -> the project's REGISTERED zones +
+                                              pile counts (zero-pile zones
+                                              included — the Add Piles dropdown
+                                              source; any signed-in login)
+   await Dash.addZone(projectId, zone)     -> register a zone name for the
+                                              project ('duplicate_zone' when it
+                                              exists); zones are created BEFORE
+                                              piles go into them
+   await Dash.deleteZone(projectId, zone)  -> remove a zone NO pile uses
+                                              ('zone_in_use' otherwise)
+   await Dash.deleteZoneAndPiles(projectId, zone)
+                                           -> batch-undo: delete the zone AND
+                                              its piles — refused unless EVERY
+                                              pile is still planned with zero
+                                              records ('zone_piles_started' /
+                                              'zone_piles_in_use', offending
+                                              mark in .details); all-or-nothing
    await Dash.getManpowerBySite()                 -> active staff: name/role/company + current
                                                      site (whereabouts only — no IC/phone)
    await Dash.getProjectDirectory()               -> every project id/code/name/status (ALL
@@ -448,6 +498,84 @@
     }));
   }
 
+  // ---- pile register writes (0055) — the database re-checks the caller's
+  // designation on every call; these wrappers just shape the parameters. ------
+  function addPiles(projectId, o) {
+    o = o || {};
+    return q(sb.rpc("add_piles", {
+      p_project_id: projectId,
+      p_marks: o.marks || [],
+      p_diameter_mm: numOrNull(o.diameterMm),
+      p_zone: o.zone || null,
+      p_depth_m: numOrNull(o.depthM),
+      p_socket_m: numOrNull(o.socketM),
+      p_grade: o.grade || null,
+      p_capacity_kn: numOrNull(o.capacityKn),
+      p_reinforcement: o.reinforcement || null,
+      p_drawing_no: o.drawingNo || null,
+      p_drawing_rev: o.drawingRev || null,
+      p_drawing_date: o.drawingDate || null,
+      p_remarks: o.remarks || null
+    }));
+  }
+
+  function updatePileIdentity(pileId, o) {
+    o = o || {};
+    return q(sb.rpc("update_pile_identity", {
+      p_pile_id: pileId,
+      p_mark: o.mark || null,
+      p_zone: o.zone || null,
+      p_clear_zone: !!o.clearZone,
+      p_diameter_mm: numOrNull(o.diameterMm)
+    }));
+  }
+
+  function setPileDesign(pileId, o) {
+    o = o || {};
+    return q(sb.rpc("set_pile_design", {
+      p_pile_id: pileId,
+      p_diameter_mm: numOrNull(o.diameterMm),
+      p_depth_m: numOrNull(o.depthM),
+      p_socket_m: numOrNull(o.socketM),
+      p_grade: o.grade || null,
+      p_capacity_kn: numOrNull(o.capacityKn),
+      p_reinforcement: o.reinforcement || null,
+      p_drawing_no: o.drawingNo || null,
+      p_drawing_rev: o.drawingRev || null,
+      p_drawing_date: o.drawingDate || null,
+      p_remarks: o.remarks || null
+    }));
+  }
+
+  function deletePile(pileId) {
+    return q(sb.rpc("delete_pile", { p_pile_id: pileId }));
+  }
+
+  function previewPileSteel(diameterMm, depthM, reinforcement) {
+    return q(sb.rpc("preview_pile_steel", {
+      p_diameter_mm: numOrNull(diameterMm),
+      p_depth_m: numOrNull(depthM),
+      p_reinforcement: reinforcement || null
+    }));
+  }
+
+  function getProjectZones(projectId) {
+    return q(sb.from("v_project_zones").select("*")
+      .eq("project_id", projectId).order("zone_name"));
+  }
+
+  function addZone(projectId, zone) {
+    return q(sb.rpc("add_zone", { p_project_id: projectId, p_zone: zone }));
+  }
+
+  function deleteZone(projectId, zone) {
+    return q(sb.rpc("delete_zone", { p_project_id: projectId, p_zone: zone }));
+  }
+
+  function deleteZoneAndPiles(projectId, zone) {
+    return q(sb.rpc("delete_zone_and_piles", { p_project_id: projectId, p_zone: zone }));
+  }
+
   // ---- manpower (whereabouts + office-adjustable moves, 0039) ---------------
   function getManpowerBySite() {
     return q(sb.from("v_manpower_by_site").select("*").order("full_name"));
@@ -825,6 +953,16 @@
     bookTest: bookTest,
     recordTestResult: recordTestResult,
     setProjectTestSpec: setProjectTestSpec,
+
+    addPiles: addPiles,
+    updatePileIdentity: updatePileIdentity,
+    setPileDesign: setPileDesign,
+    deletePile: deletePile,
+    previewPileSteel: previewPileSteel,
+    getProjectZones: getProjectZones,
+    addZone: addZone,
+    deleteZone: deleteZone,
+    deleteZoneAndPiles: deleteZoneAndPiles,
 
     getManpowerBySite: getManpowerBySite,
     getProjectDirectory: getProjectDirectory,

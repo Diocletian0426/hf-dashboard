@@ -737,6 +737,41 @@ summary.zone-rich::before { float: left; margin: 4px 8px 0 0; }
   position: static; box-shadow: none; background: #fbfcfe;
 }
 
+/* -------- pile add/edit forms (piles.html, 0055/0056 write round) --------
+   One field per line: fixed-width word label | input | unit. .pw-req marks
+   the required fields with a red asterisk. Batch rows + section blocks get
+   a light bounding line so groups read as groups. */
+.pw-form .pw-row {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: 3px 0; flex-wrap: wrap;
+}
+.pw-form .pw-label {
+  flex: 0 0 230px; font-size: var(--fs-sm); color: var(--ink-2);
+}
+.pw-form .pw-label.pw-req::after { content: " *"; color: var(--danger); font-weight: 700; }
+.pw-form .pw-unit { font-size: var(--fs-sm); color: var(--ink-3); }
+.pw-form .pw-hint { font-size: var(--fs-xs); color: var(--ink-3); flex-basis: 100%; padding-left: 238px; }
+.pw-form .pw-group {
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  padding: var(--sp-2) var(--sp-3); margin: var(--sp-2) 0;
+  background: var(--surface-2);
+}
+.pw-form .pw-group > .pw-group-title {
+  font-size: var(--fs-sm); font-weight: 600; margin-bottom: var(--sp-1);
+}
+.pw-batch { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; padding: 2px 0; }
+/* ⋮ zone-actions button on each zone block's header */
+.zone-menu {
+  background: none; border: none; cursor: pointer;
+  color: var(--ink-3); font-size: 16px; line-height: 1; padding: 0 6px;
+  align-self: center;
+}
+.zone-menu:hover { color: var(--ink); }
+@media (max-width: 760px) {
+  .pw-form .pw-label { flex-basis: 100%; }
+  .pw-form .pw-hint { padding-left: 0; }
+}
+
 /* ============================ 8. RESPONSIVE =============================== */
 
 @media (max-width: 900px) {
