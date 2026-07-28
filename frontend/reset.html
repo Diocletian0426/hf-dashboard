@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Set a new password — HF Bored Piles</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!--
+    Where a password-reset email lands.
+
+    Deliberately does NOT load shell.js: the shell exists to show company data,
+    and nothing on this page should. It also must not bounce a signed-in user
+    away — the person arriving here IS signed in, by virtue of the reset link.
+  -->
+  <main class="login-wrap">
+    <div class="login-card">
+
+      <div class="auth-brand">
+        <svg class="auth-mark" viewBox="0 0 38 38" role="img" aria-label="HF Bored Piles logo">
+          <rect width="38" height="38" rx="9" fill="#0f172a"></rect>
+          <path d="M10 9v20M19 9v20M28 9v20" stroke="#2563eb" stroke-width="3" stroke-linecap="round"></path>
+          <path d="M6 13.5h26" stroke="#e2e8f0" stroke-width="1.5" stroke-linecap="round" opacity=".55"></path>
+        </svg>
+        <div class="auth-name">
+          HF Bored Piles
+          <span>Malaysia Sdn Bhd</span>
+        </div>
+      </div>
+
+      <button type="button" class="auth-back" id="r-cancel" hidden>
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M10 3 5 8l5 5"/>
+        </svg>
+        Back to sign in
+      </button>
+
+      <h1 id="r-title">Set a new password</h1>
+      <p class="sub" id="r-sub">Choose a new password for <strong id="r-email">your account</strong>.</p>
+
+      <form id="reset-form" novalidate>
+        <label for="pw1">New password</label>
+        <div class="auth-pw">
+          <input id="pw1" type="password" autocomplete="new-password" required
+                 aria-describedby="r-hint r-msg" />
+          <button type="button" class="auth-peek" id="pw-peek"
+                  aria-controls="pw1" aria-pressed="false">Show</button>
+        </div>
+        <div class="auth-note" id="r-hint" style="margin:6px 0 0;padding:0;border:0;">
+          <span>Use at least 8 characters.</span>
+        </div>
+
+        <label for="pw2">Confirm new password</label>
+        <input id="pw2" type="password" autocomplete="new-password" required
+               aria-describedby="r-msg" />
+
+        <button class="auth-submit" id="r-btn" type="submit">Save new password</button>
+        <div id="r-msg" class="auth-msg" role="status" aria-live="polite"></div>
+      </form>
+
+      <!-- shown instead of the form when the link is stale -->
+      <div id="r-dead" hidden>
+        <div class="banner banner-amber" style="margin-bottom:var(--sp-4);">
+          This reset link has expired or has already been used.
+        </div>
+        <p class="sub">Reset links are single-use and time-limited. Request a new one from the sign-in page.</p>
+        <button class="auth-submit" id="r-back" type="button">Back to sign in</button>
+      </div>
+
+      <p class="auth-note">
+        <svg viewBox="0 0 16 16" aria-hidden="true" fill="currentColor">
+          <path d="M8 1 3 3.2v4C3 10.5 5.1 13.6 8 15c2.9-1.4 5-4.5 5-7.8v-4L8 1Zm0 1.6 3.6 1.6v3C11.6 9.7 10.1 12 8 13.2 5.9 12 4.4 9.7 4.4 7.2v-3L8 2.6Z"/>
+        </svg>
+        <span>
+          After saving, you will be signed out and asked to sign in again with the
+          new password — that way you know it works.
+        </span>
+      </p>
+
+    </div>
+  </main>
+
+  <script src="vendor/supabase.js"></script>
+  <script src="config.js"></script>
+  <script src="dashboard-client.js"></script>
+
+  <script>
+  (function () {
+    "use strict";
+    var $ = function (id) { return document.getElementById(id); };
+    var form = $("reset-form"), pw1 = $("pw1"), pw2 = $("pw2");
+    var btn = $("r-btn"), msg = $("r-msg");
+    var busy = false;
+
+    // Dash.recoveryPending() reads the hash captured before supabase-js wiped
+    // it. Someone who simply typed this URL has no recovery token, and a stale
+    // link has no valid session — both get the "expired" card, not a form that
+    // fails on submit.
+    var fromLink = Dash.recoveryPending();
+
+    function show(text, kind) {
+      msg.textContent = text || "";
+      msg.className = "auth-msg" + (kind ? " " + kind : "");
+    }
+
+    function humanError(raw) {
+      var m = String(raw || "");
+      if (/auth session missing|session_not_found|jwt/i.test(m))
+        return "This reset link has expired or has already been used. Please request a new one.";
+      if (/should be at least|password.*short/i.test(m))
+        return "That password is too short. Use at least 8 characters.";
+      if (/different from the old password|same as the old/i.test(m))
+        return "Choose a password you have not used before on this account.";
+      if (/for security purposes|rate limit|too many/i.test(m))
+        return "Too many attempts. Please wait a minute and try again.";
+      return m || "Could not save the new password. Please try again.";
+    }
+
+    function dead(why) {
+      form.hidden = true;
+      $("r-dead").hidden = false;
+      $("r-title").textContent = "This link is no longer valid";
+      $("r-sub").hidden = true;
+      // Supabase's own words when it says why (e.g. "Email link is invalid or
+      // has expired"), otherwise the generic line already in the markup.
+      if (why) $("r-dead").querySelector(".banner").textContent = why;
+    }
+
+    // Leaving without setting a password. The link has ALREADY been spent — the
+    // token became a session the moment this page loaded — so they will need a
+    // fresh email. Worth one confirm rather than a silent dead end later.
+    // Signing out first is required: with the recovery session still live,
+    // login.html would bounce them straight into the dashboard.
+    async function leave(askFirst) {
+      if (askFirst && !window.confirm(
+            "You have not set a new password yet.\n\n" +
+            "This reset link has already been used, so you will need to request " +
+            "a new one. Go back to sign in?")) return;
+      await Dash.signOutQuiet();
+      window.location.replace("login.html");
+    }
+
+    $("r-cancel").addEventListener("click", function () { leave(true); });
+    $("r-back").addEventListener("click",   function () { leave(false); });
+
+    $("pw-peek").addEventListener("click", function () {
+      var showing = pw1.type === "text";
+      pw1.type = pw2.type = showing ? "password" : "text";
+      this.textContent = showing ? "Show" : "Hide";
+      this.setAttribute("aria-pressed", String(!showing));
+      pw1.focus();
+    });
+
+    // Supabase said outright that the link is dead — no need to ask further.
+    var deadLink = Dash.linkError();
+
+    // The reset link creates a session. No session and no recovery hash means
+    // there is nothing to act on.
+    Dash.getUser().then(function (user) {
+      if (deadLink) { dead(deadLink); return; }
+      if (!user) { dead(); return; }
+      if (!fromLink) {
+        // Signed in normally and browsed here by hand — harmless, but this is
+        // not the place to change a password, so send them back.
+        window.location.replace("index.html");
+        return;
+      }
+      $("r-email").textContent = user.email || "your account";
+      $("r-cancel").hidden = false;      // only offer "back" on a live form
+      pw1.focus();
+    }).catch(function () { dead(); });
+
+    form.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      if (busy) return;
+      show("", "");
+      pw1.removeAttribute("aria-invalid"); pw2.removeAttribute("aria-invalid");
+
+      if (pw1.value.length < 8) {
+        pw1.setAttribute("aria-invalid", "true"); pw1.focus();
+        show("Choose a password of at least 8 characters.", "bad"); return;
+      }
+      if (pw1.value !== pw2.value) {
+        pw2.setAttribute("aria-invalid", "true"); pw2.focus();
+        show("The two passwords do not match.", "bad"); return;
+      }
+
+      busy = true; btn.disabled = true; btn.textContent = "Saving…";
+      try {
+        var res = await Dash.updatePassword(pw1.value);
+        if (!res.ok) {
+          busy = false; btn.disabled = false; btn.textContent = "Save new password";
+          show(humanError(res.message), "bad");
+          return;
+        }
+        show("Password updated. Signing you out…", "good");
+        // Sign out on purpose: signing in again is what proves the new password
+        // works, rather than riding the session the email link created.
+        await Dash.signOutQuiet();
+        window.location.replace("login.html?reset=1");
+      } catch (err) {
+        busy = false; btn.disabled = false; btn.textContent = "Save new password";
+        show("Could not reach the server. Check your connection and try again.", "bad");
+      }
+    });
+  })();
+  </script>
+</body>
+</html>

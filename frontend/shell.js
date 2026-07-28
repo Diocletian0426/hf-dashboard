@@ -37,10 +37,27 @@
     { href: "tests.html",      label: "Tests"      }
   ];
 
-  // page -> designations allowed. Unlisted page = everyone signed in.
+  // page -> the permission needed to open it.
+  //
+  // DEFAULT-CLOSED. Every page must be listed. A page that is not listed is
+  // refused, which is the opposite of how this used to work: unlisted meant
+  // "visible to everyone", so each new page was exposed to every signed-in
+  // account until somebody remembered to come back here.
+  //
+  // The database re-checks every read and write regardless (migrations
+  // 0059-0066). This map decides what is worth showing, not what is allowed.
   var PAGE_ACCESS = {
-    "leave.html": ["management", "office"],
-    "claims.html": ["management", "office"]   // MONEY page — DB re-checks every call too
+    "index.html":      "overview.view",
+    "projects.html":   "projects.view",
+    "project.html":    "projects.view",
+    "piles.html":      "piles.view",
+    "issues.html":     "issues.view",
+    "machines.html":   "machines.view",
+    "manpower.html":   "manpower.view",
+    "attendance.html": "attendance.view",
+    "tests.html":      "tests.view",
+    "claims.html":     "claims.view",     // MONEY — the DB re-checks every call too
+    "leave.html":      "leave.view"
   };
 
   // project-scoped pages: they get the context bar and light up "Projects"
@@ -50,14 +67,26 @@
     "claims.html":  "Claims"
   };
 
-  // tiny local copy (shell must not depend on ui.js — see header)
+  // tiny local copy (shell must not depend on ui.js — see header).
+  // Covers the legacy staff designations AND the access profiles from migration
+  // 0059, because either can arrive here depending on whether the database work
+  // has been applied yet. Anything unrecognised is sentence-cased rather than
+  // shown as a raw code.
   var DESIG_LABELS = {
+    // legacy staff.designation values
     management: "Management", office: "Office",
-    site_supervisor: "Site Supervisor", site: "Site Crew"
+    site_supervisor: "Site Supervisor", site: "Site Crew",
+    // access profiles (0059)
+    super_admin: "Super Administrator", admin: "Administrator",
+    qs: "Quantity Surveyor", project_manager: "Project Manager",
+    supervisor: "Site Supervisor", viewer: "Viewer (read only)",
+    external_viewer: "External — assigned sites only"
   };
   function desigLabel(d) {
     if (!d) return "";
-    return DESIG_LABELS[d] || String(d).replace(/_/g, " ");
+    if (DESIG_LABELS[d]) return DESIG_LABELS[d];
+    var s = String(d).replace(/_/g, " ");
+    return s.charAt(0).toUpperCase() + s.slice(1);
   }
 
   function escText(s) {
@@ -70,11 +99,26 @@
     return p && p.length ? p : "index.html";
   }
 
-  function allowed(page, profile) {
-    var list = PAGE_ACCESS[page];
-    if (!list) return true;                       // unlisted = everyone
-    if (!profile) return false;                   // unlinked account = lowest tier
-    return list.indexOf(profile.designation) !== -1;
+  // `acc` is the verdict from Dash.getMyAccess(), not a bare profile.
+  function allowed(page, acc) {
+    // no account, or we could not find out: show nothing. An account with no
+    // confirmed permissions must see no company information.
+    if (!acc || !acc.ok) return false;
+
+    var a = acc.access;
+    if (a.status !== "active") return false;
+
+    // Before migration 0062 there is no permission list to consult, so
+    // reproduce the OLD rule exactly. That way shipping this frontend ahead of
+    // the database work changes nothing anyone can see.
+    if (a.legacy) {
+      if (page === "claims.html" || page === "leave.html") return !!a.legacy_is_office;
+      return true;
+    }
+
+    var perm = PAGE_ACCESS[page];
+    if (!perm) return false;                      // DEFAULT-CLOSED: unlisted = refused
+    return Dash.can(perm);
   }
 
   function initialsOf(profile, user) {
@@ -88,14 +132,15 @@
 
   /* ---- the project context bar (project-scoped pages only) ---- */
 
-  function buildCtxBar(page, profile) {
+  function buildCtxBar(page, acc) {
     var projectId = new URLSearchParams(window.location.search).get("project") || "";
 
     var tabs = "";
     if (projectId) {
       tabs = Object.keys(PROJECT_PAGES).map(function (p) {
-        if (p === "claims.html" &&
-            (!profile || ["management", "office"].indexOf(profile.designation) === -1)) return "";
+        // was a second, hand-maintained copy of the money rule; now the same
+        // one check every other page uses
+        if (!allowed(p, acc)) return "";
         var active = (p === page) ? ' class="active"' : "";
         return '<a href="' + p + "?project=" + encodeURIComponent(projectId) + '"' + active + ">" +
                PROJECT_PAGES[p] + "</a>";
@@ -147,16 +192,49 @@
   /* ---- boot ---- */
 
   async function boot() {
+    // A password-reset link is a real sign-in, so without this the person lands
+    // straight in the dashboard and never changes their password. It is checked
+    // here and not only on login.html because Supabase falls back to the Site
+    // URL — the site root, i.e. index.html — whenever the reset link's redirect
+    // is not on its allow-list.
+    if (Dash.recoveryPending()) {
+      window.location.replace("reset.html");
+      return;
+    }
+
     var user = await Dash.requireLogin();
     if (!user) return;                            // redirecting to login.html
 
-    var profile = await Dash.getMyProfile();
+    var acc = await Dash.getMyAccess();
+
+    // An account that exists but has not been switched on yet gets the holding
+    // page, not a stripped-down dashboard.
+    if (acc.ok && acc.access.status !== "active") {
+      window.location.replace("pending.html");
+      return;
+    }
+
+    // Could not find out. Say so, and DO NOT quietly demote them — the old code
+    // treated a network failure as "you have no permissions", which told a
+    // director they were not linked to a staff record and emptied their menu.
+    if (!acc.ok && acc.reason === "error") {
+      var main0 = document.getElementById("main");
+      if (main0) {
+        main0.innerHTML =
+          '<div class="banner banner-red">Could not check your access: ' +
+          escText(acc.message || "the server did not respond") +
+          '. Please reload. If this keeps happening, tell the office.</div>' + main0.innerHTML;
+      }
+      return;
+    }
+
+    var profile = acc.ok ? acc.access : null;
     var page = currentPage();
 
     var nav = document.getElementById("nav");
     if (nav) {
       var links = NAV_LINKS
-        .filter(function (l) { return allowed(l.href, profile); })
+        .filter(function (l) { return allowed(l.href, acc); })
         .map(function (l) {
           var active = (l.href === page || PROJECT_PAGES[page] !== undefined && l.href === "projects.html");
           return '<a href="' + l.href + '"' + (active ? ' class="active"' : "") + ">" + l.label + "</a>";
@@ -164,7 +242,14 @@
         .join("");
 
       var fullName = profile ? profile.full_name : (user.email || "Signed in");
+      // What they ARE (job title) and, once 0062 is applied, what they MAY DO
+      // (access profile) — the two things this redesign separates. Before that
+      // the profile code is just the old designation, so only one line shows.
       var desig = profile ? desigLabel(profile.designation) : "Not linked to a staff record";
+      var profileName = (profile && !profile.legacy)
+        ? (profile.access_profile_name || desigLabel(profile.access_profile_code))
+        : "";
+      if (profileName && profileName !== desig) desig = desig ? desig + " · " + profileName : profileName;
 
       nav.innerHTML =
         '<div class="topbar">' +
@@ -189,10 +274,13 @@
             "</div>" +
           "</details>" +
         "</div>" +
-        (PROJECT_PAGES[page] !== undefined ? buildCtxBar(page, profile) : "") +
+        (PROJECT_PAGES[page] !== undefined ? buildCtxBar(page, acc) : "") +
+        // Only ever shown when the server actually said "no account for you" —
+        // never because a request failed. See the error branch above.
         (profile ? "" :
-          '<div class="banner banner-amber">This login is not linked to a staff record yet — ' +
-          "ask the office to link it (page access stays limited until then).</div>");
+          '<div class="banner banner-amber">This login is not set up yet — ' +
+          "ask the office to finish setting up your account. You will not see " +
+          "any company information until they do.</div>");
 
       // sign out (one button in the phone menu, one in the user menu)
       var outs = nav.querySelectorAll(".signout-btn");
@@ -219,7 +307,9 @@
     }
 
     // ---- gate the page body ----
-    if (!allowed(page, profile)) {
+    // `acc`, not `profile`: allowed() takes the verdict from getMyAccess(), and
+    // a bare access object has no .ok, so passing it refuses everything.
+    if (!allowed(page, acc)) {
       var main = document.getElementById("main");
       if (main) {
         main.innerHTML =

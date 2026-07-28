@@ -81,6 +81,14 @@
 
 * { box-sizing: border-box; }
 
+/* The `hidden` attribute must actually hide.
+   Browsers implement it as [hidden] { display: none } in their own stylesheet,
+   but ANY author rule that sets `display` beats that — author styles outrank
+   the browser's. So `.auth-tabs { display: grid }` silently cancelled
+   `<div class="auth-tabs" hidden>`, and el.hidden = true did nothing.
+   One global rule fixes it for every current and future use. */
+[hidden] { display: none !important; }
+
 html { -webkit-text-size-adjust: 100%; }
 
 body {
@@ -641,30 +649,136 @@ td.drift { color: var(--warn-ink); font-weight: 600; white-space: nowrap; }
   font-size: 12.5px; background: var(--surface); max-width: 280px;  /* fits "CODE — NAME" */
 }
 
-/* ---- login page ---- */
+/* ---- login / auth page ----------------------------------------------------
+   Legacy class names (.login-wrap, .login-card, .login-error) are kept so
+   nothing referencing them breaks; the rest is new. Uses only :root tokens.
+--------------------------------------------------------------------------- */
 .login-wrap {
   min-height: 100vh; display: flex; align-items: center; justify-content: center;
   padding: var(--sp-4);
+  background:
+    radial-gradient(900px 420px at 50% -8%, var(--brand-soft) 0%, rgba(255,255,255,0) 62%),
+    var(--bg);
 }
 .login-card {
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg);
-  padding: 28px; width: 100%; max-width: 360px; box-shadow: var(--shadow-2);
+  padding: 28px; width: 100%; max-width: 420px; box-shadow: var(--shadow-2);
 }
-.login-card h1 { margin: 0 0 4px; font-size: var(--fs-xl); }
-.login-card .sub { color: var(--ink-2); font-size: var(--fs-sm); margin: 0 0 18px; }
+
+/* brand block */
+.auth-brand { display: flex; align-items: center; gap: 10px; margin-bottom: var(--sp-3); }
+.auth-mark { flex: 0 0 auto; width: 38px; height: 38px; border-radius: 9px; display: block; }
+.auth-name { font-size: var(--fs-lg); font-weight: 700; line-height: 1.15; letter-spacing: -0.01em; }
+.auth-name span { display: block; font-size: var(--fs-xs); font-weight: 500; color: var(--ink-3);
+  letter-spacing: 0.06em; text-transform: uppercase; margin-top: 1px; }
+.login-card h1 { margin: 0 0 4px; font-size: var(--fs-xl); letter-spacing: -0.01em; }
+.login-card .sub { color: var(--ink-2); font-size: var(--fs-sm); margin: 0 0 var(--sp-4); }
+
+/* "← Back to sign in". Needed because the forgot-password and set-a-new-password
+   views hide the tabs AND the Forgot link, leaving no way back but a reload. */
+.auth-back {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: none; border: 0; padding: 4px 6px 4px 0; margin: 0 0 var(--sp-2) -2px;
+  font: inherit; font-size: var(--fs-sm); font-weight: 500;
+  color: var(--ink-2); cursor: pointer; border-radius: var(--r-sm);
+  min-height: var(--tap);
+}
+.auth-back:hover { color: var(--ink); }
+.auth-back svg { width: 15px; height: 15px; flex: 0 0 auto; }
+
+/* Sign in | Create account */
+.auth-tabs {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px;
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-md);
+  margin-bottom: var(--sp-4);
+}
+.auth-tab {
+  appearance: none; border: 0; background: transparent; cursor: pointer;
+  font: inherit; font-size: var(--fs-sm); font-weight: 600; color: var(--ink-2);
+  padding: 8px 10px; border-radius: var(--r-sm); min-height: var(--tap);
+}
+.auth-tab[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-1); }
+.auth-tab:hover:not([aria-selected="true"]) { color: var(--ink); }
+
+/* social buttons — rendered ONLY for providers actually configured */
+.auth-social { display: grid; gap: var(--sp-2); }
+.auth-social button {
+  width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px;
+  min-height: var(--tap); padding: 10px 12px; font-size: var(--fs-md); font-weight: 600;
+  background: var(--surface); color: var(--ink);
+  border: 1px solid var(--line-strong); border-radius: var(--r-md); cursor: pointer;
+}
+.auth-social button:hover { background: var(--surface-2); }
+.auth-social button:disabled { opacity: 0.6; cursor: default; }
+.auth-social svg { width: 18px; height: 18px; flex: 0 0 auto; }
+
+.auth-divider {
+  display: flex; align-items: center; gap: var(--sp-3);
+  color: var(--ink-3); font-size: var(--fs-xs); margin: var(--sp-4) 0;
+}
+.auth-divider::before, .auth-divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+
+/* fields */
 .login-card label { display: block; font-size: var(--fs-sm); color: var(--ink-2); margin: 10px 0 4px; }
-.login-card input {
-  width: 100%; font-size: 15px; padding: 10px 12px;
+.login-card input[type="email"],
+.login-card input[type="password"],
+.login-card input[type="text"] {
+  width: 100%; font-size: 15px; padding: 10px 12px; min-height: var(--tap);
   border: 1px solid var(--line-strong); border-radius: var(--r-md);
   background: var(--surface); color: var(--ink);
 }
-.login-card button {
+.login-card input:focus-visible, .auth-tab:focus-visible,
+.login-card button:focus-visible, .auth-link:focus-visible {
+  outline: 2px solid var(--brand); outline-offset: 2px;
+}
+.login-card input[aria-invalid="true"] { border-color: var(--danger); }
+
+.auth-pw { position: relative; }
+.auth-pw input { padding-right: 74px; }
+.auth-pw .auth-peek {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  width: auto; margin: 0; padding: 6px 8px; min-height: 32px;
+  background: transparent; color: var(--ink-2); border: 0; border-radius: var(--r-sm);
+  font-size: var(--fs-xs); font-weight: 600; cursor: pointer;
+}
+.auth-pw .auth-peek:hover { background: var(--surface-2); color: var(--ink); }
+
+.auth-row {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3);
+  margin-top: var(--sp-3); font-size: var(--fs-sm);
+}
+.auth-check { display: flex; align-items: center; gap: 7px; color: var(--ink-2); cursor: pointer; }
+.auth-check input { width: 16px; height: 16px; min-height: 0; accent-color: var(--brand); }
+.auth-link {
+  background: none; border: 0; padding: 0; cursor: pointer;
+  font: inherit; font-size: var(--fs-sm); color: var(--brand-ink); text-decoration: underline;
+}
+
+.login-card button.auth-submit {
   width: 100%; margin-top: var(--sp-4); padding: 11px; font-size: 15px; font-weight: 600;
+  min-height: var(--tap);
   background: var(--nav-bg); color: #fff; border: 0; border-radius: var(--r-md); cursor: pointer;
 }
-.login-card button:hover { background: #1e293b; }
-.login-card button:disabled { opacity: 0.6; cursor: default; }
+.login-card button.auth-submit:hover { background: var(--nav-hover); }
+.login-card button.auth-submit:disabled { opacity: 0.6; cursor: default; }
+
+/* messages */
 .login-error { color: var(--danger-ink); font-size: var(--fs-sm); margin-top: var(--sp-3); min-height: 18px; }
+.auth-msg { font-size: var(--fs-sm); margin-top: var(--sp-3); }
+.auth-msg.bad  { color: var(--danger-ink); }
+.auth-msg.good { color: var(--ok-ink); }
+
+.auth-note {
+  display: flex; gap: 8px; align-items: flex-start;
+  margin-top: var(--sp-5); padding-top: var(--sp-4); border-top: 1px solid var(--line);
+  color: var(--ink-3); font-size: var(--fs-xs); line-height: 1.5;
+}
+.auth-note svg { width: 14px; height: 14px; flex: 0 0 auto; margin-top: 2px; }
+
+@media (max-width: 640px) {
+  .login-wrap { align-items: flex-start; padding: var(--sp-3); }
+  .login-card { padding: 22px 18px; box-shadow: none; margin-top: var(--sp-4); }
+}
 
 /* ============================== 6. STATES ================================= */
 

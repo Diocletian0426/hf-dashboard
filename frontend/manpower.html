@@ -403,16 +403,12 @@
       var coOpts = COMPANIES.map(function (c) {
         return '<option value="' + c + '">' + c + "</option>";
       }).join("");
-      var desOpts = DESIGNATIONS.map(function (x) {
-        return '<option value="' + x + '">' + UI.label(x) + "</option>";
-      }).join("");
       return '<div class="claim-form">' +
         "<strong>New worker</strong>" +
         '<label>full name <input type="text" id="aw-name" size="24"></label>' +
         '<label>employee code <input type="text" id="aw-code" size="9" placeholder="optional"></label>' +
         '<label>role <select id="aw-role">' + roleOpts + "</select></label>" +
         '<label>company <select id="aw-company">' + coOpts + "</select></label>" +
-        '<label>designation <select id="aw-designation">' + desOpts + "</select></label>" +
         '<label>site <select id="aw-site"><option value="">— unassigned —</option>' +
           siteOptions(false) + "</select></label>" +
         '<label>date joined <input type="date" id="aw-joined" title="drives the annual-leave entitlement tier"></label>' +
@@ -428,7 +424,10 @@
     // Blank field = unchanged (partial-update semantics); clearing a value
     // stays a session job. whatsapp_name shown read-only: it is the bot's
     // sender-match key and is deliberately not editable here.
-    var DESIGNATIONS = ["site", "site_supervisor", "office", "management"];
+    // staff.designation was retired in migration 0069. "role" already says what
+    // somebody does on site, and the job title of anyone who signs in now lives
+    // on their dashboard account, where it is set by an administrator. Nothing
+    // here should be able to change what a person may reach.
     function editWorkerForm() {
       var d = MP.editing.d;
       var roleOpts = ROLES.map(function (r) {
@@ -438,18 +437,12 @@
       var coOpts = COMPANIES.map(function (c) {
         return '<option value="' + c + '"' + (c === d.company_code ? " selected" : "") + ">" + c + "</option>";
       }).join("");
-      var desOpts = (d.designation ? "" : '<option value="" selected>(unchanged)</option>') +
-        DESIGNATIONS.map(function (x) {
-          return '<option value="' + x + '"' + (x === d.designation ? " selected" : "") + ">" +
-                 UI.label(x) + "</option>";
-        }).join("");
       return '<div class="claim-form">' +
         "<strong>Edit worker</strong>" +
         '<label>full name <input type="text" id="ew-name" size="24" value="' + esc(d.full_name) + '"></label>' +
         '<label>employee code <input type="text" id="ew-code" size="9" value="' + esc(d.employee_code || "") + '"></label>' +
         '<label>role <select id="ew-role">' + roleOpts + "</select></label>" +
         '<label>company <select id="ew-company">' + coOpts + "</select></label>" +
-        '<label>designation <select id="ew-designation">' + desOpts + "</select></label>" +
         '<label>date joined <input type="date" id="ew-joined" value="' + esc(d.date_joined || "") + '"></label>' +
         '<label>contact <input type="text" id="ew-contact" size="12" value="' + esc(d.contact_number || "") + '"></label>' +
         '<label>origin <input type="text" id="ew-origin" size="12" list="country-list" value="' + esc(d.country_origin || "") + '"></label>' +
@@ -508,7 +501,6 @@
       var head =
         '<div class="pc-head"><strong>' + escHtml(r.full_name) + "</strong> " +
         escHtml(UI.label(r.role)) + " · " + escHtml(r.company) +
-        (d.designation ? ' <span class="badge badge-gray">' + escHtml(UI.label(d.designation)) + "</span>" : "") +
         (chips.length ? ' <span class="pc-chips">' + chips.join(" · ") + "</span>" : "") + "</div>";
 
       var where =
@@ -792,7 +784,6 @@
         role: document.getElementById("aw-role").value,
         companyCode: document.getElementById("aw-company").value,
         employeeCode: document.getElementById("aw-code").value || null,
-        designation: document.getElementById("aw-designation").value,
         projectId: document.getElementById("aw-site").value || null,
         dateJoined: document.getElementById("aw-joined").value || null,
         contactNumber: document.getElementById("aw-contact").value || null,
@@ -828,7 +819,6 @@
         role: document.getElementById("ew-role").value,
         companyCode: document.getElementById("ew-company").value,
         employeeCode: document.getElementById("ew-code").value || null,
-        designation: document.getElementById("ew-designation").value || null,
         dateJoined: document.getElementById("ew-joined").value || null,
         contactNumber: document.getElementById("ew-contact").value || null,
         countryOrigin: document.getElementById("ew-origin").value || null
@@ -860,8 +850,7 @@
       document.getElementById("groups").innerHTML = UI.empty("Loading the roster…");
       try {
         var profile = await Dash.getMyProfile();
-        MP.canMove = !!(profile &&
-          (profile.designation === "management" || profile.designation === "office"));
+        MP.canMove = Dash.can("manpower.edit");
 
         var res = await Promise.all([
           Dash.getManpowerBySite(),

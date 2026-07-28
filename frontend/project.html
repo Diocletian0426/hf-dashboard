@@ -753,9 +753,8 @@
     }
 
     async function loadClaims(projectId, p) {
-      var profile = await Dash.getMyProfile();
-      if (!profile ||
-          (profile.designation !== "management" && profile.designation !== "office")) return;
+      await Dash.getMyAccess();                 // make sure permissions are loaded
+      if (!Dash.can("claims.view")) return;     // money section stays absent, not errored
       CL.projectId = projectId; CL.p = p;
       try { await fetchClaims(); } catch (e) { return; }   // DB said no — section stays absent
       renderClaims();

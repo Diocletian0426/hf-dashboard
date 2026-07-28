@@ -12,6 +12,17 @@
    await Dash.signOut()               -> clears the session, goes to login.html
    await Dash.getUser()               -> the signed-in user or null (no network)
    await Dash.requireLogin()          -> redirects to login.html when signed out
+   await Dash.getMyAccess()           -> { ok:true, access:{ full_name, designation,
+                                         role, status, access_profile_code,
+                                         access_profile_name, scope_all_projects,
+                                         permissions[], project_ids[] } }
+                                      or { ok:false, reason:'no_account' | 'error' }.
+                                      Falls back to the old profile call, in
+                                      "legacy" mode, until migration 0062 is
+                                      applied.
+   Dash.can('piles.edit')             -> boolean. Buttons only — the database
+                                         refuses the write regardless.
+
    await Dash.getMyProfile()          -> { full_name, designation, role } for the
                                          signed-in person's staff record, or null
                                          if the account isn't linked yet.
@@ -318,9 +329,48 @@
   "use strict";
 
   var cfg = window.DASH_CONFIG;
+
+  // A password-reset link arrives as  ...#access_token=…&type=recovery  and is a
+  // REAL SIGN-IN: supabase-js turns it into an ordinary session that carries no
+  // marker saying "this person only came here to change their password". So the
+  // only trustworthy signal is the URL itself — and the library erases it.
+  //
+  // Timing (checked against the vendored build, supabase-js 2.108.2):
+  //   * createClient only STARTS the async initialise, so the hash is still
+  //     intact on the line below;
+  //   * initialise then fetches /auth/v1/user and sets location.hash = "",
+  //     so the hash is gone after the first await anywhere in the app.
+  // Hence: read it here, synchronously, before createClient. Every page loads
+  // this file before its own script, so one capture covers the whole app.
+  //
+  // Supabase's PASSWORD_RECOVERY event is deliberately NOT used: it fires once
+  // from a setTimeout and is never replayed, so any code that awaits a session
+  // first misses it permanently.
+  var _initialHash = (window.location.hash || "");
+
   var sb  = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_KEY);
   // supabase-js keeps the login session in localStorage and refreshes it
   // automatically — nothing to manage here.
+
+  // Did this page load from a password-reset link?
+  function recoveryPending() {
+    return /(^|[#&])type=recovery(&|$)/.test(_initialHash);
+  }
+
+  // Supabase reports a dead link by redirecting with an error in the hash and
+  // no token at all, e.g.
+  //   #error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired
+  // Returns that description in readable form, or null when the link was fine.
+  function linkError() {
+    if (!/(^|[#&])error/.test(_initialHash)) return null;
+    var params = new URLSearchParams(_initialHash.replace(/^#/, ""));
+    // error_description is prose; error is a code like "server_error", so
+    // underscores become spaces too when we have to fall back to it.
+    var desc = params.get("error_description") || params.get("error") || "";
+    desc = desc.replace(/\+/g, " ").replace(/_/g, " ").trim();
+    if (!desc) return "That link is no longer valid.";
+    return desc.charAt(0).toUpperCase() + desc.slice(1) + ".";
+  }
 
   // ---- auth ----------------------------------------------------------------
   async function signIn(email, password) {
@@ -334,8 +384,19 @@
     window.location.replace("login.html");
   }
 
+  // Sign out WITHOUT choosing where to go next — the caller redirects. Used by
+  // reset.html, which needs to land on login.html?reset=1 to show its
+  // confirmation. Never throws: if the sign-out call fails the session is
+  // stale anyway, and the caller still wants to move on.
+  async function signOutQuiet() {
+    try { await sb.auth.signOut(); } catch (e) { /* already gone */ }
+  }
+
   async function getUser() {
-    var res = await sb.auth.getSession();     // reads local session, no network
+    // Usually a local read. NOT always free: on a page opened from a magic /
+    // recovery link this awaits the library's initialise, which calls
+    // /auth/v1/user before the session exists.
+    var res = await sb.auth.getSession();
     return (res.data && res.data.session) ? res.data.session.user : null;
   }
 
@@ -345,21 +406,193 @@
     return user;
   }
 
-  var _profile;   // cached for the lifetime of the page
-  async function getMyProfile() {
-    if (_profile !== undefined) return _profile;
+  // Create an account. This does NOT grant any access: the new auth user has no
+  // row in user_accounts, so every database gate refuses them until an
+  // administrator approves and assigns an access profile. See migration 0059.
+  async function signUp(email, password) {
+    var res = await sb.auth.signUp({
+      email: email,
+      password: password,
+      options: { emailRedirectTo: window.location.origin + basePath() + "pending.html" }
+    });
+    if (res.error) return { ok: false, message: res.error.message };
+    // Supabase returns a user with no session when email confirmation is on
+    var needsConfirm = !(res.data && res.data.session);
+    return { ok: true, needsConfirm: needsConfirm };
+  }
+
+  // Hand off to Google / Microsoft. The provider must be enabled in the Supabase
+  // dashboard first — see AUTH_PROVIDERS in config.js. Supabase validates the
+  // redirect against its own allow-list, which is what stops an open redirect.
+  async function signInWithProvider(provider) {
+    var res = await sb.auth.signInWithOAuth({
+      provider: provider,
+      options: { redirectTo: window.location.origin + basePath() + "index.html" }
+    });
+    if (res.error) return { ok: false, message: res.error.message };
+    return { ok: true };            // the browser is navigating away
+  }
+
+  // Sends the "set a new password" email. It must land on reset.html, NOT on
+  // login.html — login.html bounces anyone holding a session to the dashboard,
+  // and a recovery link is a session, so pointing it there means the password
+  // never actually gets changed.
+  // NOTE this URL must also be on Supabase's Redirect URLs allow-list, or
+  // Supabase ignores it and falls back to the Site URL.
+  async function resetPassword(email) {
+    var res = await sb.auth.resetPasswordForEmail(email, {
+      redirectTo: window.location.origin + basePath() + "reset.html"
+    });
+    if (res.error) return { ok: false, message: res.error.message };
+    return { ok: true };
+  }
+
+  // Used by reset.html. Needs the session the recovery link just created.
+  async function updatePassword(newPassword) {
+    var res = await sb.auth.updateUser({ password: newPassword });
+    if (res.error) return { ok: false, message: res.error.message };
+    return { ok: true };
+  }
+
+  // the directory the app is served from — "/" locally, "/hf-dashboard/" on Pages
+  function basePath() {
+    var p = window.location.pathname;
+    return p.slice(0, p.lastIndexOf("/") + 1);
+  }
+
+  // ---- who am I, and what may I do ------------------------------------------
+  //
+  // ONE call answers both. getMyAccess() returns a verdict, never a bare null,
+  // because "the server said you have no account" and "the network dropped" are
+  // completely different situations that used to look identical:
+  //
+  //     { ok: true,  access: {...} }
+  //     { ok: false, reason: "no_account" }   -> signed in, not set up yet
+  //     { ok: false, reason: "error", message } -> could not tell; assume nothing
+  //
+  // The old code collapsed all three into null, so a moment of bad wifi told a
+  // director they were "not linked to a staff record" and stripped their menu.
+  // Only SUCCESS is cached — an error must not stick for the life of the page.
+  var _access;
+  async function getMyAccess() {
+    if (_access !== undefined) return _access;
+
+    var res;
     try {
-      var res = await sb.rpc("get_my_profile");
-      _profile = (res.error || !res.data || res.data.length === 0) ? null : res.data[0];
-    } catch (e) { _profile = null; }
-    return _profile;
+      res = await sb.rpc("get_my_access");
+    } catch (e) {
+      return { ok: false, reason: "error", message: String(e && e.message || e) };
+    }
+
+    if (res.error) {
+      // get_my_access() arrives with migration 0062. Until that is applied the
+      // function does not exist, so fall back to the old profile call and run
+      // in legacy mode. This is what lets the frontend ship before or after the
+      // database work without a flag day.
+      if (isMissingFunction(res.error)) return await legacyAccess();
+      return { ok: false, reason: "error", message: res.error.message };
+    }
+
+    if (!res.data || res.data.length === 0) {
+      _access = { ok: false, reason: "no_account" };
+      return _access;
+    }
+
+    var a = res.data[0];
+    a.permissions = a.permissions || [];
+    a.project_ids = a.project_ids || [];
+    a.legacy = false;
+    _access = { ok: true, access: a };
+    return _access;
+  }
+
+  function isMissingFunction(err) {
+    // PostgREST says PGRST202 for "no function matches"; older/edge cases show
+    // up as a 404 or the phrase itself.
+    var code = (err && err.code) || "";
+    var msg  = String((err && err.message) || "");
+    return code === "PGRST202" || code === "404" || /could not find the function/i.test(msg);
+  }
+
+  // Pre-0062 behaviour, expressed through the new shape so callers need no
+  // special case. Permissions are unknown, so can() falls back to the old
+  // two-tier rule (see below).
+  async function legacyAccess() {
+    var res;
+    try {
+      res = await sb.rpc("get_my_profile");
+    } catch (e) {
+      return { ok: false, reason: "error", message: String(e && e.message || e) };
+    }
+    if (res.error) return { ok: false, reason: "error", message: res.error.message };
+    if (!res.data || res.data.length === 0) {
+      _access = { ok: false, reason: "no_account" };
+      return _access;
+    }
+    var p = res.data[0];
+    _access = { ok: true, access: {
+      full_name: p.full_name,
+      designation: p.designation,
+      role: p.role,
+      status: "active",
+      access_profile_code: p.designation,
+      access_profile_name: null,
+      scope_all_projects: true,
+      permissions: [],
+      project_ids: [],
+      legacy: true,
+      legacy_is_office: (p.designation === "management" || p.designation === "office")
+    }};
+    return _access;
+  }
+
+  // May the signed-in person do this? e.g. Dash.can("piles.edit")
+  //
+  // Buttons only. The database refuses the write regardless — see the gates in
+  // migrations 0059-0066. Hiding a control the person cannot use stops the
+  // interface lying to them; it is not what keeps them out.
+  //
+  // Call getMyAccess() once before using this (shell.js does it on boot).
+  function can(permission) {
+    if (!_access || !_access.ok) return false;
+    var a = _access.access;
+    if (a.status !== "active") return false;
+    // before 0062 there is no permission list, so behave exactly as the old
+    // dashboard did rather than guessing
+    if (a.legacy) return !!a.legacy_is_office;
+    return a.permissions.indexOf(permission) !== -1;
+  }
+
+  // Kept for the pages that already use it, and for shell.js's fallback path.
+  // Same three-column shape as before: { full_name, designation, role } or null.
+  async function getMyProfile() {
+    var r = await getMyAccess();
+    if (!r.ok) return null;
+    return {
+      full_name: r.access.full_name,
+      designation: r.access.designation,
+      role: r.access.role
+    };
   }
 
   // ---- tiny query helper: unwrap data or throw the error --------------------
   async function q(builder) {
     var res = await builder;
-    if (res.error) throw res.error;
+    if (res.error) {
+      // An expired or revoked login used to surface as a red "could not load"
+      // banner on every panel. Send them back to sign in instead.
+      if (isAuthExpired(res.error)) { await signOutQuiet(); window.location.replace("login.html"); }
+      throw res.error;
+    }
     return res.data;
+  }
+
+  function isAuthExpired(err) {
+    var code   = (err && err.code) || "";
+    var status = (err && err.status) || 0;
+    var msg    = String((err && err.message) || "");
+    return status === 401 || code === "PGRST301" ||
+           /jwt expired|invalid jwt|jwt.*malformed/i.test(msg);
   }
 
   // ---- data ------------------------------------------------------------------
@@ -926,10 +1159,19 @@
   // ---- the public commands the UI uses ---------------------------------------
   window.Dash = {
     signIn: signIn,
+    signUp: signUp,
+    signInWithProvider: signInWithProvider,
+    resetPassword: resetPassword,
+    updatePassword: updatePassword,
+    recoveryPending: recoveryPending,
+    linkError: linkError,
+    signOutQuiet: signOutQuiet,
     signOut: signOut,
     getUser: getUser,
     requireLogin: requireLogin,
     getMyProfile: getMyProfile,
+    getMyAccess: getMyAccess,
+    can: can,
 
     getOverview: getOverview,
     getProjectPulse: getProjectPulse,

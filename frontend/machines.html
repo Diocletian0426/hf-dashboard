@@ -1132,8 +1132,7 @@
         ]);
         var machines = results[0];
         var profile = results[4];
-        MOVE.can = !!(profile &&
-          (profile.designation === "management" || profile.designation === "office"));
+        MOVE.can = Dash.can("machines.edit");
         MOVE.projects = results[5];
         MOVE.projects.forEach(function (p) { DIR_BY_CODE[p.project_code] = p; });
         results[6].forEach(function (u) { UTIL[u.machine_id] = u; });
