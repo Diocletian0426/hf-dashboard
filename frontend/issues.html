@@ -327,8 +327,7 @@
         }
 
         var profile = await Dash.getMyProfile();
-        IS.canAct = !!(profile &&
-          (profile.designation === "management" || profile.designation === "office"));
+        IS.canAct = Dash.can("issues.edit");
 
         var res = await Promise.all([
           Dash.getIssues("all"),

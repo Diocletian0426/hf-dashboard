@@ -1774,8 +1774,7 @@
 
         // test operations context (0052)
         var profile = results[4];
-        TOPS.can = !!(profile &&
-          (profile.designation === "management" || profile.designation === "office"));
+        TOPS.can = Dash.can("piles.edit");
         TOPS.types = results[5];
         TOPS.types.forEach(function (t) { TOPS.byCode[t.test_code] = t; });
         TOPS.specs = results[6].filter(function (s) { return s.project_id === projectId; });

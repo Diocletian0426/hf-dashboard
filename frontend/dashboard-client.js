@@ -12,6 +12,17 @@
    await Dash.signOut()               -> clears the session, goes to login.html
    await Dash.getUser()               -> the signed-in user or null (no network)
    await Dash.requireLogin()          -> redirects to login.html when signed out
+   await Dash.getMyAccess()           -> { ok:true, access:{ full_name, designation,
+                                         role, status, access_profile_code,
+                                         access_profile_name, scope_all_projects,
+                                         permissions[], project_ids[] } }
+                                      or { ok:false, reason:'no_account' | 'error' }.
+                                      Falls back to the old profile call, in
+                                      "legacy" mode, until migration 0062 is
+                                      applied.
+   Dash.can('piles.edit')             -> boolean. Buttons only — the database
+                                         refuses the write regardless.
+
    await Dash.getMyProfile()          -> { full_name, designation, role } for the
                                          signed-in person's staff record, or null
                                          if the account isn't linked yet.
@@ -449,21 +460,139 @@
     return p.slice(0, p.lastIndexOf("/") + 1);
   }
 
-  var _profile;   // cached for the lifetime of the page
-  async function getMyProfile() {
-    if (_profile !== undefined) return _profile;
+  // ---- who am I, and what may I do ------------------------------------------
+  //
+  // ONE call answers both. getMyAccess() returns a verdict, never a bare null,
+  // because "the server said you have no account" and "the network dropped" are
+  // completely different situations that used to look identical:
+  //
+  //     { ok: true,  access: {...} }
+  //     { ok: false, reason: "no_account" }   -> signed in, not set up yet
+  //     { ok: false, reason: "error", message } -> could not tell; assume nothing
+  //
+  // The old code collapsed all three into null, so a moment of bad wifi told a
+  // director they were "not linked to a staff record" and stripped their menu.
+  // Only SUCCESS is cached — an error must not stick for the life of the page.
+  var _access;
+  async function getMyAccess() {
+    if (_access !== undefined) return _access;
+
+    var res;
     try {
-      var res = await sb.rpc("get_my_profile");
-      _profile = (res.error || !res.data || res.data.length === 0) ? null : res.data[0];
-    } catch (e) { _profile = null; }
-    return _profile;
+      res = await sb.rpc("get_my_access");
+    } catch (e) {
+      return { ok: false, reason: "error", message: String(e && e.message || e) };
+    }
+
+    if (res.error) {
+      // get_my_access() arrives with migration 0062. Until that is applied the
+      // function does not exist, so fall back to the old profile call and run
+      // in legacy mode. This is what lets the frontend ship before or after the
+      // database work without a flag day.
+      if (isMissingFunction(res.error)) return await legacyAccess();
+      return { ok: false, reason: "error", message: res.error.message };
+    }
+
+    if (!res.data || res.data.length === 0) {
+      _access = { ok: false, reason: "no_account" };
+      return _access;
+    }
+
+    var a = res.data[0];
+    a.permissions = a.permissions || [];
+    a.project_ids = a.project_ids || [];
+    a.legacy = false;
+    _access = { ok: true, access: a };
+    return _access;
+  }
+
+  function isMissingFunction(err) {
+    // PostgREST says PGRST202 for "no function matches"; older/edge cases show
+    // up as a 404 or the phrase itself.
+    var code = (err && err.code) || "";
+    var msg  = String((err && err.message) || "");
+    return code === "PGRST202" || code === "404" || /could not find the function/i.test(msg);
+  }
+
+  // Pre-0062 behaviour, expressed through the new shape so callers need no
+  // special case. Permissions are unknown, so can() falls back to the old
+  // two-tier rule (see below).
+  async function legacyAccess() {
+    var res;
+    try {
+      res = await sb.rpc("get_my_profile");
+    } catch (e) {
+      return { ok: false, reason: "error", message: String(e && e.message || e) };
+    }
+    if (res.error) return { ok: false, reason: "error", message: res.error.message };
+    if (!res.data || res.data.length === 0) {
+      _access = { ok: false, reason: "no_account" };
+      return _access;
+    }
+    var p = res.data[0];
+    _access = { ok: true, access: {
+      full_name: p.full_name,
+      designation: p.designation,
+      role: p.role,
+      status: "active",
+      access_profile_code: p.designation,
+      access_profile_name: null,
+      scope_all_projects: true,
+      permissions: [],
+      project_ids: [],
+      legacy: true,
+      legacy_is_office: (p.designation === "management" || p.designation === "office")
+    }};
+    return _access;
+  }
+
+  // May the signed-in person do this? e.g. Dash.can("piles.edit")
+  //
+  // Buttons only. The database refuses the write regardless — see the gates in
+  // migrations 0059-0066. Hiding a control the person cannot use stops the
+  // interface lying to them; it is not what keeps them out.
+  //
+  // Call getMyAccess() once before using this (shell.js does it on boot).
+  function can(permission) {
+    if (!_access || !_access.ok) return false;
+    var a = _access.access;
+    if (a.status !== "active") return false;
+    // before 0062 there is no permission list, so behave exactly as the old
+    // dashboard did rather than guessing
+    if (a.legacy) return !!a.legacy_is_office;
+    return a.permissions.indexOf(permission) !== -1;
+  }
+
+  // Kept for the pages that already use it, and for shell.js's fallback path.
+  // Same three-column shape as before: { full_name, designation, role } or null.
+  async function getMyProfile() {
+    var r = await getMyAccess();
+    if (!r.ok) return null;
+    return {
+      full_name: r.access.full_name,
+      designation: r.access.designation,
+      role: r.access.role
+    };
   }
 
   // ---- tiny query helper: unwrap data or throw the error --------------------
   async function q(builder) {
     var res = await builder;
-    if (res.error) throw res.error;
+    if (res.error) {
+      // An expired or revoked login used to surface as a red "could not load"
+      // banner on every panel. Send them back to sign in instead.
+      if (isAuthExpired(res.error)) { await signOutQuiet(); window.location.replace("login.html"); }
+      throw res.error;
+    }
     return res.data;
+  }
+
+  function isAuthExpired(err) {
+    var code   = (err && err.code) || "";
+    var status = (err && err.status) || 0;
+    var msg    = String((err && err.message) || "");
+    return status === 401 || code === "PGRST301" ||
+           /jwt expired|invalid jwt|jwt.*malformed/i.test(msg);
   }
 
   // ---- data ------------------------------------------------------------------
@@ -1041,6 +1170,8 @@
     getUser: getUser,
     requireLogin: requireLogin,
     getMyProfile: getMyProfile,
+    getMyAccess: getMyAccess,
+    can: can,
 
     getOverview: getOverview,
     getProjectPulse: getProjectPulse,

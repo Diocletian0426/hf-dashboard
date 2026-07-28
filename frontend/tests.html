@@ -215,8 +215,7 @@
         TQ.dir = results[1];
         TQ.types = results[2];
         var profile = results[3];
-        TQ.can = !!(profile &&
-          (profile.designation === "management" || profile.designation === "office"));
+        TQ.can = Dash.can("tests.edit");
         TQ.dir.forEach(function (p) { TQ.codeToId[p.project_code] = p.project_id; });
 
         renderFilters();

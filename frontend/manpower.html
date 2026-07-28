@@ -860,8 +860,7 @@
       document.getElementById("groups").innerHTML = UI.empty("Loading the roster…");
       try {
         var profile = await Dash.getMyProfile();
-        MP.canMove = !!(profile &&
-          (profile.designation === "management" || profile.designation === "office"));
+        MP.canMove = Dash.can("manpower.edit");
 
         var res = await Promise.all([
           Dash.getManpowerBySite(),
