@@ -3,28 +3,99 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>HF Dashboard — Sign in</title>
+  <title>Sign in — HF Bored Piles</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
 
-  <div class="login-wrap">
+  <main class="login-wrap">
     <div class="login-card">
-      <h1>HF Dashboard</h1>
-      <p class="sub">Office sign in. Accounts are created by the office — there is no self-registration.</p>
 
-      <form id="login-form">
-        <label for="email">Email</label>
-        <input id="email" type="email" autocomplete="username" required />
+      <!-- ====== brand ====== -->
+      <div class="auth-brand">
+        <svg class="auth-mark" viewBox="0 0 38 38" role="img" aria-label="HF Bored Piles logo">
+          <rect width="38" height="38" rx="9" fill="#0f172a"></rect>
+          <!-- two bored piles + a ground line: the work, not a generic glyph -->
+          <path d="M10 9v20M19 9v20M28 9v20" stroke="#2563eb" stroke-width="3" stroke-linecap="round"></path>
+          <path d="M6 13.5h26" stroke="#e2e8f0" stroke-width="1.5" stroke-linecap="round" opacity=".55"></path>
+        </svg>
+        <div class="auth-name">
+          HF Bored Piles
+          <span>Malaysia Sdn Bhd</span>
+        </div>
+      </div>
 
-        <label for="password">Password</label>
-        <input id="password" type="password" autocomplete="current-password" required />
+      <!-- only shown in the forgot-password view, which hides both the tabs and
+           the Forgot link and would otherwise be a dead end -->
+      <button type="button" class="auth-back" id="auth-back" hidden>
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M10 3 5 8l5 5"/>
+        </svg>
+        Back to sign in
+      </button>
 
-        <button id="login-btn" type="submit">Sign in</button>
-        <div id="login-error" class="login-error"></div>
+      <h1 id="auth-title">Sign in</h1>
+      <p class="sub" id="auth-sub">
+        Site progress, pile records, plant and project reporting — in one place.
+      </p>
+
+      <!-- ====== mode switch ====== -->
+      <div class="auth-tabs" id="auth-tabs" role="tablist" aria-label="Sign in or create an account">
+        <button class="auth-tab" id="tab-in" role="tab" aria-selected="true"  type="button">Sign in</button>
+        <button class="auth-tab" id="tab-up" role="tab" aria-selected="false" type="button">Create account</button>
+      </div>
+
+      <!-- ====== social sign-in (only providers actually configured) ====== -->
+      <div class="auth-social" id="auth-social" hidden></div>
+      <div class="auth-divider" id="auth-divider" hidden>or continue with email</div>
+
+      <!-- ====== email + password ====== -->
+      <form id="login-form" novalidate>
+        <label for="email">Work email</label>
+        <input id="email" type="email" autocomplete="username" inputmode="email"
+               autocapitalize="off" spellcheck="false" required
+               aria-describedby="auth-msg" />
+
+        <label for="password" id="pw-label">Password</label>
+        <div class="auth-pw">
+          <input id="password" type="password" autocomplete="current-password" required
+                 aria-describedby="pw-hint auth-msg" />
+          <button type="button" class="auth-peek" id="pw-peek"
+                  aria-controls="password" aria-pressed="false">Show</button>
+        </div>
+        <div class="auth-note" id="pw-hint" hidden style="margin:6px 0 0;padding:0;border:0;">
+          <span>Use at least 8 characters.</span>
+        </div>
+
+        <div class="auth-row" id="auth-row">
+          <label class="auth-check" for="remember">
+            <input type="checkbox" id="remember" />
+            Remember my email on this device
+          </label>
+          <button type="button" class="auth-link" id="forgot">Forgot password?</button>
+        </div>
+
+        <button class="auth-submit" id="login-btn" type="submit">Sign in</button>
+
+        <!-- one live region for every outcome: validation, failure, success -->
+        <div id="auth-msg" class="auth-msg" role="status" aria-live="polite"></div>
+        <div id="login-error" class="login-error" hidden></div>
       </form>
+
+      <!-- ====== who is allowed in ====== -->
+      <p class="auth-note">
+        <svg viewBox="0 0 16 16" aria-hidden="true" fill="currentColor">
+          <path d="M8 1 3 3.2v4C3 10.5 5.1 13.6 8 15c2.9-1.4 5-4.5 5-7.8v-4L8 1Zm0 1.6 3.6 1.6v3C11.6 9.7 10.1 12 8 13.2 5.9 12 4.4 9.7 4.4 7.2v-3L8 2.6Z"/>
+        </svg>
+        <span>
+          Access is restricted to authorised HF Bored Piles personnel. New accounts
+          must be approved by the office before any company information is shown.
+        </span>
+      </p>
+
     </div>
-  </div>
+  </main>
 
   <!-- libraries: supabase (local copy), connection details, then the engine -->
   <script src="vendor/supabase.js"></script>
@@ -32,31 +103,266 @@
   <script src="dashboard-client.js"></script>
 
   <script>
-    // already signed in? go straight to the dashboard
-    Dash.getUser().then(function (user) {
-      if (user) window.location.replace("index.html");
+  (function () {
+    "use strict";
+
+    // Page state. Mode is "in" (sign in), "up" (create account) or "reset".
+    var AU = { mode: "in", busy: false };
+
+    var $ = function (id) { return document.getElementById(id); };
+    var form = $("login-form"), email = $("email"), pw = $("password");
+    var btn = $("login-btn"), msg = $("auth-msg"), legacyErr = $("login-error");
+
+    // ---- arrived from a password-reset link? --------------------------------
+    // A recovery link IS a sign-in — it hands back an ordinary session — so the
+    // signed-in bounce below would send the person to the dashboard and they
+    // would never get to change their password. Checked first, and checked
+    // against the URL rather than the session, because the session carries no
+    // marker distinguishing recovery from a normal login.
+    if (Dash.recoveryPending()) {
+      window.location.replace("reset.html");
+      return;
+    }
+
+    // just came back from reset.html having set a new password
+    // (show() is a function declaration below, so it is already hoisted)
+    if (/[?&]reset=1/.test(window.location.search)) {
+      show("Password updated — please sign in with your new password.", "good");
+    }
+
+    // a dead reset / confirmation link lands here with an error in the hash and
+    // no token — say why, instead of showing a bare form
+    var deadLink = Dash.linkError();
+    if (deadLink) show(deadLink + " Please request a new link.", "bad");
+
+    // ---- already signed in? bounce before the form is usable ----------------
+    // Awaited on purpose: the old page wired the form first, so you could start
+    // typing into a page that was already navigating away.
+    var ready = Dash.getUser().then(function (user) {
+      if (user) { window.location.replace("index.html"); return false; }
+      return true;
     });
 
-    document.getElementById("login-form").addEventListener("submit", async function (e) {
+    // ---- social buttons ------------------------------------------------------
+    // Rendered ONLY for providers listed in config.js AUTH_PROVIDERS, which is
+    // empty until the provider is actually configured in Supabase. A button that
+    // errors on tap is worse than no button.
+    var PROVIDERS = {
+      google: {
+        label: "Continue with Google",
+        icon: '<svg viewBox="0 0 18 18" aria-hidden="true">' +
+              '<path fill="#4285F4" d="M17.6 9.2c0-.6-.1-1.2-.2-1.8H9v3.5h4.8a4.1 4.1 0 0 1-1.8 2.7v2.2h2.9c1.7-1.6 2.7-3.9 2.7-6.6Z"/>' +
+              '<path fill="#34A853" d="M9 18c2.4 0 4.5-.8 6-2.2l-2.9-2.2c-.8.5-1.8.9-3.1.9-2.4 0-4.4-1.6-5.1-3.8H.9v2.3A9 9 0 0 0 9 18Z"/>' +
+              '<path fill="#FBBC05" d="M3.9 10.7a5.4 5.4 0 0 1 0-3.4V5H.9a9 9 0 0 0 0 8l3-2.3Z"/>' +
+              '<path fill="#EA4335" d="M9 3.6c1.3 0 2.5.5 3.4 1.3L15 2.3A9 9 0 0 0 .9 5l3 2.3C4.6 5.2 6.6 3.6 9 3.6Z"/></svg>'
+      },
+      azure: {
+        label: "Continue with Microsoft",
+        icon: '<svg viewBox="0 0 18 18" aria-hidden="true">' +
+              '<path fill="#F25022" d="M1 1h7.6v7.6H1z"/><path fill="#7FBA00" d="M9.4 1H17v7.6H9.4z"/>' +
+              '<path fill="#00A4EF" d="M1 9.4h7.6V17H1z"/><path fill="#FFB900" d="M9.4 9.4H17V17H9.4z"/></svg>'
+      }
+    };
+
+    function renderSocial() {
+      var list = (window.DASH_CONFIG && window.DASH_CONFIG.AUTH_PROVIDERS) || [];
+      var host = $("auth-social");
+      var html = "";
+      for (var i = 0; i < list.length; i++) {
+        var p = PROVIDERS[list[i]];
+        if (!p) continue;                       // unknown code in config: ignore
+        html += '<button type="button" data-provider="' + list[i] + '">' +
+                p.icon + "<span>" + p.label + "</span></button>";
+      }
+      if (!html) return;                        // no providers -> no divider either
+      host.innerHTML = html;
+      host.hidden = false;
+      $("auth-divider").hidden = false;
+
+      host.addEventListener("click", function (ev) {
+        var b = ev.target.closest("button[data-provider]");
+        if (!b || AU.busy) return;
+        setBusy(true, b, "Redirecting…");
+        Dash.signInWithProvider(b.getAttribute("data-provider")).then(function (res) {
+          if (!res.ok) { setBusy(false); show(humanError(res.message), "bad"); }
+          // on success the browser is already navigating away
+        });
+      });
+    }
+
+    // ---- error wording -------------------------------------------------------
+    // Supabase speaks developer ("Signups not allowed for this instance"). Site
+    // and office staff should never see that, so the handful of errors people
+    // actually hit get plain-language replacements. Anything unrecognised falls
+    // through unchanged rather than being swallowed.
+    function humanError(raw) {
+        var m = String(raw || "");
+        if (/signup.*not allowed|signup_disabled/i.test(m))
+          return "Creating accounts is currently switched off. Ask the office to set up your login.";
+        if (/already registered|already been registered/i.test(m))
+          return "There is already an account with that email. Try signing in instead.";
+        if (/email not confirmed/i.test(m))
+          return "Please open the confirmation link we emailed you, then sign in.";
+        if (/password should be at least/i.test(m))
+          return "That password is too short. Use at least 8 characters.";
+        if (/for security purposes|rate limit|too many/i.test(m))
+          return "Too many attempts. Please wait a minute and try again.";
+        if (/invalid login/i.test(m))
+          return "Email or password is incorrect.";
+        if (/provider is not enabled|unsupported provider/i.test(m))
+          return "That sign-in method is not set up yet. Use your email and password.";
+        return m || "Something went wrong. Please try again.";
+      }
+
+    // ---- messages ------------------------------------------------------------
+    function show(text, kind) {
+      msg.textContent = text || "";
+      msg.className = "auth-msg" + (kind ? " " + kind : "");
+      legacyErr.hidden = true;
+    }
+    function clearMsg() { show("", ""); email.removeAttribute("aria-invalid"); pw.removeAttribute("aria-invalid"); }
+
+    function setBusy(on, target, label) {
+      AU.busy = on;
+      var b = target || btn;
+      b.disabled = on;
+      if (on) { b.dataset.was = b.textContent; b.textContent = label || "Please wait…"; }
+      else if (b.dataset.was) { b.textContent = b.dataset.was; delete b.dataset.was; }
+      btn.disabled = on;
+    }
+
+    // ---- mode switching ------------------------------------------------------
+    var COPY = {
+      in:    { title: "Sign in",        btn: "Sign in",
+               sub: "Site progress, pile records, plant and project reporting — in one place." },
+      up:    { title: "Create account", btn: "Create account",
+               sub: "Request access. An administrator checks your details before the account is switched on." },
+      reset: { title: "Reset password", btn: "Send reset link",
+               sub: "We will email you a link to set a new password." }
+    };
+
+    function setMode(mode) {
+      AU.mode = mode;
+      clearMsg();
+      var c = COPY[mode];
+      $("auth-title").textContent = c.title;
+      $("auth-sub").textContent = c.sub;
+      btn.textContent = c.btn;
+      $("tab-in").setAttribute("aria-selected", String(mode !== "up"));
+      $("tab-up").setAttribute("aria-selected", String(mode === "up"));
+
+      var hidePw = (mode === "reset");
+      pw.closest(".auth-pw").hidden = hidePw;
+      $("pw-label").hidden = hidePw;
+      pw.required = !hidePw;
+      $("pw-hint").hidden = (mode !== "up");
+      $("auth-row").hidden = (mode !== "in");
+      $("auth-back").hidden = (mode !== "reset");   // the only way out of reset
+      pw.setAttribute("autocomplete", mode === "up" ? "new-password" : "current-password");
+    }
+
+    $("tab-in").addEventListener("click", function () { setMode("in"); email.focus(); });
+    $("tab-up").addEventListener("click", function () { setMode("up"); email.focus(); });
+    $("forgot").addEventListener("click", function () { setMode("reset"); email.focus(); });
+    $("auth-back").addEventListener("click", function () { setMode("in"); email.focus(); });
+
+    // ---- password visibility -------------------------------------------------
+    $("pw-peek").addEventListener("click", function () {
+      var showing = pw.type === "text";
+      pw.type = showing ? "password" : "text";
+      this.textContent = showing ? "Show" : "Hide";
+      this.setAttribute("aria-pressed", String(!showing));
+      pw.focus();
+    });
+
+    // ---- remember my email ---------------------------------------------------
+    // Honest scope: this remembers the ADDRESS so it is prefilled next time. It
+    // does not extend how long you stay signed in — supabase-js decides that,
+    // and pretending otherwise would be a security promise we do not keep.
+    var saved = localStorage.getItem("hf-login-email");
+    if (saved) { email.value = saved; $("remember").checked = true; }
+
+    // ---- validation ----------------------------------------------------------
+    function validEmail(v) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v); }
+
+    function checkInputs() {
+      var e = email.value.trim();
+      if (!e)              { email.setAttribute("aria-invalid","true"); email.focus(); return "Enter your email address."; }
+      if (!validEmail(e))  { email.setAttribute("aria-invalid","true"); email.focus(); return "That does not look like an email address."; }
+      if (AU.mode === "reset") return null;
+      if (!pw.value)       { pw.setAttribute("aria-invalid","true"); pw.focus(); return "Enter your password."; }
+      if (AU.mode === "up" && pw.value.length < 8) {
+        pw.setAttribute("aria-invalid","true"); pw.focus();
+        return "Choose a password of at least 8 characters.";
+      }
+      return null;
+    }
+
+    // ---- submit --------------------------------------------------------------
+    form.addEventListener("submit", async function (e) {
       e.preventDefault();
-      var btn = document.getElementById("login-btn");
-      var err = document.getElementById("login-error");
-      err.textContent = "";
-      btn.disabled = true; btn.textContent = "Signing in…";
+      if (AU.busy) return;
+      clearMsg();
 
-      var res = await Dash.signIn(
-        document.getElementById("email").value.trim(),
-        document.getElementById("password").value
-      );
+      var problem = checkInputs();
+      if (problem) { show(problem, "bad"); return; }
 
-      if (res.ok) {
-        window.location.replace("index.html");
-      } else {
-        // Supabase says "Invalid login credentials" for wrong email OR password
-        err.textContent = res.message || "Could not sign in. Try again.";
-        btn.disabled = false; btn.textContent = "Sign in";
+      var addr = email.value.trim();
+      if ($("remember").checked) localStorage.setItem("hf-login-email", addr);
+      else localStorage.removeItem("hf-login-email");
+
+      setBusy(true, btn, AU.mode === "in" ? "Signing in…" : "Please wait…");
+
+      try {
+        if (AU.mode === "reset") {
+          var r = await Dash.resetPassword(addr);
+          setBusy(false);
+          show(r.ok
+            ? "If that address has an account, a reset link is on its way. Check your email."
+            : (r.message || "Could not send the reset link."), r.ok ? "good" : "bad");
+          return;
+        }
+
+        if (AU.mode === "up") {
+          var s = await Dash.signUp(addr, pw.value);
+          if (!s.ok) { setBusy(false); show(humanError(s.message), "bad"); return; }
+          show("Account created. Taking you to the next step…", "good");
+          window.location.replace("pending.html" + (s.needsConfirm ? "?confirm=1" : ""));
+          return;
+        }
+
+        var res = await Dash.signIn(addr, pw.value);
+        if (res.ok) { window.location.replace("index.html"); return; }
+
+        setBusy(false);
+        // "Invalid login credentials" covers a wrong email OR a wrong password,
+        // and humanError keeps it that way on purpose: saying which half was
+        // right would confirm whether an address has an account here.
+        show(humanError(res.message), "bad");
+      } catch (err) {
+        setBusy(false);
+        show("Could not reach the server. Check your connection and try again.", "bad");
       }
     });
+
+    // ---- boot ----------------------------------------------------------------
+    ready.then(function (proceed) {
+      if (!proceed) return;
+      renderSocial();
+
+      // Hide "Create account" while self sign-up is switched off in Supabase —
+      // an always-failing tab is the same mistake as a social button with no
+      // provider behind it. See ALLOW_SIGNUP in config.js.
+      // The whole strip goes, not just the second tab: a one-item segmented
+      // control looks like something failed to load.
+      if (!(window.DASH_CONFIG && window.DASH_CONFIG.ALLOW_SIGNUP)) {
+        $("auth-tabs").hidden = true;
+      }
+
+      setMode("in");
+      if (!email.value) email.focus(); else pw.focus();
+    });
+  })();
   </script>
 </body>
 </html>

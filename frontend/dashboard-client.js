@@ -318,9 +318,48 @@
   "use strict";
 
   var cfg = window.DASH_CONFIG;
+
+  // A password-reset link arrives as  ...#access_token=…&type=recovery  and is a
+  // REAL SIGN-IN: supabase-js turns it into an ordinary session that carries no
+  // marker saying "this person only came here to change their password". So the
+  // only trustworthy signal is the URL itself — and the library erases it.
+  //
+  // Timing (checked against the vendored build, supabase-js 2.108.2):
+  //   * createClient only STARTS the async initialise, so the hash is still
+  //     intact on the line below;
+  //   * initialise then fetches /auth/v1/user and sets location.hash = "",
+  //     so the hash is gone after the first await anywhere in the app.
+  // Hence: read it here, synchronously, before createClient. Every page loads
+  // this file before its own script, so one capture covers the whole app.
+  //
+  // Supabase's PASSWORD_RECOVERY event is deliberately NOT used: it fires once
+  // from a setTimeout and is never replayed, so any code that awaits a session
+  // first misses it permanently.
+  var _initialHash = (window.location.hash || "");
+
   var sb  = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_KEY);
   // supabase-js keeps the login session in localStorage and refreshes it
   // automatically — nothing to manage here.
+
+  // Did this page load from a password-reset link?
+  function recoveryPending() {
+    return /(^|[#&])type=recovery(&|$)/.test(_initialHash);
+  }
+
+  // Supabase reports a dead link by redirecting with an error in the hash and
+  // no token at all, e.g.
+  //   #error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired
+  // Returns that description in readable form, or null when the link was fine.
+  function linkError() {
+    if (!/(^|[#&])error/.test(_initialHash)) return null;
+    var params = new URLSearchParams(_initialHash.replace(/^#/, ""));
+    // error_description is prose; error is a code like "server_error", so
+    // underscores become spaces too when we have to fall back to it.
+    var desc = params.get("error_description") || params.get("error") || "";
+    desc = desc.replace(/\+/g, " ").replace(/_/g, " ").trim();
+    if (!desc) return "That link is no longer valid.";
+    return desc.charAt(0).toUpperCase() + desc.slice(1) + ".";
+  }
 
   // ---- auth ----------------------------------------------------------------
   async function signIn(email, password) {
@@ -334,8 +373,19 @@
     window.location.replace("login.html");
   }
 
+  // Sign out WITHOUT choosing where to go next — the caller redirects. Used by
+  // reset.html, which needs to land on login.html?reset=1 to show its
+  // confirmation. Never throws: if the sign-out call fails the session is
+  // stale anyway, and the caller still wants to move on.
+  async function signOutQuiet() {
+    try { await sb.auth.signOut(); } catch (e) { /* already gone */ }
+  }
+
   async function getUser() {
-    var res = await sb.auth.getSession();     // reads local session, no network
+    // Usually a local read. NOT always free: on a page opened from a magic /
+    // recovery link this awaits the library's initialise, which calls
+    // /auth/v1/user before the session exists.
+    var res = await sb.auth.getSession();
     return (res.data && res.data.session) ? res.data.session.user : null;
   }
 
@@ -343,6 +393,60 @@
     var user = await getUser();
     if (!user) { window.location.replace("login.html"); return null; }
     return user;
+  }
+
+  // Create an account. This does NOT grant any access: the new auth user has no
+  // row in user_accounts, so every database gate refuses them until an
+  // administrator approves and assigns an access profile. See migration 0059.
+  async function signUp(email, password) {
+    var res = await sb.auth.signUp({
+      email: email,
+      password: password,
+      options: { emailRedirectTo: window.location.origin + basePath() + "pending.html" }
+    });
+    if (res.error) return { ok: false, message: res.error.message };
+    // Supabase returns a user with no session when email confirmation is on
+    var needsConfirm = !(res.data && res.data.session);
+    return { ok: true, needsConfirm: needsConfirm };
+  }
+
+  // Hand off to Google / Microsoft. The provider must be enabled in the Supabase
+  // dashboard first — see AUTH_PROVIDERS in config.js. Supabase validates the
+  // redirect against its own allow-list, which is what stops an open redirect.
+  async function signInWithProvider(provider) {
+    var res = await sb.auth.signInWithOAuth({
+      provider: provider,
+      options: { redirectTo: window.location.origin + basePath() + "index.html" }
+    });
+    if (res.error) return { ok: false, message: res.error.message };
+    return { ok: true };            // the browser is navigating away
+  }
+
+  // Sends the "set a new password" email. It must land on reset.html, NOT on
+  // login.html — login.html bounces anyone holding a session to the dashboard,
+  // and a recovery link is a session, so pointing it there means the password
+  // never actually gets changed.
+  // NOTE this URL must also be on Supabase's Redirect URLs allow-list, or
+  // Supabase ignores it and falls back to the Site URL.
+  async function resetPassword(email) {
+    var res = await sb.auth.resetPasswordForEmail(email, {
+      redirectTo: window.location.origin + basePath() + "reset.html"
+    });
+    if (res.error) return { ok: false, message: res.error.message };
+    return { ok: true };
+  }
+
+  // Used by reset.html. Needs the session the recovery link just created.
+  async function updatePassword(newPassword) {
+    var res = await sb.auth.updateUser({ password: newPassword });
+    if (res.error) return { ok: false, message: res.error.message };
+    return { ok: true };
+  }
+
+  // the directory the app is served from — "/" locally, "/hf-dashboard/" on Pages
+  function basePath() {
+    var p = window.location.pathname;
+    return p.slice(0, p.lastIndexOf("/") + 1);
   }
 
   var _profile;   // cached for the lifetime of the page
@@ -926,6 +1030,13 @@
   // ---- the public commands the UI uses ---------------------------------------
   window.Dash = {
     signIn: signIn,
+    signUp: signUp,
+    signInWithProvider: signInWithProvider,
+    resetPassword: resetPassword,
+    updatePassword: updatePassword,
+    recoveryPending: recoveryPending,
+    linkError: linkError,
+    signOutQuiet: signOutQuiet,
     signOut: signOut,
     getUser: getUser,
     requireLogin: requireLogin,

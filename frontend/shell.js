@@ -147,6 +147,16 @@
   /* ---- boot ---- */
 
   async function boot() {
+    // A password-reset link is a real sign-in, so without this the person lands
+    // straight in the dashboard and never changes their password. It is checked
+    // here and not only on login.html because Supabase falls back to the Site
+    // URL — the site root, i.e. index.html — whenever the reset link's redirect
+    // is not on its allow-list.
+    if (Dash.recoveryPending()) {
+      window.location.replace("reset.html");
+      return;
+    }
+
     var user = await Dash.requireLogin();
     if (!user) return;                            // redirecting to login.html
 

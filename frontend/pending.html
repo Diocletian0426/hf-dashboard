@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Waiting for approval — HF Bored Piles</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!--
+    The holding page for an account that exists but has not been approved yet.
+    It deliberately does NOT load shell.js: the shell is for pages that show
+    company data, and this page must show none. Nothing here reads the database.
+  -->
+  <main class="login-wrap">
+    <div class="login-card">
+
+      <div class="auth-brand">
+        <svg class="auth-mark" viewBox="0 0 38 38" role="img" aria-label="HF Bored Piles logo">
+          <rect width="38" height="38" rx="9" fill="#0f172a"></rect>
+          <path d="M10 9v20M19 9v20M28 9v20" stroke="#2563eb" stroke-width="3" stroke-linecap="round"></path>
+          <path d="M6 13.5h26" stroke="#e2e8f0" stroke-width="1.5" stroke-linecap="round" opacity=".55"></path>
+        </svg>
+        <div class="auth-name">
+          HF Bored Piles
+          <span>Malaysia Sdn Bhd</span>
+        </div>
+      </div>
+
+      <h1 id="p-title">Your account is waiting for approval</h1>
+      <p class="sub" id="p-sub">
+        Thanks — your details have been sent to the office. Someone will check them
+        and switch your account on. You will be able to sign in normally after that.
+      </p>
+
+      <div class="banner banner-amber" id="p-status" style="margin-bottom:var(--sp-4);">
+        Signed in as <strong id="p-email">…</strong> — no company information is
+        shown until an administrator approves the account.
+      </div>
+
+      <p class="sub" style="margin-bottom:var(--sp-3);">
+        <strong>What happens next</strong>
+      </p>
+      <ol style="margin:0 0 var(--sp-4) 18px;padding:0;color:var(--ink-2);font-size:var(--fs-sm);line-height:1.7;">
+        <li>The office checks who you are and which sites you work on.</li>
+        <li>They set your job title and what you are allowed to see.</li>
+        <li>Your account is switched on — no need to sign up again.</li>
+      </ol>
+
+      <p class="sub">
+        If this is taking longer than a working day, contact the office directly
+        and mention the email address shown above.
+      </p>
+
+      <button class="auth-submit" id="p-refresh" type="button">Check again</button>
+      <div id="p-msg" class="auth-msg" role="status" aria-live="polite"></div>
+
+      <div class="auth-row" style="justify-content:center;">
+        <button type="button" class="auth-link" id="p-out">Sign out</button>
+      </div>
+
+      <p class="auth-note">
+        <svg viewBox="0 0 16 16" aria-hidden="true" fill="currentColor">
+          <path d="M8 1 3 3.2v4C3 10.5 5.1 13.6 8 15c2.9-1.4 5-4.5 5-7.8v-4L8 1Zm0 1.6 3.6 1.6v3C11.6 9.7 10.1 12 8 13.2 5.9 12 4.4 9.7 4.4 7.2v-3L8 2.6Z"/>
+        </svg>
+        <span>
+          Access is restricted to authorised HF Bored Piles personnel. Requesting an
+          account does not grant any access on its own.
+        </span>
+      </p>
+
+    </div>
+  </main>
+
+  <script src="vendor/supabase.js"></script>
+  <script src="config.js"></script>
+  <script src="dashboard-client.js"></script>
+
+  <script>
+  (function () {
+    "use strict";
+    var $ = function (id) { return document.getElementById(id); };
+
+    // arrived straight after signing up, before confirming the email
+    if (/[?&]confirm=1/.test(window.location.search)) {
+      $("p-title").textContent = "Confirm your email address";
+      $("p-sub").textContent =
+        "We have sent you a confirmation link. Open it, then come back here — " +
+        "the office still needs to approve the account afterwards.";
+    }
+
+    Dash.getUser().then(function (user) {
+      if (!user) { window.location.replace("login.html"); return; }
+      $("p-email").textContent = user.email || "this account";
+    });
+
+    // "Check again": if the office has approved in the meantime, get_my_profile
+    // starts returning a row and the dashboard lets them in.
+    $("p-refresh").addEventListener("click", async function () {
+      var b = this;
+      b.disabled = true; b.textContent = "Checking…";
+      $("p-msg").textContent = "";
+      try {
+        var profile = await Dash.getMyProfile();
+        if (profile) { window.location.replace("index.html"); return; }
+        $("p-msg").className = "auth-msg";
+        $("p-msg").textContent = "Not approved yet. Please check again later.";
+      } catch (e) {
+        $("p-msg").className = "auth-msg bad";
+        $("p-msg").textContent = "Could not reach the server. Try again in a moment.";
+      }
+      b.disabled = false; b.textContent = "Check again";
+    });
+
+    $("p-out").addEventListener("click", function () { Dash.signOut(); });
+  })();
+  </script>
+</body>
+</html>
