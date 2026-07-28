@@ -307,7 +307,9 @@
     }
 
     // ---- gate the page body ----
-    if (!allowed(page, profile)) {
+    // `acc`, not `profile`: allowed() takes the verdict from getMyAccess(), and
+    // a bare access object has no .ok, so passing it refuses everything.
+    if (!allowed(page, acc)) {
       var main = document.getElementById("main");
       if (main) {
         main.innerHTML =
