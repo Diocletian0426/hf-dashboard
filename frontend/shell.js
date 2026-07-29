@@ -34,7 +34,9 @@
     { href: "attendance.html", label: "Attendance" },
     // leave.html stays in PAGE_ACCESS but is out of the nav until the page
     // is actually built (owner decision — leave UI deferred)
-    { href: "tests.html",      label: "Tests"      }
+    { href: "tests.html",      label: "Tests"      },
+    // only appears for logins holding users.view (the allowed() filter below)
+    { href: "users.html",      label: "Users"      }
   ];
 
   // page -> the permission needed to open it.
@@ -57,7 +59,9 @@
     "attendance.html": "attendance.view",
     "tests.html":      "tests.view",
     "claims.html":     "claims.view",     // MONEY — the DB re-checks every call too
-    "leave.html":      "leave.view"
+    "leave.html":      "leave.view",
+    "users.html":      "users.view",      // admin — writes carry their own DB gates
+    "roles.html":      "users.view"       // read-only reference, reached from users.html
   };
 
   // project-scoped pages: they get the context bar and light up "Projects"
