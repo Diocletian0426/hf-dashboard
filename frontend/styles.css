@@ -886,6 +886,49 @@ summary.zone-rich::before { float: left; margin: 4px 8px 0 0; }
   .pw-form .pw-hint { padding-left: 0; }
 }
 
+/* Permission switch (users.html). A BUTTON with role="switch", not a
+   checkbox — flipping never happens natively; the page decides after the
+   pop-up is saved, so the knob position always tells the truth. */
+button.switch {
+  width: 42px; height: 24px; flex: 0 0 42px;
+  border: 1px solid var(--line-strong); border-radius: 12px;
+  background: var(--line-strong); position: relative;
+  padding: 0; cursor: pointer; vertical-align: middle;
+  transition: background 0.15s ease;
+}
+button.switch::after {
+  content: ""; position: absolute; top: 2px; left: 2px;
+  width: 18px; height: 18px; border-radius: 50%;
+  background: var(--surface); box-shadow: var(--shadow-1);
+  transition: left 0.15s ease;
+}
+button.switch[aria-checked="true"] { background: var(--ok); border-color: var(--ok); }
+button.switch[aria-checked="true"]::after { left: 20px; }
+/* an EXCEPTION (personal override) gets the amber ring so customised rows
+   stand out from profile defaults at a glance */
+button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(--amber); }
+
+/* Pop-up confirmation box (users.html permission changes). One small card
+   over a dimmed page — the reason is typed here before anything flips. */
+.modal-back {
+  position: fixed; inset: 0; z-index: 300;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex; align-items: center; justify-content: center;
+  padding: var(--sp-4);
+}
+.modal-card {
+  background: var(--surface); border-radius: var(--r-md);
+  box-shadow: var(--shadow-2); border: 1px solid var(--line);
+  padding: var(--sp-4); width: 100%; max-width: 420px;
+}
+.modal-card h3 { margin: 0 0 var(--sp-2); font-size: var(--fs-lg); }
+.modal-card .modal-note { font-size: var(--fs-sm); color: var(--ink-2); margin: 0 0 var(--sp-3); }
+.modal-card label { display: block; font-size: var(--fs-sm); color: var(--ink-2); margin-bottom: var(--sp-3); }
+.modal-card label input[type="text"] {
+  display: block; width: 100%; box-sizing: border-box; margin-top: var(--sp-1);
+}
+.modal-card .modal-actions { display: flex; gap: var(--sp-2); justify-content: flex-end; }
+
 /* ============================ 8. RESPONSIVE =============================== */
 
 @media (max-width: 900px) {

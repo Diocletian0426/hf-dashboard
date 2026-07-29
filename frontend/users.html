@@ -49,6 +49,9 @@
 
   </main>
 
+  <!-- the pop-up confirmation box for permission changes (rendered by JS) -->
+  <div id="modal"></div>
+
   <script src="vendor/supabase.js"></script>
   <script src="config.js"></script>
   <script src="dashboard-client.js"></script>
@@ -71,12 +74,15 @@
       search: "", profileFilter: "all",
       cardOpen: null,      // user_id of the open record card (accordion)
       cardData: {},        // user_id -> { access: [...], sites: [...] } lazy cache
+      profilePerms: {},    // access_profile_id -> {code:true} — what the profile
+                           // grants by DEFAULT, so a switch knows whether a flip
+                           // is "make an exception" or "back to normal"
       permSearch: "",      // filter box inside the permission editor
       showCodes: false,    // "advanced" — reveal raw permission codes
       form: null,          // the ONE open write form:
                            //   {kind:'setup', loginId} | {kind:'edit', userId}
                            //   {kind:'suspend'|'disable', userId}
-                           //   {kind:'override', userId, code, effect, name, sensitive}
+                           //   {kind:'override', ...} -> the pop-up box
                            //   {kind:'site-add', userId}
       formDirty: false,    // typed into the open form — guard before discarding
       err: "", okMsg: ""
@@ -248,20 +254,79 @@
         "</div>";
     }
 
-    // one permission exception for one person. reason is REQUIRED — it is
-    // shown next to the permission for as long as the exception lives.
-    function overrideForm(f) {
-      var doing = f.effect === "grant" ? "Add for this person" : "Remove for this person";
-      return '<div class="claim-form" data-form="1">' +
-        "<strong>" + doing + " — " + escHtml(f.name) + "</strong>" +
-        (f.sensitive
-          ? '<span class="muted-line">&#9888; this is a sensitive permission — the change is audited</span>'
-          : "") +
-        '<label>why <input type="text" id="ov-reason" size="30" placeholder="required — shown next to the permission"></label>' +
-        '<label>until <input type="date" id="ov-until" title="optional — the exception removes itself after this date"></label>' +
-        '<button type="button" data-action="override-save">Save</button>' +
-        '<button type="button" data-action="form-cancel">Cancel</button>' +
-        "</div>";
+    // The pop-up box for a permission switch. Two very different moods:
+    //   making an EXCEPTION (grant/deny) -> asks WHY (the database requires
+    //     the reason — it is shown next to the permission for as long as the
+    //     exception lives);
+    //   going BACK TO NORMAL (clear)     -> no reason needed, just confirm —
+    //     returning to the rule needs no justification.
+    function renderModal() {
+      var host = document.getElementById("modal");
+      var f = UA.form;
+      if (!f || f.kind !== "override") { host.innerHTML = ""; return; }
+
+      var title, note, action;
+      var prof = escHtml(f.profileName || "assigned");
+      if (f.effect === "clear") {
+        title = "Back to normal";
+        note = "This removes the personal exception for <strong>" + escHtml(f.personName) +
+               "</strong>. The " + prof + " profile decides again — it will be <strong>" +
+               (f.defaultGranted ? "allowed" : "not allowed") + "</strong>.";
+        action = "Back to normal";
+      } else if (f.effect === "grant") {
+        title = "Turn on";
+        note = "Just for <strong>" + escHtml(f.personName) + "</strong> — the " + prof +
+               " profile does not include this.";
+        action = "Turn on";
+      } else {
+        title = "Turn off";
+        note = "Just for <strong>" + escHtml(f.personName) + "</strong> — everyone else on the " +
+               prof + " profile keeps it.";
+        action = "Turn off";
+      }
+
+      host.innerHTML =
+        '<div class="modal-back"><div class="modal-card">' +
+          "<h3>" + title + " — " + escHtml(f.name) + "</h3>" +
+          (f.sensitive
+            ? '<p class="modal-note">&#9888; sensitive permission — the change is recorded in the activity log</p>'
+            : "") +
+          '<p class="modal-note">' + note + "</p>" +
+          (f.effect !== "clear"
+            ? '<label>Why? (shown next to the permission)' +
+              '<input type="text" id="ov-reason" autocomplete="off" data-form="1"></label>'
+            : "") +
+          '<div id="ov-err"></div>' +
+          '<div class="modal-actions">' +
+            '<button type="button" class="btn-plain" data-action="modal-cancel">Cancel</button>' +
+            '<button type="button" data-action="modal-save">' + action + "</button>" +
+          "</div>" +
+        "</div></div>";
+
+      var inp = document.getElementById("ov-reason");
+      if (inp) inp.focus();
+    }
+
+    function modalError(msg) {
+      var el = document.getElementById("ov-err");
+      if (el) el.innerHTML = '<p class="modal-note" style="color:var(--danger-ink)">' + escHtml(msg) + "</p>";
+    }
+
+    async function modalSave() {
+      var f = UA.form;
+      if (!f || f.kind !== "override") return;
+      try {
+        if (f.effect === "clear") {
+          await Dash.clearUserPermissionOverride(f.userId, f.code);
+          await refreshAfterWrite(f.userId, "Back to normal — " + f.name);
+        } else {
+          var why = document.getElementById("ov-reason").value.trim();
+          if (!why) { modalError("A reason is required — it is shown next to the permission."); return; }
+          await Dash.setUserPermissionOverride(f.userId, f.code, f.effect, why);
+          await refreshAfterWrite(f.userId,
+            (f.effect === "grant" ? "Turned on — " : "Turned off — ") + f.name);
+        }
+      } catch (e) { modalError(friendly(e)); }
     }
 
     function siteAddForm(r) {
@@ -419,20 +484,35 @@
           else srcText = "not part of this access profile";
 
           var ovr = p.source === "granted for this person" || p.source === "removed for this person";
-          var btns = "";
+
+          // what the PROFILE would say without the exception — decides whether
+          // flipping the switch means "make an exception" or "back to normal".
+          // Falls back to reading it off the source wording if the profile's
+          // permission list has not arrived (a redundant override is the only
+          // case the fallback can misread, and the database corrects it).
+          var defSet = UA.profilePerms[r.access_profile_id];
+          var defaultGranted = defSet
+            ? !!defSet[p.permission_code]
+            : (p.source === "profile" || p.source === "removed for this person");
+
+          var control;
           if (editable) {
-            if (ovr) {
-              btns = '<button type="button" class="btn-plain" data-action="override-clear" data-user="' + r.user_id +
-                     '" data-perm="' + esc(p.permission_code) + '">Back to default</button>';
-            } else if (p.granted) {
-              btns = '<button type="button" class="btn-plain" data-action="override-open" data-effect="deny" data-user="' + r.user_id +
-                     '" data-perm="' + esc(p.permission_code) + '" data-name="' + esc(p.name) +
-                     '" data-sensitive="' + (p.is_sensitive ? "1" : "") + '">Remove for this person</button>';
-            } else {
-              btns = '<button type="button" class="btn-plain" data-action="override-open" data-effect="grant" data-user="' + r.user_id +
-                     '" data-perm="' + esc(p.permission_code) + '" data-name="' + esc(p.name) +
-                     '" data-sensitive="' + (p.is_sensitive ? "1" : "") + '">Add for this person</button>';
-            }
+            // a BUTTON with role=switch — it never flips by itself; the pop-up
+            // box decides, so the knob always tells the truth
+            control = '<button type="button" class="switch' + (ovr ? " exc" : "") +
+              '" role="switch" aria-checked="' + (p.granted ? "true" : "false") +
+              '" aria-label="' + esc(p.name) + '" data-action="perm-flip"' +
+              ' data-user="' + r.user_id + '" data-perm="' + esc(p.permission_code) +
+              '" data-name="' + esc(p.name) + '" data-sensitive="' + (p.is_sensitive ? "1" : "") +
+              '" data-granted="' + (p.granted ? "1" : "") + '" data-ovr="' + (ovr ? "1" : "") +
+              '" data-default="' + (defaultGranted ? "1" : "") +
+              '" title="' + esc((p.granted ? "Allowed" : "Not allowed") + " — " + srcText + ". Click to change.") +
+              '"></button>';
+          } else {
+            // read-only viewers get information, not a dead control
+            control = p.granted
+              ? '<span class="badge badge-approved">Yes</span>'
+              : '<span class="badge badge-gray">No</span>';
           }
 
           html += "<tr>" +
@@ -440,17 +520,8 @@
               (p.is_sensitive ? ' <span class="chip chip-warn" title="sensitive — changes are audited">sensitive</span>' : "") +
               (UA.showCodes ? ' <span class="muted-line">' + escHtml(p.permission_code) + "</span>" : "") +
               '<br><span class="muted-line">' + escHtml(srcText) + "</span>") +
-            UI.td("Allowed", p.granted
-              ? '<span class="badge badge-approved">Yes</span>'
-              : '<span class="badge badge-gray">No</span>') +
-            UI.td("", btns) +
+            UI.td("Allowed", control) +
             "</tr>";
-
-          // the override mini-form opens directly under its permission row
-          if (UA.form && UA.form.kind === "override" &&
-              UA.form.userId === r.user_id && UA.form.code === p.permission_code) {
-            html += '<tr><td colspan="3">' + overrideForm(UA.form) + "</td></tr>";
-          }
         });
 
         html += "</tbody></table>";
@@ -601,6 +672,7 @@
         (UA.okMsg ? UI.okBanner(UA.okMsg) : "");
       document.getElementById("accounts").innerHTML =
         UA.tab === "setup" ? setupTable() : accountsTable();
+      renderModal();   // the pop-up box lives outside #accounts; keep it in step
     }
 
     /* --------------------------- data loading --------------------------- */
@@ -614,16 +686,28 @@
       UA.unlinked = res[2] || [];
     }
 
-    // the card's two lazy reads — cached until a write invalidates them
+    // the card's lazy reads — cached until a write invalidates them. When the
+    // caller can flip switches, the person's PROFILE permission list comes too
+    // (cached per profile), so each switch knows what "back to normal" means.
     async function loadCard(userId) {
       var d = UA.cardData[userId] = UA.cardData[userId] || {};
+      var row = UA.rows.find(function (x) { return x.user_id === userId; }) || {};
+      var wantProfile = UA.canManage && row.access_profile_id &&
+                        !UA.profilePerms[row.access_profile_id];
       try {
-        var res = await Promise.all([
+        var jobs = [
           Dash.getUserEffectiveAccess(userId),
           Dash.getUserProjectAssignments(userId)
-        ]);
+        ];
+        if (wantProfile) jobs.push(Dash.getAccessProfilePermissions(row.access_profile_id));
+        var res = await Promise.all(jobs);
         d.access = res[0] || [];
         d.sites = res[1] || [];
+        if (wantProfile) {
+          var set = {};
+          (res[2] || []).forEach(function (p) { set[p.permission_code] = true; });
+          UA.profilePerms[row.access_profile_id] = set;
+        }
       } catch (e) {
         d.access = d.access || [];
         d.sites = d.sites || [];
@@ -674,14 +758,26 @@
       if (actName === "suspend-open") { if (openForm({ kind: "suspend", userId: userId })) render(); return; }
       if (actName === "disable-open") { if (openForm({ kind: "disable", userId: userId })) render(); return; }
       if (actName === "site-add-open"){ if (openForm({ kind: "site-add", userId: userId })) render(); return; }
-      if (actName === "override-open") {
+
+      // a permission switch was clicked. Work out what the flip MEANS before
+      // asking anything: back to what the profile says needs no reason, an
+      // exception does. Nothing flips until the pop-up box is saved.
+      if (actName === "perm-flip") {
+        var granted = btn.getAttribute("data-granted") === "1";
+        var isOvr = btn.getAttribute("data-ovr") === "1";
+        var defGranted = btn.getAttribute("data-default") === "1";
+        var target = !granted;
+        var rowP = UA.rows.find(function (x) { return x.user_id === userId; }) || {};
         if (openForm({
           kind: "override", userId: userId,
           code: btn.getAttribute("data-perm"),
-          effect: btn.getAttribute("data-effect"),
           name: btn.getAttribute("data-name"),
-          sensitive: btn.getAttribute("data-sensitive") === "1"
-        })) render();
+          sensitive: btn.getAttribute("data-sensitive") === "1",
+          effect: (isOvr && target === defGranted) ? "clear" : (target ? "grant" : "deny"),
+          defaultGranted: defGranted,
+          personName: rowP.full_name || "?",
+          profileName: rowP.access_profile_name || ""
+        })) renderModal();
         return;
       }
 
@@ -773,30 +869,6 @@
         try {
           await Dash.unassignUserProject(btn.getAttribute("data-assignment"));
           await refreshAfterWrite(userId, "Site removed.");
-        } catch (e) { UA.err = friendly(e); render(); }
-        return;
-      }
-
-      if (actName === "override-save") {
-        var f = UA.form;
-        var why = document.getElementById("ov-reason").value.trim();
-        if (!why) { UA.err = "A reason is required — it is shown next to the exception."; render(); return; }
-        if (f.sensitive &&
-            !window.confirm("\"" + f.name + "\" is a sensitive permission. Save this exception?")) return;
-        var until = document.getElementById("ov-until").value;
-        try {
-          await Dash.setUserPermissionOverride(f.userId, f.code, f.effect, why,
-            { expiresAt: until ? until + "T23:59:59+08:00" : null });
-          await refreshAfterWrite(f.userId,
-            (f.effect === "grant" ? "Added: " : "Removed: ") + f.name);
-        } catch (e) { UA.err = friendly(e); render(); }
-        return;
-      }
-
-      if (actName === "override-clear") {
-        try {
-          await Dash.clearUserPermissionOverride(userId, btn.getAttribute("data-perm"));
-          await refreshAfterWrite(userId, "Back to the profile default.");
         } catch (e) { UA.err = friendly(e); render(); }
         return;
       }
@@ -901,6 +973,27 @@
             UA.showCodes = ev.target.checked;
             render();
           }
+        });
+
+        // the pop-up box: Cancel / click outside = close (typed text asks
+        // first), the action button saves. Enter in the reason box saves too.
+        document.getElementById("modal").addEventListener("click", async function (ev) {
+          if (ev.target.classList && ev.target.classList.contains("modal-back")) {
+            if (confirmDiscard()) { closeForm(); renderModal(); }
+            return;
+          }
+          var btn = ev.target.closest("button[data-action]");
+          if (!btn) return;
+          var a = btn.getAttribute("data-action");
+          if (a === "modal-cancel") { if (confirmDiscard()) { closeForm(); renderModal(); } return; }
+          if (a === "modal-save")   { await modalSave(); }
+        });
+        document.getElementById("modal").addEventListener("input", function () {
+          UA.formDirty = true;
+        });
+        document.getElementById("modal").addEventListener("keydown", async function (ev) {
+          if (ev.key === "Enter" && ev.target.id === "ov-reason") { await modalSave(); }
+          if (ev.key === "Escape") { if (confirmDiscard()) { closeForm(); renderModal(); } }
         });
       } catch (e) {
         document.getElementById("accounts").innerHTML = UI.errorBanner((e && e.message) || String(e));
