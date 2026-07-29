@@ -1,0 +1,1005 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HF Dashboard — Users</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <header id="nav"></header>
+
+  <main id="main">
+
+    <!-- ================= USER ACCOUNTS (0070/0071) ============================
+         Who has a dashboard login and what each person may do. The DATABASE
+         enforces everything on every call — these controls are convenience:
+           users.view    -> may open this page (Management sees it read-only)
+           users.edit    -> account details, status, site assignments
+           users.create  -> "set up a login" for a console-created login
+           users.manage  -> access profiles + permission exceptions
+                            (Super Administrator only today)
+         Three rules the database refuses on, so the page does not offer:
+         you cannot change your own access; you may only manage people MORE
+         JUNIOR than yourself; you may only hand out profiles BELOW your own
+         rank (the reference call marks each profile assignable for you). -->
+    <div class="page-eyebrow">Administration</div>
+    <h1>User accounts</h1>
+    <p class="page-caption">Who can sign in to this dashboard, and what each
+      person is allowed to see and do.
+      <a href="roles.html" class="section-link">What each access profile allows &rarr;</a></p>
+
+    <div id="error"></div>
+
+    <div class="mp-controls" id="ua-tabs">
+      <span>Show:
+        <button type="button" data-tab="all" class="active">All</button>
+        <button type="button" data-tab="setup">To set up</button>
+        <button type="button" data-tab="suspended">Suspended</button>
+      </span>
+      <span id="ua-profile-filter"></span>
+    </div>
+    <div class="filter-wrap">
+      <input type="search" id="ua-search" class="filter-box"
+             placeholder="Search name or email…" autocomplete="off">
+    </div>
+
+    <div id="accounts"></div>
+
+  </main>
+
+  <!-- the pop-up confirmation box for permission changes (rendered by JS) -->
+  <div id="modal"></div>
+
+  <script src="vendor/supabase.js"></script>
+  <script src="config.js"></script>
+  <script src="dashboard-client.js"></script>
+  <script src="ui.js"></script>
+  <script src="shell.js"></script>
+
+  <script>
+    var esc = UI.esc, escHtml = UI.escHtml;
+
+    // page state — survives every re-render
+    var UA = {
+      rows: [],            // get_user_accounts
+      unlinked: [],        // get_unlinked_logins (only when users.create)
+      ref: null,           // get_admin_reference: profiles/departments/designations/companies/modules/my_rank
+      staffPool: [],       // manpower rows for the staff-link pickers
+      projects: [],        // project directory for the site picker
+      myUserId: null,      // auth user id — own row gets no controls
+      canEdit: false, canCreate: false, canManage: false,
+      tab: "all",          // all | setup | suspended
+      search: "", profileFilter: "all",
+      cardOpen: null,      // user_id of the open record card (accordion)
+      cardData: {},        // user_id -> { access: [...], sites: [...] } lazy cache
+      profilePerms: {},    // access_profile_id -> {code:true} — what the profile
+                           // grants by DEFAULT, so a switch knows whether a flip
+                           // is "make an exception" or "back to normal"
+      permSearch: "",      // filter box inside the permission editor
+      showCodes: false,    // "advanced" — reveal raw permission codes
+      form: null,          // the ONE open write form:
+                           //   {kind:'setup', loginId} | {kind:'edit', userId}
+                           //   {kind:'suspend'|'disable', userId}
+                           //   {kind:'override', ...} -> the pop-up box
+                           //   {kind:'site-add', userId}
+      formDirty: false,    // typed into the open form — guard before discarding
+      err: "", okMsg: ""
+    };
+
+    /* ------------------------- small helpers ------------------------- */
+
+    function statusBadge(s) {
+      var cls = { active: "badge-approved", pending: "badge-pending",
+                  suspended: "badge-high", disabled: "badge-gray" }[s] || "badge-gray";
+      return UI.badge(s, cls);
+    }
+
+    function fmtDT(ts) { return ts ? Dash.klDateTime(ts) : "—"; }
+
+    // The junior-target rule, mirrored so the page never offers what the
+    // database will refuse: not yourself, and only people whose profile rank
+    // is BELOW yours (a bigger number). No profile yet = most junior.
+    function canTouch(r) {
+      if (!UA.ref) return false;
+      if (r.user_id === UA.myUserId) return false;
+      if (r.profile_rank === null || r.profile_rank === undefined) return true;
+      return r.profile_rank > UA.ref.my_rank;
+    }
+
+    // discard-guard: one write form at a time; typed text never dies silently
+    function confirmDiscard() {
+      if (!UA.form || !UA.formDirty) return true;
+      return window.confirm("Discard what you typed in the open form?");
+    }
+    function openForm(f) {
+      if (!confirmDiscard()) return false;
+      UA.form = f; UA.formDirty = false; UA.err = "";
+      return true;
+    }
+    function closeForm() { UA.form = null; UA.formDirty = false; }
+
+    function profileById(id) {
+      var list = (UA.ref && UA.ref.access_profiles) || [];
+      for (var i = 0; i < list.length; i++)
+        if (list[i].access_profile_id === id) return list[i];
+      return null;
+    }
+
+    /* --------------------- dropdown option builders --------------------- */
+
+    // only the profiles the database will let THIS caller hand out
+    function profileOptions(selectedId) {
+      return ((UA.ref && UA.ref.access_profiles) || [])
+        .filter(function (p) { return p.assignable; })
+        .map(function (p) {
+          return '<option value="' + p.access_profile_id + '"' +
+                 (p.access_profile_id === selectedId ? " selected" : "") + ">" +
+                 escHtml(p.name) + "</option>";
+        }).join("");
+    }
+
+    function departmentOptions(selectedId) {
+      return '<option value="">— none —</option>' +
+        ((UA.ref && UA.ref.departments) || []).map(function (d) {
+          return '<option value="' + d.department_id + '"' +
+                 (d.department_id === selectedId ? " selected" : "") + ">" +
+                 escHtml(d.name) + "</option>";
+        }).join("");
+    }
+
+    // job titles, grouped the way the company organigram groups them
+    function designationOptions(selectedId) {
+      var groups = {};
+      ((UA.ref && UA.ref.designations) || []).forEach(function (d) {
+        var g = d.group_name || "Other";
+        (groups[g] = groups[g] || []).push(d);
+      });
+      var html = '<option value="">— none —</option>';
+      Object.keys(groups).forEach(function (g) {
+        html += '<optgroup label="' + esc(g) + '">' +
+          groups[g].map(function (d) {
+            return '<option value="' + d.designation_id + '"' +
+                   (d.designation_id === selectedId ? " selected" : "") + ">" +
+                   escHtml(d.name) + "</option>";
+          }).join("") + "</optgroup>";
+      });
+      return html;
+    }
+
+    function companyOptions(selectedId) {
+      return ((UA.ref && UA.ref.companies) || []).map(function (c) {
+        return '<option value="' + c.company_id + '"' +
+               (c.company_id === selectedId ? " selected" : "") + ">" +
+               escHtml(c.company_code + " — " + c.name) + "</option>";
+      }).join("");
+    }
+
+    // staff not yet linked to any login (linking twice is refused anyway)
+    function staffOptions(selectedId) {
+      var linked = {};
+      UA.rows.forEach(function (r) { if (r.staff_id) linked[r.staff_id] = r.user_id; });
+      var html = '<option value="">— not linked —</option>';
+      UA.staffPool
+        .filter(function (s) { return !linked[s.staff_id] || s.staff_id === selectedId; })
+        .forEach(function (s) {
+          html += '<option value="' + s.staff_id + '"' +
+                  (s.staff_id === selectedId ? " selected" : "") + ">" +
+                  escHtml((s.employee_code ? s.employee_code + " — " : "") +
+                          s.full_name + " (" + (s.company || "?") + ")") + "</option>";
+        });
+      return html;
+    }
+
+    // house rule: pickers show CODE — NAME, never a bare id
+    function siteOptions() {
+      return UA.projects
+        .filter(function (p) { return p.status === "active" || p.status === "completed"; })
+        .map(function (p) {
+          return '<option value="' + p.project_id + '">' +
+                 escHtml((p.project_code || "?") + " — " + (p.project_name || "")) +
+                 (p.status !== "active" ? " (" + escHtml(p.status) + ")" : "") + "</option>";
+        }).join("");
+    }
+
+    /* --------------------------- write forms --------------------------- */
+
+    // "Set up a login": console-created login -> active account in one step
+    function setupForm(login) {
+      return '<div class="claim-form" data-form="1">' +
+        "<strong>Set up " + escHtml(login.email) + "</strong>" +
+        '<label>full name <input type="text" id="su-name" size="24"></label>' +
+        '<label>company <select id="su-company">' + companyOptions(null) + "</select></label>" +
+        '<label>access profile <select id="su-profile"><option value="">choose…</option>' +
+          profileOptions(null) + "</select></label>" +
+        '<label>department <select id="su-dept">' + departmentOptions(null) + "</select></label>" +
+        '<label>job title <select id="su-desig">' + designationOptions(null) + "</select></label>" +
+        '<label>staff record <select id="su-staff">' + staffOptions(null) + "</select></label>" +
+        '<button type="button" data-action="setup-save" data-login="' + login.user_id + '">Set up login</button>' +
+        '<button type="button" data-action="form-cancel">Cancel</button>' +
+        '<span class="muted-line">the account switches on immediately — they can sign in once this is saved</span>' +
+        "</div>";
+    }
+
+    // edit WHO somebody is — never what they may do (that is the profile
+    // select + permission editor, each behind its own stricter permission)
+    function editForm(r) {
+      return '<div class="claim-form" data-form="1">' +
+        "<strong>Edit details — " + escHtml(r.full_name) + "</strong>" +
+        '<label>full name <input type="text" id="ed-name" size="24" value="' + esc(r.full_name) + '"></label>' +
+        '<label>company <select id="ed-company">' + companyOptions(r.company_id) + "</select></label>" +
+        '<label>department <select id="ed-dept">' + departmentOptions(r.department_id) + "</select></label>" +
+        '<label>job title <select id="ed-desig">' + designationOptions(r.designation_id) + "</select></label>" +
+        '<label>staff record <select id="ed-staff">' + staffOptions(r.staff_id) + "</select></label>" +
+        '<button type="button" data-action="edit-save" data-user="' + r.user_id + '">Save changes</button>' +
+        '<button type="button" data-action="form-cancel">Cancel</button>' +
+        "</div>";
+    }
+
+    // suspend/disable ask WHY — the reason is stored on the account and shown
+    // here, so "why can he not sign in?" always has an answer
+    function statusReasonForm(r, kind) {
+      var word = kind === "suspend" ? "Suspend" : "Disable";
+      var note = kind === "suspend"
+        ? "temporary — the account can be switched back on later"
+        : "for people who have left — the login stops working until reactivated";
+      return '<div class="claim-form" data-form="1">' +
+        "<strong>" + word + " — " + escHtml(r.full_name) + "</strong>" +
+        '<label>reason <input type="text" id="st-reason" size="30" placeholder="required"></label>' +
+        '<button type="button" data-action="status-save" data-user="' + r.user_id +
+          '" data-status="' + (kind === "suspend" ? "suspended" : "disabled") + '">' + word + "</button>" +
+        '<button type="button" data-action="form-cancel">Cancel</button>' +
+        '<span class="muted-line">' + note + "</span>" +
+        "</div>";
+    }
+
+    // The pop-up box for a permission switch. Two very different moods:
+    //   making an EXCEPTION (grant/deny) -> asks WHY (the database requires
+    //     the reason — it is shown next to the permission for as long as the
+    //     exception lives);
+    //   going BACK TO NORMAL (clear)     -> no reason needed, just confirm —
+    //     returning to the rule needs no justification.
+    function renderModal() {
+      var host = document.getElementById("modal");
+      var f = UA.form;
+      if (!f || f.kind !== "override") { host.innerHTML = ""; return; }
+
+      var title, note, action;
+      var prof = escHtml(f.profileName || "assigned");
+      if (f.effect === "clear") {
+        title = "Back to normal";
+        note = "This removes the personal exception for <strong>" + escHtml(f.personName) +
+               "</strong>. The " + prof + " profile decides again — it will be <strong>" +
+               (f.defaultGranted ? "allowed" : "not allowed") + "</strong>.";
+        action = "Back to normal";
+      } else if (f.effect === "grant") {
+        title = "Turn on";
+        note = "Just for <strong>" + escHtml(f.personName) + "</strong> — the " + prof +
+               " profile does not include this.";
+        action = "Turn on";
+      } else {
+        title = "Turn off";
+        note = "Just for <strong>" + escHtml(f.personName) + "</strong> — everyone else on the " +
+               prof + " profile keeps it.";
+        action = "Turn off";
+      }
+
+      host.innerHTML =
+        '<div class="modal-back"><div class="modal-card">' +
+          "<h3>" + title + " — " + escHtml(f.name) + "</h3>" +
+          (f.sensitive
+            ? '<p class="modal-note">&#9888; sensitive permission — the change is recorded in the activity log</p>'
+            : "") +
+          '<p class="modal-note">' + note + "</p>" +
+          (f.effect !== "clear"
+            ? '<label>Why? (shown next to the permission)' +
+              '<input type="text" id="ov-reason" autocomplete="off" data-form="1"></label>'
+            : "") +
+          '<div id="ov-err"></div>' +
+          '<div class="modal-actions">' +
+            '<button type="button" class="btn-plain" data-action="modal-cancel">Cancel</button>' +
+            '<button type="button" data-action="modal-save">' + action + "</button>" +
+          "</div>" +
+        "</div></div>";
+
+      var inp = document.getElementById("ov-reason");
+      if (inp) inp.focus();
+    }
+
+    function modalError(msg) {
+      var el = document.getElementById("ov-err");
+      if (el) el.innerHTML = '<p class="modal-note" style="color:var(--danger-ink)">' + escHtml(msg) + "</p>";
+    }
+
+    async function modalSave() {
+      var f = UA.form;
+      if (!f || f.kind !== "override") return;
+      try {
+        if (f.effect === "clear") {
+          await Dash.clearUserPermissionOverride(f.userId, f.code);
+          await refreshAfterWrite(f.userId, "Back to normal — " + f.name);
+        } else {
+          var why = document.getElementById("ov-reason").value.trim();
+          if (!why) { modalError("A reason is required — it is shown next to the permission."); return; }
+          await Dash.setUserPermissionOverride(f.userId, f.code, f.effect, why);
+          await refreshAfterWrite(f.userId,
+            (f.effect === "grant" ? "Turned on — " : "Turned off — ") + f.name);
+        }
+      } catch (e) { modalError(friendly(e)); }
+    }
+
+    function siteAddForm(r) {
+      return '<div class="claim-form" data-form="1">' +
+        "<strong>Assign a site — " + escHtml(r.full_name) + "</strong>" +
+        '<label>site <select id="sa-site"><option value="">choose…</option>' + siteOptions() + "</select></label>" +
+        '<label>role <select id="sa-role">' +
+          '<option value="member">Member</option>' +
+          '<option value="supervisor">Supervisor</option>' +
+          '<option value="project_manager">Project manager</option>' +
+        "</select></label>" +
+        '<label>until <input type="date" id="sa-until" title="optional end date"></label>' +
+        '<button type="button" data-action="site-save" data-user="' + r.user_id + '">Assign</button>' +
+        '<button type="button" data-action="form-cancel">Cancel</button>' +
+        "</div>";
+    }
+
+    /* ------------------------- the record card ------------------------- */
+
+    function cardIdentity(r) {
+      var chips = [];
+      chips.push(escHtml(r.email));
+      if (r.company_code) chips.push(escHtml(r.company_code));
+      if (r.department_name) chips.push(escHtml(r.department_name));
+      if (r.designation_name) chips.push(escHtml(r.designation_name));
+      if (r.staff_name) chips.push("Staff: " + escHtml(r.staff_name));
+      chips.push("Created " + fmtDT(r.created_at));
+      if (r.approved_by_email) chips.push("Approved by " + escHtml(r.approved_by_email));
+      if (r.last_seen_at) chips.push("Last seen " + fmtDT(r.last_seen_at));
+
+      var self = r.user_id === UA.myUserId;
+      return '<div class="pc-head"><strong>' + escHtml(r.full_name) + "</strong> " +
+        statusBadge(r.status) +
+        (self ? ' <span class="muted-line">this is you — another administrator manages your account</span>' : "") +
+        '<span class="pc-chips">' + chips.join(" · ") + "</span></div>" +
+        (r.suspended_reason
+          ? '<div class="muted-line">Reason: ' + escHtml(r.suspended_reason) + "</div>"
+          : "");
+    }
+
+    function cardActions(r) {
+      var self = r.user_id === UA.myUserId;
+      var touchable = canTouch(r);
+      var btns = [];
+
+      // identity edits: allowed on yourself (name/department are not power)
+      if (UA.canEdit && (self || touchable))
+        btns.push('<button type="button" data-action="edit-open" data-user="' + r.user_id + '">Edit details…</button>');
+
+      if (UA.canEdit && touchable) {
+        if (r.status === "active") {
+          btns.push('<button type="button" data-action="suspend-open" data-user="' + r.user_id + '">Suspend…</button>');
+          btns.push('<button type="button" class="danger" data-action="disable-open" data-user="' + r.user_id + '">Disable…</button>');
+        } else {
+          btns.push('<button type="button" data-action="activate" data-user="' + r.user_id + '">Activate</button>');
+        }
+      }
+
+      var profileCtl = "";
+      if (UA.canManage && touchable) {
+        profileCtl =
+          '<span class="move-ctl">Access profile: ' +
+          '<select id="ap-sel-' + r.user_id + '">' + profileOptions(r.access_profile_id) + "</select> " +
+          '<button type="button" data-action="profile-apply" data-user="' + r.user_id + '">Apply</button></span>';
+      }
+
+      return (btns.length || profileCtl)
+        ? '<div class="claim-actions">' + btns.join(" ") + " " + profileCtl + "</div>"
+        : "";
+    }
+
+    function cardSites(r, data) {
+      var html = '<div class="section-title">Sites</div>';
+
+      if (r.scope_all_projects) {
+        return html + '<div class="muted-line">The ' + escHtml(r.access_profile_name || "assigned") +
+          ' profile sees every site — site assignments do not restrict this person.</div>';
+      }
+
+      var sites = data.sites || [];
+      if (!sites.length) {
+        html += '<div class="muted-line">No sites assigned — this person sees no project pages until a site is added.</div>';
+      } else {
+        html += '<table class="table-stack"><thead><tr><th>Site</th><th>Role</th><th>From</th><th>Until</th>' +
+                (UA.canEdit && canTouch(r) ? "<th></th>" : "") + "</tr></thead><tbody>";
+        sites.forEach(function (s) {
+          html += "<tr>" +
+            UI.td("Site", escHtml((s.project_code || "?") + " — " + (s.project_name || ""))) +
+            UI.td("Role", escHtml(UI.label(s.assignment_role))) +
+            UI.td("From", UI.dstr(s.starts_on)) +
+            UI.td("Until", s.ends_on ? UI.dstr(s.ends_on) : "—") +
+            (UA.canEdit && canTouch(r)
+              ? UI.td("", '<button type="button" class="btn-plain" data-action="site-remove" data-assignment="' +
+                          s.assignment_id + '" data-user="' + r.user_id + '">Remove</button>')
+              : "") +
+            "</tr>";
+        });
+        html += "</tbody></table>";
+      }
+
+      if (UA.canEdit && canTouch(r)) {
+        html += (UA.form && UA.form.kind === "site-add" && UA.form.userId === r.user_id)
+          ? siteAddForm(r)
+          : '<div class="claim-actions"><button type="button" data-action="site-add-open" data-user="' +
+            r.user_id + '">+ Assign a site</button></div>';
+      }
+      return html;
+    }
+
+    // the permission editor: grouped by module, plain words, and next to every
+    // permission WHERE IT CAME FROM — profile, added for this person, removed
+    // for this person — so the screen is never a list of unexplainable ticks
+    function cardPermissions(r, data) {
+      var acc = data.access;
+      var html = '<div class="section-title">What this person can do</div>';
+      if (!acc) return html + '<div class="muted-line">Loading…</div>';
+
+      var editable = UA.canManage && canTouch(r);
+      var customised = acc.some(function (p) {
+        return p.source === "granted for this person" || p.source === "removed for this person";
+      });
+
+      html += '<div class="claim-actions">' +
+        '<input type="search" class="filter-box" id="perm-search" placeholder="Find a permission…" value="' +
+          esc(UA.permSearch) + '" style="max-width:240px"> ' +
+        (editable && customised
+          ? '<button type="button" data-action="reset-perms" data-user="' + r.user_id +
+            '">Use role default (clear all exceptions)</button> '
+          : "") +
+        '<label class="muted-line"><input type="checkbox" id="perm-codes"' +
+          (UA.showCodes ? " checked" : "") + "> show technical codes</label>" +
+        "</div>";
+
+      var needle = UA.permSearch.toLowerCase();
+      var mods = (UA.ref && UA.ref.modules) || [];
+      var byModule = {};
+      acc.forEach(function (p) { (byModule[p.module_code] = byModule[p.module_code] || []).push(p); });
+
+      mods.forEach(function (m) {
+        var list = (byModule[m.module_code] || []).filter(function (p) {
+          if (!needle) return true;
+          return (p.name || "").toLowerCase().indexOf(needle) !== -1 ||
+                 (p.permission_code || "").toLowerCase().indexOf(needle) !== -1;
+        });
+        if (!list.length) return;
+
+        html += '<div class="group-head" style="margin-top:10px">' + escHtml(m.name) + "</div>" +
+          '<table class="table-stack"><tbody>';
+
+        list.forEach(function (p) {
+          var srcText;
+          if (p.source === "profile") srcText = "from the " + (r.access_profile_name || "assigned") + " access profile";
+          else if (p.source === "granted for this person") srcText = "added just for this person" + (p.source_detail ? " — " + p.source_detail : "");
+          else if (p.source === "removed for this person") srcText = "removed just for this person" + (p.source_detail ? " — " + p.source_detail : "");
+          else srcText = "not part of this access profile";
+
+          var ovr = p.source === "granted for this person" || p.source === "removed for this person";
+
+          // what the PROFILE would say without the exception — decides whether
+          // flipping the switch means "make an exception" or "back to normal".
+          // Falls back to reading it off the source wording if the profile's
+          // permission list has not arrived (a redundant override is the only
+          // case the fallback can misread, and the database corrects it).
+          var defSet = UA.profilePerms[r.access_profile_id];
+          var defaultGranted = defSet
+            ? !!defSet[p.permission_code]
+            : (p.source === "profile" || p.source === "removed for this person");
+
+          var control;
+          if (editable) {
+            // a BUTTON with role=switch — it never flips by itself; the pop-up
+            // box decides, so the knob always tells the truth
+            control = '<button type="button" class="switch' + (ovr ? " exc" : "") +
+              '" role="switch" aria-checked="' + (p.granted ? "true" : "false") +
+              '" aria-label="' + esc(p.name) + '" data-action="perm-flip"' +
+              ' data-user="' + r.user_id + '" data-perm="' + esc(p.permission_code) +
+              '" data-name="' + esc(p.name) + '" data-sensitive="' + (p.is_sensitive ? "1" : "") +
+              '" data-granted="' + (p.granted ? "1" : "") + '" data-ovr="' + (ovr ? "1" : "") +
+              '" data-default="' + (defaultGranted ? "1" : "") +
+              '" title="' + esc((p.granted ? "Allowed" : "Not allowed") + " — " + srcText + ". Click to change.") +
+              '"></button>';
+          } else {
+            // read-only viewers get information, not a dead control
+            control = p.granted
+              ? '<span class="badge badge-approved">Yes</span>'
+              : '<span class="badge badge-gray">No</span>';
+          }
+
+          html += "<tr>" +
+            UI.td("Permission", escHtml(p.name) +
+              (p.is_sensitive ? ' <span class="chip chip-warn" title="sensitive — changes are audited">sensitive</span>' : "") +
+              (UA.showCodes ? ' <span class="muted-line">' + escHtml(p.permission_code) + "</span>" : "") +
+              '<br><span class="muted-line">' + escHtml(srcText) + "</span>") +
+            UI.td("Allowed", control) +
+            "</tr>";
+        });
+
+        html += "</tbody></table>";
+      });
+
+      return html;
+    }
+
+    function recordCard(r) {
+      var data = UA.cardData[r.user_id] || {};
+      var html = '<div class="pile-card">';
+      html += cardIdentity(r);
+
+      if (UA.form && UA.form.kind === "edit" && UA.form.userId === r.user_id) {
+        html += editForm(r);
+      } else if (UA.form && (UA.form.kind === "suspend" || UA.form.kind === "disable") &&
+                 UA.form.userId === r.user_id) {
+        html += statusReasonForm(r, UA.form.kind);
+      } else {
+        html += cardActions(r);
+      }
+
+      html += cardSites(r, data);
+      html += cardPermissions(r, data);
+      html += "</div>";
+      return html;
+    }
+
+    /* --------------------------- the tables --------------------------- */
+
+    function filteredRows() {
+      var needle = UA.search.toLowerCase();
+      return UA.rows.filter(function (r) {
+        if (UA.tab === "suspended" && r.status !== "suspended" && r.status !== "disabled") return false;
+        if (UA.profileFilter !== "all" && r.access_profile_code !== UA.profileFilter) return false;
+        if (needle &&
+            (r.full_name || "").toLowerCase().indexOf(needle) === -1 &&
+            (r.email || "").toLowerCase().indexOf(needle) === -1) return false;
+        return true;
+      });
+    }
+
+    function accountsTable() {
+      var rows = filteredRows();
+      if (!rows.length) return UI.empty("No accounts match.");
+
+      var html = '<div class="table-wrap"><table class="table-stack table-sticky-first">' +
+        "<thead><tr><th>Name</th><th>Email</th><th>Job title</th><th>Access profile</th>" +
+        "<th>Sites</th><th>Status</th><th>Last seen</th></tr></thead><tbody>";
+
+      rows.forEach(function (r) {
+        var profCell = escHtml(r.access_profile_name || "—");
+        if (r.override_count > 0) {
+          profCell += ' <span class="chip chip-warn" title="' + r.override_count +
+            ' permission exception(s) — open the card to see them">Customised</span>';
+        }
+        var sitesCell = r.scope_all_projects ? "All sites" :
+          (r.project_count > 0 ? r.project_count + " site" + (r.project_count > 1 ? "s" : "") : "—");
+
+        html += '<tr data-userrow="' + r.user_id + '"' +
+          (UA.cardOpen === r.user_id ? ' class="active"' : "") + ">" +
+          UI.td("Name", escHtml(r.full_name) +
+            (r.user_id === UA.myUserId ? ' <span class="muted-line">(you)</span>' : "")) +
+          UI.td("Email", escHtml(r.email)) +
+          UI.td("Job title", escHtml(r.designation_name || "—")) +
+          UI.td("Access profile", profCell) +
+          UI.td("Sites", sitesCell) +
+          UI.td("Status", statusBadge(r.status)) +
+          UI.td("Last seen", fmtDT(r.last_seen_at)) +
+          "</tr>";
+
+        if (UA.cardOpen === r.user_id) {
+          html += '<tr class="pile-card-row"><td colspan="7">' + recordCard(r) + "</td></tr>";
+        }
+      });
+
+      return html + "</tbody></table></div>";
+    }
+
+    // "To set up": logins that exist in Supabase but have no account yet.
+    // Not a signup queue — signups are off; the owner creates the login in
+    // the console, then finishes it here.
+    function setupTable() {
+      if (!UA.canCreate) {
+        return UI.empty("Only administrators can set up new logins.");
+      }
+      if (!UA.unlinked.length) {
+        return UI.empty("No logins waiting to be set up.",
+          "To add someone: create their login first (Supabase console › Authentication › Add user), then it appears here for you to finish.");
+      }
+      var html = '<div class="table-wrap"><table class="table-stack">' +
+        "<thead><tr><th>Email</th><th>Sign-in method</th><th>Created</th><th>Last signed in</th><th></th></tr></thead><tbody>";
+      UA.unlinked.forEach(function (l) {
+        html += "<tr>" +
+          UI.td("Email", escHtml(l.email || "?")) +
+          UI.td("Sign-in method", escHtml(UI.label(l.provider))) +
+          UI.td("Created", fmtDT(l.created_at)) +
+          UI.td("Last signed in", fmtDT(l.last_sign_in_at)) +
+          UI.td("", '<button type="button" data-action="setup-open" data-login="' + l.user_id +
+                    '">Set up&hellip;</button>') +
+          "</tr>";
+        if (UA.form && UA.form.kind === "setup" && UA.form.loginId === l.user_id) {
+          html += '<tr><td colspan="5">' + setupForm(l) + "</td></tr>";
+        }
+      });
+      return html + "</tbody></table></div>" +
+        '<div class="pipe-note" style="margin-top:10px">A login that is set up here switches on ' +
+        "immediately with the access profile you choose. The person signs in with the email and " +
+        "password from the console (they can change the password with “Forgot password?”).</div>";
+    }
+
+    /* ---------------------------- rendering ---------------------------- */
+
+    function renderTabs() {
+      var wrap = document.getElementById("ua-tabs");
+      var setupN = UA.canCreate ? UA.unlinked.length : 0;
+      var suspN = UA.rows.filter(function (r) {
+        return r.status === "suspended" || r.status === "disabled";
+      }).length;
+
+      wrap.querySelectorAll("button[data-tab]").forEach(function (b) {
+        var t = b.getAttribute("data-tab");
+        b.classList.toggle("active", t === UA.tab);
+        if (t === "setup")     b.textContent = "To set up" + (setupN ? " (" + setupN + ")" : "");
+        if (t === "suspended") b.textContent = "Suspended" + (suspN ? " (" + suspN + ")" : "");
+      });
+
+      // profile filter chips only make sense on the account tabs
+      var pf = document.getElementById("ua-profile-filter");
+      if (UA.tab === "setup") { pf.innerHTML = ""; return; }
+      var profiles = {};
+      UA.rows.forEach(function (r) {
+        if (r.access_profile_code) profiles[r.access_profile_code] = r.access_profile_name;
+      });
+      var html = "Profile: <select id=\"ua-profile-sel\">" +
+        '<option value="all">All</option>' +
+        Object.keys(profiles).map(function (c) {
+          return '<option value="' + esc(c) + '"' + (UA.profileFilter === c ? " selected" : "") + ">" +
+                 escHtml(profiles[c]) + "</option>";
+        }).join("") + "</select>";
+      pf.innerHTML = html;
+    }
+
+    function render() {
+      renderTabs();
+      document.getElementById("error").innerHTML =
+        (UA.err ? UI.errorBanner(UA.err) : "") +
+        (UA.okMsg ? UI.okBanner(UA.okMsg) : "");
+      document.getElementById("accounts").innerHTML =
+        UA.tab === "setup" ? setupTable() : accountsTable();
+      renderModal();   // the pop-up box lives outside #accounts; keep it in step
+    }
+
+    /* --------------------------- data loading --------------------------- */
+
+    async function loadAll() {
+      var jobs = [Dash.getUserAccounts(), Dash.getAdminReference()];
+      jobs.push(UA.canCreate ? Dash.getUnlinkedLogins() : Promise.resolve([]));
+      var res = await Promise.all(jobs);
+      UA.rows = res[0] || [];
+      UA.ref = res[1] || {};
+      UA.unlinked = res[2] || [];
+    }
+
+    // the card's lazy reads — cached until a write invalidates them. When the
+    // caller can flip switches, the person's PROFILE permission list comes too
+    // (cached per profile), so each switch knows what "back to normal" means.
+    async function loadCard(userId) {
+      var d = UA.cardData[userId] = UA.cardData[userId] || {};
+      var row = UA.rows.find(function (x) { return x.user_id === userId; }) || {};
+      var wantProfile = UA.canManage && row.access_profile_id &&
+                        !UA.profilePerms[row.access_profile_id];
+      try {
+        var jobs = [
+          Dash.getUserEffectiveAccess(userId),
+          Dash.getUserProjectAssignments(userId)
+        ];
+        if (wantProfile) jobs.push(Dash.getAccessProfilePermissions(row.access_profile_id));
+        var res = await Promise.all(jobs);
+        d.access = res[0] || [];
+        d.sites = res[1] || [];
+        if (wantProfile) {
+          var set = {};
+          (res[2] || []).forEach(function (p) { set[p.permission_code] = true; });
+          UA.profilePerms[row.access_profile_id] = set;
+        }
+      } catch (e) {
+        d.access = d.access || [];
+        d.sites = d.sites || [];
+        UA.err = (e && e.message) || String(e);
+      }
+    }
+
+    // after a write: fresh lists + fresh card for the person changed
+    async function refreshAfterWrite(userId, msg) {
+      UA.okMsg = msg || ""; UA.err = "";
+      closeForm();
+      delete UA.cardData[userId];
+      try {
+        await loadAll();
+        if (userId && UA.cardOpen === userId) await loadCard(userId);
+      } catch (e) { UA.err = (e && e.message) || String(e); }
+      render();
+    }
+
+    // database error codes -> plain words (anything unmapped shows as-is)
+    var ERR_WORDS = {
+      not_authorised: "The database refused this — it is above your level or not allowed.",
+      reason_required: "A reason is required — it is shown next to the exception.",
+      override_not_found: "This permission is already at the profile default.",
+      account_already_exists: "That login already has an account.",
+      login_not_found: "That login no longer exists in Supabase.",
+      staff_already_linked: "That staff record is already linked to another login.",
+      no_access_profile: "Choose an access profile first.",
+      empty_name: "The name cannot be empty.",
+      bad_expiry: "The end date is already in the past."
+    };
+    function friendly(e) {
+      var m = (e && e.message) || String(e);
+      return ERR_WORDS[m] || m;
+    }
+
+    /* ----------------------------- actions ----------------------------- */
+
+    async function act(btn) {
+      var actName = btn.getAttribute("data-action");
+      var userId = btn.getAttribute("data-user");
+
+      if (actName === "form-cancel") { if (confirmDiscard()) { closeForm(); render(); } return; }
+
+      /* ---- open forms ---- */
+      if (actName === "setup-open")   { if (openForm({ kind: "setup", loginId: btn.getAttribute("data-login") })) render(); return; }
+      if (actName === "edit-open")    { if (openForm({ kind: "edit", userId: userId })) render(); return; }
+      if (actName === "suspend-open") { if (openForm({ kind: "suspend", userId: userId })) render(); return; }
+      if (actName === "disable-open") { if (openForm({ kind: "disable", userId: userId })) render(); return; }
+      if (actName === "site-add-open"){ if (openForm({ kind: "site-add", userId: userId })) render(); return; }
+
+      // a permission switch was clicked. Work out what the flip MEANS before
+      // asking anything: back to what the profile says needs no reason, an
+      // exception does. Nothing flips until the pop-up box is saved.
+      if (actName === "perm-flip") {
+        var granted = btn.getAttribute("data-granted") === "1";
+        var isOvr = btn.getAttribute("data-ovr") === "1";
+        var defGranted = btn.getAttribute("data-default") === "1";
+        var target = !granted;
+        var rowP = UA.rows.find(function (x) { return x.user_id === userId; }) || {};
+        if (openForm({
+          kind: "override", userId: userId,
+          code: btn.getAttribute("data-perm"),
+          name: btn.getAttribute("data-name"),
+          sensitive: btn.getAttribute("data-sensitive") === "1",
+          effect: (isOvr && target === defGranted) ? "clear" : (target ? "grant" : "deny"),
+          defaultGranted: defGranted,
+          personName: rowP.full_name || "?",
+          profileName: rowP.access_profile_name || ""
+        })) renderModal();
+        return;
+      }
+
+      /* ---- saves ---- */
+      if (actName === "setup-save") {
+        var loginId = btn.getAttribute("data-login");
+        var name = document.getElementById("su-name").value.trim();
+        var profile = document.getElementById("su-profile").value;
+        if (!name)    { UA.err = "The full name is required."; render(); return; }
+        if (!profile) { UA.err = "Choose an access profile."; render(); return; }
+        try {
+          await Dash.createUserAccount(loginId, {
+            fullName: name,
+            companyId: document.getElementById("su-company").value,
+            accessProfileId: profile,
+            departmentId: document.getElementById("su-dept").value || null,
+            designationId: document.getElementById("su-desig").value || null,
+            staffId: document.getElementById("su-staff").value || null
+          });
+          await refreshAfterWrite(null, "Login set up — " + name + " can sign in now.");
+        } catch (e) { UA.err = friendly(e); render(); }
+        return;
+      }
+
+      if (actName === "edit-save") {
+        var newStaff = document.getElementById("ed-staff").value;
+        var row = UA.rows.find(function (x) { return x.user_id === userId; }) || {};
+        try {
+          await Dash.updateUserAccount(userId, {
+            fullName: document.getElementById("ed-name").value.trim() || null,
+            companyId: document.getElementById("ed-company").value || null,
+            departmentId: document.getElementById("ed-dept").value || null,
+            designationId: document.getElementById("ed-desig").value || null,
+            staffId: newStaff || null,
+            clearStaff: !newStaff && !!row.staff_id   // "— not linked —" chosen = unlink
+          });
+          await refreshAfterWrite(userId, "Details saved.");
+        } catch (e) { UA.err = friendly(e); render(); }
+        return;
+      }
+
+      if (actName === "status-save") {
+        var reason = document.getElementById("st-reason").value.trim();
+        if (!reason) { UA.err = "A reason is required."; render(); return; }
+        try {
+          await Dash.setUserStatus(userId, btn.getAttribute("data-status"), reason);
+          await refreshAfterWrite(userId, "Account " + btn.getAttribute("data-status") + ".");
+        } catch (e) { UA.err = friendly(e); render(); }
+        return;
+      }
+
+      if (actName === "activate") {
+        if (!window.confirm("Switch this account back on?")) return;
+        try {
+          await Dash.setUserStatus(userId, "active");
+          await refreshAfterWrite(userId, "Account activated.");
+        } catch (e) { UA.err = friendly(e); render(); }
+        return;
+      }
+
+      if (actName === "profile-apply") {
+        var sel = document.getElementById("ap-sel-" + userId);
+        var chosen = profileById(sel.value);
+        var row2 = UA.rows.find(function (x) { return x.user_id === userId; }) || {};
+        if (!sel.value || sel.value === row2.access_profile_id) return;
+        if (!window.confirm("Change " + row2.full_name + "'s access profile to \"" +
+              (chosen ? chosen.name : "?") + "\"? Their permissions change immediately.")) return;
+        try {
+          await Dash.setUserAccessProfile(userId, sel.value);
+          await refreshAfterWrite(userId, "Access profile changed.");
+        } catch (e) { UA.err = friendly(e); render(); }
+        return;
+      }
+
+      if (actName === "site-save") {
+        var site = document.getElementById("sa-site").value;
+        if (!site) { UA.err = "Choose a site."; render(); return; }
+        try {
+          await Dash.assignUserProject(userId, site,
+            document.getElementById("sa-role").value,
+            document.getElementById("sa-until").value || null);
+          await refreshAfterWrite(userId, "Site assigned.");
+        } catch (e) { UA.err = friendly(e); render(); }
+        return;
+      }
+
+      if (actName === "site-remove") {
+        if (!window.confirm("Remove this site assignment?")) return;
+        try {
+          await Dash.unassignUserProject(btn.getAttribute("data-assignment"));
+          await refreshAfterWrite(userId, "Site removed.");
+        } catch (e) { UA.err = friendly(e); render(); }
+        return;
+      }
+
+      if (actName === "reset-perms") {
+        var row3 = UA.rows.find(function (x) { return x.user_id === userId; }) || {};
+        if (!window.confirm("Clear ALL of " + row3.full_name +
+              "'s permission exceptions and go back to the profile defaults?")) return;
+        try {
+          var out = await Dash.resetUserPermissions(userId);
+          await refreshAfterWrite(userId, "Cleared " + ((out && out.cleared) || 0) + " exception(s).");
+        } catch (e) { UA.err = friendly(e); render(); }
+        return;
+      }
+    }
+
+    /* ------------------------------ boot ------------------------------ */
+
+    window.onShellReady = async function () {
+      document.getElementById("accounts").innerHTML = UI.empty("Loading accounts…");
+      try {
+        var user = await Dash.getUser();
+        UA.myUserId = user && user.id;
+        UA.canEdit = Dash.can("users.edit");
+        UA.canCreate = Dash.can("users.create");
+        UA.canManage = Dash.can("users.manage");
+
+        await loadAll();
+
+        // pickers only matter when this login can actually write
+        if (UA.canEdit || UA.canCreate) {
+          try {
+            var extra = await Promise.all([Dash.getManpowerBySite(), Dash.getProjectDirectory()]);
+            UA.staffPool = (extra[0] || []).filter(function (s) { return s.is_active; });
+            UA.projects = extra[1] || [];
+          } catch (e) { /* pickers degrade to empty lists */ }
+        }
+
+        render();
+
+        document.getElementById("ua-search").addEventListener("input", function () {
+          UA.search = this.value;
+          document.getElementById("accounts").innerHTML =
+            UA.tab === "setup" ? setupTable() : accountsTable();
+        });
+
+        document.getElementById("ua-tabs").addEventListener("click", function (ev) {
+          var b = ev.target.closest("button[data-tab]");
+          if (!b) return;
+          if (!confirmDiscard()) return;
+          closeForm();
+          UA.tab = b.getAttribute("data-tab");
+          UA.cardOpen = null;
+          render();
+        });
+
+        document.getElementById("ua-tabs").addEventListener("change", function (ev) {
+          if (ev.target.id === "ua-profile-sel") {
+            UA.profileFilter = ev.target.value;
+            render();
+          }
+        });
+
+        // one delegated handler: buttons first, then row-click = open card
+        document.getElementById("accounts").addEventListener("click", async function (ev) {
+          var btn = ev.target.closest("button[data-action]");
+          if (btn) { ev.preventDefault(); await act(btn); return; }
+
+          if (ev.target.closest("button, select, input, a, label")) return;
+          var tr = ev.target.closest("tr[data-userrow]");
+          if (!tr) return;
+          if (!confirmDiscard()) return;
+          closeForm();
+          var uid = tr.getAttribute("data-userrow");
+          if (UA.cardOpen === uid) { UA.cardOpen = null; render(); return; }
+          UA.cardOpen = uid;         // accordion: opening one closes the other
+          UA.okMsg = "";
+          render();                  // show the card shell while the reads run
+          if (!UA.cardData[uid] || !UA.cardData[uid].access) {
+            await loadCard(uid);
+            render();
+          }
+        });
+
+        // permission search + codes toggle live inside re-rendered HTML,
+        // so they are delegated too
+        document.getElementById("accounts").addEventListener("input", function (ev) {
+          if (ev.target.id === "perm-search") {
+            UA.permSearch = ev.target.value;
+            var uid = UA.cardOpen;
+            render();
+            // keep typing focus through the re-render
+            var box = document.getElementById("perm-search");
+            if (box) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
+          } else if (ev.target.closest('[data-form="1"]')) {
+            UA.formDirty = true;     // typed into a write form — guard discards
+          }
+        });
+
+        document.getElementById("accounts").addEventListener("change", function (ev) {
+          if (ev.target.id === "perm-codes") {
+            UA.showCodes = ev.target.checked;
+            render();
+          }
+        });
+
+        // the pop-up box: Cancel / click outside = close (typed text asks
+        // first), the action button saves. Enter in the reason box saves too.
+        document.getElementById("modal").addEventListener("click", async function (ev) {
+          if (ev.target.classList && ev.target.classList.contains("modal-back")) {
+            if (confirmDiscard()) { closeForm(); renderModal(); }
+            return;
+          }
+          var btn = ev.target.closest("button[data-action]");
+          if (!btn) return;
+          var a = btn.getAttribute("data-action");
+          if (a === "modal-cancel") { if (confirmDiscard()) { closeForm(); renderModal(); } return; }
+          if (a === "modal-save")   { await modalSave(); }
+        });
+        document.getElementById("modal").addEventListener("input", function () {
+          UA.formDirty = true;
+        });
+        document.getElementById("modal").addEventListener("keydown", async function (ev) {
+          if (ev.key === "Enter" && ev.target.id === "ov-reason") { await modalSave(); }
+          if (ev.key === "Escape") { if (confirmDiscard()) { closeForm(); renderModal(); } }
+        });
+      } catch (e) {
+        document.getElementById("accounts").innerHTML = UI.errorBanner((e && e.message) || String(e));
+      }
+    };
+  </script>
+
+</body>
+</html>

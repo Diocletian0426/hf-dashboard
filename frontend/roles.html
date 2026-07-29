@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HF Dashboard — Access profiles</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <header id="nav"></header>
+
+  <main id="main">
+
+    <!-- ================= ACCESS PROFILES (read-only reference) ================
+         What each access profile allows, in plain words — the page you open
+         to answer "what does Office actually get?" before changing anyone.
+         DELIBERATELY read-only: profiles change what a whole group of people
+         may do at once, so changes stay in reviewed SQL migrations, not
+         buttons. Assigning a profile to a PERSON is done on the Users page.
+         Gated users.view like users.html (database-enforced on every read). -->
+    <div class="page-eyebrow">Administration</div>
+    <h1>Access profiles</h1>
+    <p class="page-caption">What each profile allows. Profiles are assigned to
+      people on the <a href="users.html" class="section-link">Users page</a>;
+      the profiles themselves are changed by the system owner, not from here.</p>
+
+    <div id="error"></div>
+    <div id="profiles"></div>
+
+  </main>
+
+  <script src="vendor/supabase.js"></script>
+  <script src="config.js"></script>
+  <script src="dashboard-client.js"></script>
+  <script src="ui.js"></script>
+  <script src="shell.js"></script>
+
+  <script>
+    var esc = UI.esc, escHtml = UI.escHtml;
+
+    var RP = {
+      ref: null,          // get_admin_reference (profiles + modules + my_rank)
+      perms: {},          // access_profile_id -> permission rows (lazy, cached)
+      loading: {}         // access_profile_id -> true while the read runs
+    };
+
+    // one profile's permissions, grouped under the plain-language module
+    // headings — same grouping the Users page's permission editor uses
+    function permsBlock(profileId) {
+      var rows = RP.perms[profileId];
+      if (!rows) return '<div class="empty">Loading…</div>';
+      if (!rows.length) return '<div class="empty">This profile grants nothing.</div>';
+
+      var byModule = {};
+      rows.forEach(function (p) {
+        (byModule[p.module_code] = byModule[p.module_code] || []).push(p);
+      });
+
+      var html = "";
+      ((RP.ref && RP.ref.modules) || []).forEach(function (m) {
+        var list = byModule[m.module_code];
+        if (!list) return;
+        html += '<div class="group-head" style="margin-top:8px">' + escHtml(m.name) + "</div>" +
+          "<ul>" +
+          list.map(function (p) {
+            return "<li>" + escHtml(p.name) +
+              (p.is_sensitive
+                ? ' <span class="chip chip-warn" title="sensitive — uses of it are audited">sensitive</span>'
+                : "") +
+              (p.is_project_scoped
+                ? ' <span class="muted-line">(limited to assigned sites for site-scoped profiles)</span>'
+                : "") +
+              (p.description
+                ? '<br><span class="muted-line">' + escHtml(p.description) + "</span>"
+                : "") +
+              "</li>";
+          }).join("") +
+          "</ul>";
+      });
+      return html;
+    }
+
+    function profileCard(p) {
+      var meta = [];
+      meta.push(p.permission_count + " permission" + (p.permission_count === 1 ? "" : "s"));
+      meta.push(p.people_count === 0 ? "nobody uses it yet"
+        : p.people_count + (p.people_count === 1 ? " person" : " people"));
+      meta.push(p.scope_all_projects ? "sees every site" : "sees ASSIGNED sites only");
+
+      return '<details data-profile="' + p.access_profile_id + '" class="card" style="margin-bottom:10px">' +
+        "<summary><strong>" + escHtml(p.name) + "</strong>" +
+        ' <span class="muted-line">' + meta.join(" · ") + "</span></summary>" +
+        (p.description
+          ? '<p class="muted-line" style="margin:6px 0 0">' + escHtml(p.description) + "</p>"
+          : "") +
+        '<div id="perms-' + p.access_profile_id + '"></div>' +
+        "</details>";
+    }
+
+    function render() {
+      var profiles = (RP.ref && RP.ref.access_profiles) || [];
+      if (!profiles.length) {
+        document.getElementById("profiles").innerHTML = UI.empty("No access profiles found.");
+        return;
+      }
+      // ordered most-powerful first (the reference call sorts by rank)
+      document.getElementById("profiles").innerHTML =
+        profiles.map(profileCard).join("") +
+        '<div class="pipe-note" style="margin-top:10px">A person can also carry individual ' +
+        "exceptions on top of their profile — those show as “Customised” on the Users page, " +
+        "with the reason recorded next to each one.</div>";
+    }
+
+    window.onShellReady = async function () {
+      document.getElementById("profiles").innerHTML = UI.empty("Loading profiles…");
+      try {
+        RP.ref = await Dash.getAdminReference();
+        render();
+
+        // permissions load when a card first opens (76 rows × 9 profiles is
+        // not worth shipping up front)
+        document.getElementById("profiles").addEventListener("toggle", async function (ev) {
+          var det = ev.target;
+          if (!det.hasAttribute || !det.hasAttribute("data-profile") || !det.open) return;
+          var id = det.getAttribute("data-profile");
+          var host = document.getElementById("perms-" + id);
+          if (RP.perms[id]) { host.innerHTML = permsBlock(id); return; }
+          if (RP.loading[id]) return;
+          RP.loading[id] = true;
+          host.innerHTML = permsBlock(id);          // "Loading…"
+          try {
+            RP.perms[id] = await Dash.getAccessProfilePermissions(id);
+          } catch (e) {
+            RP.perms[id] = [];
+            document.getElementById("error").innerHTML =
+              UI.errorBanner((e && e.message) || String(e));
+          }
+          RP.loading[id] = false;
+          host.innerHTML = permsBlock(id);
+        }, true);   // 'toggle' does not bubble — capture phase catches it
+      } catch (e) {
+        document.getElementById("profiles").innerHTML =
+          UI.errorBanner((e && e.message) || String(e));
+      }
+    };
+  </script>
+
+</body>
+</html>

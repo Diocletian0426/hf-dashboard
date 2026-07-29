@@ -316,6 +316,93 @@
                                            -> submitted | certified | paid
    await Dash.deleteClaim(claimId)         -> latest claim of its project ONLY
 
+   USER ADMINISTRATION COMMANDS (0070/0071 — users.html / roles.html)
+   The database enforces everything: reads need the users.view permission,
+   account changes users.edit/create/approve, permission changes users.manage
+   (owner-only today). Three rules it will refuse on, so the UI should not
+   offer: you cannot change your own access; you can only manage people MORE
+   JUNIOR than yourself; you can only hand out profiles BELOW your own rank.
+   -----------------------------------------------------------------------------
+   await Dash.getUserAccounts(status?)     -> every dashboard account with its
+                                              names AND ids (profile/company/
+                                              department/designation — ids feed
+                                              the edit form), site + override
+                                              counts, last seen. Optional
+                                              status filter ('pending' etc.)
+   await Dash.getUserEffectiveAccess(userId)
+                                           -> all 76 permissions for ONE person:
+                                              granted yes/no + SOURCE ('profile',
+                                              'granted for this person',
+                                              'removed for this person',
+                                              'not granted') + the reason text.
+                                              The permission editor's read.
+   await Dash.getAdminReference()          -> ONE object with the dropdown
+                                              lists: access_profiles (each with
+                                              assignable=true when the caller
+                                              may hand it out — filter on it,
+                                              never show refusable options),
+                                              departments, designations,
+                                              companies, modules (plain-language
+                                              group headings), my_rank
+   await Dash.getUnlinkedLogins()          -> logins created in the Supabase
+                                              console that have no dashboard
+                                              account yet — the "to set up" tab
+   await Dash.createUserAccount(userId, {fullName, companyId, accessProfileId,
+                                         departmentId?, designationId?, staffId?})
+                                           -> turn an unlinked login into an
+                                              ACTIVE account in one step ("set
+                                              up a login"). Throws
+                                              login_not_found /
+                                              account_already_exists /
+                                              staff_already_linked /
+                                              no_access_profile
+   await Dash.updateUserAccount(userId, {fullName?, departmentId?, designationId?,
+                                         companyId?, staffId?, clearStaff?})
+                                           -> edit WHO somebody is (identity
+                                              only — never what they may do;
+                                              omitted = unchanged). Editing
+                                              your own row is allowed.
+   await Dash.approveUserAccount(userId, {accessProfileId, designationId?,
+                                          departmentId?, staffId?, companyId?})
+                                           -> approve a pending account and
+                                              switch it on (kept for when
+                                              signups return; today accounts
+                                              are born active via
+                                              createUserAccount)
+   await Dash.setUserStatus(userId, status, reason?)
+                                           -> active | suspended | disabled |
+                                              pending. Suspend/disable stores
+                                              the reason.
+   await Dash.setUserAccessProfile(userId, accessProfileId)
+                                           -> change what somebody may do —
+                                              owner-only today (users.manage)
+   await Dash.getUserProjectAssignments(userId)
+                                           -> that person's assigned sites WITH
+                                              the assignment_id that
+                                              unassignUserProject needs
+   await Dash.assignUserProject(userId, projectId, role?, endsOn?)
+                                           -> put somebody on a site (role:
+                                              member | supervisor |
+                                              project_manager; endsOn optional)
+   await Dash.unassignUserProject(assignmentId) -> take them off it
+   await Dash.setUserPermissionOverride(userId, permissionCode, effect, reason,
+                                        {expiresAt?, projectId?})
+                                           -> one exception for one person:
+                                              effect 'grant' | 'deny'. reason
+                                              is REQUIRED (shown next to the
+                                              permission forever). projectId
+                                              only on site-scoped permissions.
+                                              You cannot grant what you do not
+                                              hold yourself.
+   await Dash.clearUserPermissionOverride(userId, permissionCode)
+                                           -> back to the profile default
+   await Dash.resetUserPermissions(userId) -> clear ALL of somebody's
+                                              exceptions ("use role default")
+   await Dash.getAccessProfilePermissions(accessProfileId)
+                                           -> what one access profile grants,
+                                              in plain words (roles.html loads
+                                              this when a card opens)
+
    HELPERS
    -----------------------------------------------------------------------------
    Dash.todayKL()        -> 'YYYY-MM-DD' for TODAY in Malaysia time (never use
@@ -1123,6 +1210,123 @@
     return q(sb.rpc("delete_claim", { p_claim_id: claimId }));
   }
 
+  // ---- user administration (0070/0071) ---------------------------------------
+  // The database checks the caller's PERMISSIONS on every call (users.view /
+  // users.edit / users.create / users.manage) plus the rank rules — these
+  // wrappers only shape parameters. See the header block for the rules the
+  // database will refuse on, so pages can avoid offering refusable actions.
+
+  function getUserAccounts(status) {
+    return q(sb.rpc("get_user_accounts", { p_status: status || null }));
+  }
+
+  function getUserEffectiveAccess(userId) {
+    return q(sb.rpc("get_user_effective_access", { p_user_id: userId }));
+  }
+
+  function getAdminReference() {
+    // returns ONE object (not an array): { my_rank, access_profiles,
+    // departments, designations, companies, modules }
+    return q(sb.rpc("get_admin_reference"));
+  }
+
+  function getUnlinkedLogins() {
+    return q(sb.rpc("get_unlinked_logins"));
+  }
+
+  function createUserAccount(userId, o) {
+    o = o || {};
+    return q(sb.rpc("create_user_account", {
+      p_user_id: userId,
+      p_full_name: o.fullName || null,
+      p_company_id: o.companyId || null,
+      p_access_profile_id: o.accessProfileId || null,
+      p_department_id: o.departmentId || null,
+      p_designation_id: o.designationId || null,
+      p_staff_id: o.staffId || null
+    }));
+  }
+
+  function updateUserAccount(userId, o) {
+    o = o || {};
+    return q(sb.rpc("update_user_account", {
+      p_user_id: userId,
+      p_full_name: o.fullName || null,
+      p_department_id: o.departmentId || null,
+      p_designation_id: o.designationId || null,
+      p_company_id: o.companyId || null,
+      p_staff_id: o.staffId || null,
+      p_clear_staff: !!o.clearStaff
+    }));
+  }
+
+  function approveUserAccount(userId, o) {
+    o = o || {};
+    return q(sb.rpc("approve_user_account", {
+      p_user_id: userId,
+      p_access_profile_id: o.accessProfileId || null,
+      p_designation_id: o.designationId || null,
+      p_department_id: o.departmentId || null,
+      p_staff_id: o.staffId || null,
+      p_company_id: o.companyId || null
+    }));
+  }
+
+  function setUserStatus(userId, status, reason) {
+    return q(sb.rpc("set_user_status", {
+      p_user_id: userId, p_status: status, p_reason: reason || null
+    }));
+  }
+
+  function setUserAccessProfile(userId, accessProfileId) {
+    return q(sb.rpc("set_user_access_profile", {
+      p_user_id: userId, p_access_profile_id: accessProfileId
+    }));
+  }
+
+  function getUserProjectAssignments(userId) {
+    return q(sb.rpc("get_user_project_assignments", { p_user_id: userId }));
+  }
+
+  function assignUserProject(userId, projectId, role, endsOn) {
+    return q(sb.rpc("assign_user_project", {
+      p_user_id: userId, p_project_id: projectId,
+      p_role: role || "member", p_ends_on: endsOn || null
+    }));
+  }
+
+  function unassignUserProject(assignmentId) {
+    return q(sb.rpc("unassign_user_project", { p_assignment_id: assignmentId }));
+  }
+
+  function setUserPermissionOverride(userId, permissionCode, effect, reason, o) {
+    o = o || {};
+    return q(sb.rpc("set_user_permission_override", {
+      p_user_id: userId,
+      p_permission_code: permissionCode,
+      p_effect: effect,
+      p_reason: reason,
+      p_expires_at: o.expiresAt || null,
+      p_project_id: o.projectId || null
+    }));
+  }
+
+  function clearUserPermissionOverride(userId, permissionCode) {
+    return q(sb.rpc("clear_user_permission_override", {
+      p_user_id: userId, p_permission_code: permissionCode
+    }));
+  }
+
+  function resetUserPermissions(userId) {
+    return q(sb.rpc("reset_user_permissions", { p_user_id: userId }));
+  }
+
+  function getAccessProfilePermissions(accessProfileId) {
+    return q(sb.rpc("get_access_profile_permissions", {
+      p_access_profile_id: accessProfileId
+    }));
+  }
+
   // FUTURE (write actions — deliberately not wired up in the view-only MVP):
   //   approveLeave(requestId)        -> sb.rpc("approve_leave", { p_request_id: requestId })
   //   rejectLeave(requestId, reason) -> sb.rpc("reject_leave",  { p_request_id: requestId, p_reason: reason })
@@ -1245,6 +1449,23 @@
     certifyClaimLine: certifyClaimLine,
     setClaimStatus: setClaimStatus,
     deleteClaim: deleteClaim,
+
+    getUserAccounts: getUserAccounts,
+    getUserEffectiveAccess: getUserEffectiveAccess,
+    getAdminReference: getAdminReference,
+    getUnlinkedLogins: getUnlinkedLogins,
+    createUserAccount: createUserAccount,
+    updateUserAccount: updateUserAccount,
+    approveUserAccount: approveUserAccount,
+    setUserStatus: setUserStatus,
+    setUserAccessProfile: setUserAccessProfile,
+    getUserProjectAssignments: getUserProjectAssignments,
+    assignUserProject: assignUserProject,
+    unassignUserProject: unassignUserProject,
+    setUserPermissionOverride: setUserPermissionOverride,
+    clearUserPermissionOverride: clearUserPermissionOverride,
+    resetUserPermissions: resetUserPermissions,
+    getAccessProfilePermissions: getAccessProfilePermissions,
 
     todayKL: todayKL,
     currentYearKL: currentYearKL,
