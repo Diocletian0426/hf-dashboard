@@ -422,7 +422,9 @@
           '<tbody id="bl-cages">' + rows + "</tbody></table></div>" +
         '<button type="button" data-action="bl-cage-add">+ add a cage</button>' +
         '<p class="muted">Top cage first — the starter bars sit on it. ' +
-        "Weight is worked out from these numbers when you confirm.</p>";
+        "Lap is how far a cage's bars run down into the one below, so the " +
+        "bottom cage has none. Weight is worked out from these numbers when " +
+        "you confirm.</p>";
     }
 
     // No data-i on the remove button: the handler finds its own row with
@@ -481,6 +483,37 @@
       }
     }
 
+    /* A lap is the length one cage's bars run DOWN INTO the cage below it, so
+       n cages have n-1 laps and THE BOTTOM CAGE HAS NONE.
+
+       This matters in money, not just tidiness: the weight calculation adds
+       (length + lap) x bar count, so a lap typed on the bottom cage invents
+       steel that was never tied — measured at +23.1 kg on 3 cages of 6 x T25
+       with a 1.0 m lap — and that total is what the "as-built vs design
+       tonnage" check compares. The database refuses it too (0076) and the
+       weight function ignores it regardless; this just stops the box being
+       offered in the first place.
+
+       Runs on every add and remove, because which row is last keeps changing.
+       Any value already sitting in a newly-last row is cleared — it was never
+       real steel, and leaving it would mean saving a figure the database will
+       reject on Confirm. */
+    function refreshCageLaps() {
+      var rows = document.querySelectorAll("#bl-cages > tr");
+      for (var i = 0; i < rows.length; i++) {
+        var input = rows[i].querySelector('[data-k="lap_to_next_m"]');
+        if (!input) continue;
+        var isLast = (i === rows.length - 1);
+        input.disabled = isLast;
+        if (isLast) input.value = "";       // blank -> collectFields() omits it
+        if (input.parentNode && input.parentNode.classList) {
+          input.parentNode.classList.toggle("bl-cell-na", isLast);
+          input.parentNode.title = isLast
+            ? "The bottom cage has nothing to lap onto." : "";
+        }
+      }
+    }
+
     // Has the reviewer put anything in yet? A brand-new submission has no
     // ai_fields at all (nothing pre-filled it, because nothing reads the
     // document for us).
@@ -518,9 +551,11 @@
       return out;
     }
 
+    // Sits at the TOP of the review column, above the picker — so "pick one
+    // below", not "above". Getting that wrong points the reviewer at nothing.
     function designHtml(p) {
       if (!p || !p.pile_id) {
-        return '<div class="muted-line">No pile matched yet — pick one above so the ' +
+        return '<div class="muted-line">No pile matched yet — pick one below so the ' +
                "numbers can be checked against the design.</div>";
       }
       // labelHtml is HTML, not text — every caller passes a literal, and one of
@@ -621,32 +656,34 @@
             (canEdit || canApprove ? "" : '<span class="muted">View only.</span>') +
           "</div>";
 
-      // The section order follows the certified sheet: which pile it is, then
-      // the hole, then what was found in it, then what went into it. Typing
-      // runs straight down the paper instead of hopping about.
+      // Section order, owner's call:
       //
-      // Levels and Soil strata now sit next to each other and point in OPPOSITE
-      // directions — levels are mRL (down = smaller), strata are depths (down =
-      // bigger). Both headings say so out loud; that is the whole reason those
-      // hints are there.
+      //   Design → Which pile → As built → Boring times → Levels →
+      //   Concrete → Steel cage → Soil strata → Remarks
+      //
+      // The DESIGN figures sit at the very top because they are the reference
+      // the whole screen is checked against — what this pile was supposed to be,
+      // in view while every other number is typed. As-built lands directly under
+      // it so the two diameters can be compared without scrolling.
+      //
+      // Levels still says mRL and Soil strata still says depth: they point in
+      // OPPOSITE directions (levels down = smaller, depths down = bigger) and
+      // are no longer adjacent, so both hints have to carry their own weight.
       document.getElementById("view").innerHTML =
         '<div class="bl-split">' +
           '<div class="bl-left" id="bl-left">' + viewerHtml() + "</div>" +
           '<div class="bl-right">' +
             '<div id="bl-valid">' + validationHtml(s.validation, draftIsEmpty(s)) + "</div>" +
 
+            '<h3>Design <span class="muted">what this pile was meant to be</span></h3>' +
+            designHtml(s.pile) +
+
             "<h3>Which pile</h3>" +
             '<div class="claim-form">' + pickerHtml("f", s.pile_id) + "</div>" +
-            designHtml(s.pile) +
 
             "<h3>As built</h3>" +
             '<div class="claim-form">' +
               ASBUILT.map(function (r) { return fieldRow(r[0], r[1], "number", f[r[0]]); }).join("") +
-            "</div>" +
-
-            "<h3>Levels <span class=\"muted\">mRL — going down the pile the numbers get smaller</span></h3>" +
-            '<div class="claim-form">' +
-              LEVELS.map(function (r) { return fieldRow(r[0], r[1], "number", f[r[0]]); }).join("") +
             "</div>" +
 
             "<h3>Boring times</h3>" +
@@ -656,8 +693,10 @@
               }).join("") +
             "</div>" +
 
-            strataBlockHtml(f.soil_layers) +
-            cageBlockHtml(f.reinforcement) +
+            "<h3>Levels <span class=\"muted\">mRL — going down the pile the numbers get smaller</span></h3>" +
+            '<div class="claim-form">' +
+              LEVELS.map(function (r) { return fieldRow(r[0], r[1], "number", f[r[0]]); }).join("") +
+            "</div>" +
 
             "<h3>Concrete</h3>" +
             '<div class="claim-form">' +
@@ -665,6 +704,9 @@
               fieldRow("cast_date", "Cast date", "date", f.cast_date) +
               fieldRow("actual_concrete_m3", "Poured (m³)", "number", f.actual_concrete_m3) +
             "</div>" +
+
+            cageBlockHtml(f.reinforcement) +
+            strataBlockHtml(f.soil_layers) +
 
             "<h3>Remarks</h3>" +
             '<div class="claim-form">' +
@@ -676,6 +718,7 @@
           "</div>" +
         "</div>";
 
+      refreshCageLaps();
       showPage();
     }
 
@@ -861,12 +904,14 @@
           var n = host.querySelectorAll(".bl-cage").length;
           host.insertAdjacentHTML("beforeend", cageRowHtml(n, {}));
           renumberRows("bl-cages", "Cage");
+          refreshCageLaps();          // the old bottom cage can now hold a lap
           return;
         }
         if (act === "bl-cage-del") {
           var block = btn.closest(".bl-cage");
           if (block) block.remove();
           renumberRows("bl-cages", "Cage");
+          refreshCageLaps();          // whatever is last now loses its lap
           return;
         }
         if (act === "bl-strata-add") {

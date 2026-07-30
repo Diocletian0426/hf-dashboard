@@ -1114,6 +1114,14 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
 .bl-grid tbody tr:hover { background: none; }
 .bl-grid input { width: 100%; min-width: 58px; }
 .bl-grid .bl-grid-wide input { min-width: 170px; }
+
+/* A cell that cannot apply to this row — currently only the lap on the bottom
+   cage, which has no cage below it to lap onto. The input stays in the DOM
+   (disabled and emptied) so the row keeps its shape and collectFields() keeps
+   finding what it expects; the dash is what the reviewer sees. */
+.bl-grid td.bl-cell-na input { display: none; }
+.bl-grid td.bl-cell-na { text-align: center; color: var(--ink-3); }
+.bl-grid td.bl-cell-na::after { content: "—"; }
 .bl-grid-del {
   padding: 1px 7px; line-height: 1.4; cursor: pointer;
   border: 1px solid var(--line-strong); border-radius: var(--r-sm);
