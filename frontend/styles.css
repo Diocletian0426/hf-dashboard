@@ -1029,8 +1029,12 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
    the scan stays put while the form scrolls.
    ========================================================================== */
 
+/* 60/40, not 50/50: the document is dense and handwritten and is the thing
+   being READ, while the form is mostly short number boxes that stack happily in
+   a narrower column. 3fr/2fr is exactly 60/40 — change those two numbers to
+   retune. */
 .bl-split {
-  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
   gap: var(--sp-4); align-items: start;
 }
 .bl-left  { position: sticky; top: var(--sp-2); }
