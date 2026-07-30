@@ -104,16 +104,21 @@
       ["lap_to_next_m",   "Lap m"]
     ];
 
-    // Soil strata shape. NOTE: nothing in the database defined this — the old
-    // piling_records.soil_layers column was dropped in 0029 and bore_logs is
-    // empty, so there was no precedent to follow. Chosen to be LEVEL-based
-    // (mRL) for consistency with every other depth on the record. Cheap to
-    // change while the table has no rows; expensive later.
+    // Soil strata shape (0076). DEPTHS IN METRES BELOW THE PLATFORM — bigger
+    // number = further down. This is the one thing on this screen that does NOT
+    // run in levels, and it is deliberate: the strata table on the certified
+    // sheet is written in depths, so typing it as levels would mean converting
+    // every row in your head, which is how wrong numbers get in.
+    //
+    // The first version of this page guessed LEVELS (mRL) for consistency with
+    // the rest of the record — nothing in the database defined a shape, because
+    // 0029 dropped the old column and bore_logs has always been empty. Reading a
+    // real sheet settled it the other way. No SPT column: the site does not
+    // record it, and a box nobody can fill is a box that gets guessed.
     var STRATA_COLS = [
-      ["from_level_m", "From (mRL)"],
-      ["to_level_m",   "To (mRL)"],
-      ["description",  "Description"],
-      ["spt_n",        "SPT N"]
+      ["from_depth_m", "From (m)"],
+      ["to_depth_m",   "To (m)"],
+      ["description",  "Description"]
     ];
 
     /* ---------------------------- small helpers ---------------------------- */
@@ -181,8 +186,15 @@
         ? "WhatsApp" + (r.wa_sender ? " · " + escHtml(r.wa_sender) : "")
         : "Uploaded" + (r.submitted_by_name ? " · " + escHtml(r.submitted_by_name) : "");
 
-      var where = r.pile_mark_no
-        ? escHtml((r.project_code || "") + " · " + r.pile_mark_no)
+      // Site, zone and pile each get their own cell. The code alone ("HF-KLT-001")
+      // is what the database calls the job; the office calls it by name, so both
+      // are shown. Zone is the pier/abutment — the same narrowing the picker uses.
+      var site = r.project_code
+        ? escHtml(r.project_code + (r.project_name ? " — " + r.project_name : ""))
+        : "—";
+
+      var pile = r.pile_mark_no
+        ? escHtml(r.pile_mark_no)
         : '<span class="stale-warn">no pile matched yet</span>';
 
       var flags = "";
@@ -191,7 +203,9 @@
 
       return "<tr>" +
         UI.td("Status", statusBadge(r)) +
-        UI.td("Pile", where) +
+        UI.td("Site", site) +
+        UI.td("Zone", r.zone ? escHtml(r.zone) : "—") +
+        UI.td("Pile", pile) +
         UI.td("Source", who) +
         UI.td("Files", (r.file_count || 0) + (r.file_count === 1 ? " file" : " files")) +
         UI.td("Arrived", dstr(String(r.created_at).slice(0, 10))) +
@@ -218,7 +232,7 @@
       var rows = inboxRows();
       var body = rows.length
         ? rows.map(inboxRowHtml).join("")
-        : UI.emptyRow(6, BL.rows.length
+        : UI.emptyRow(8, BL.rows.length
             ? "Nothing with that status."
             : "No bore logs yet. Upload a scan, or wait for one from the site group.");
 
@@ -231,7 +245,8 @@
           '<option value="all">everything</option>' +
         "</select></span></div>" +
         '<table class="table table-stack"><thead><tr>' +
-          "<th>Status</th><th>Pile</th><th>Source</th><th>Files</th><th>Arrived</th><th></th>" +
+          "<th>Status</th><th>Site</th><th>Zone</th><th>Pile</th>" +
+          "<th>Source</th><th>Files</th><th>Arrived</th><th></th>" +
         "</tr></thead><tbody>" + body + "</tbody></table>";
 
       document.getElementById("bl-status").value = BL.statusFilter;
@@ -377,6 +392,24 @@
       return String(v).replace(" ", "T").slice(0, 16);
     }
 
+    /* ------------------- repeating rows: cages and strata -------------------
+       Both are TABLES with a single header row. Every row asks for the same
+       six (or three) things, so repeating the labels on each one just pushed
+       the boxes into a narrower and narrower column — a 4-cage log printed
+       "Bars / Bar Ø mm / Length m / Spiral Ø mm / Pitch mm / Lap m" four times.
+
+       The markup hooks are unchanged on purpose: .bl-cage / .bl-cage-in /
+       .bl-stratum / .bl-strata-in / data-k are what collectFields() walks, and
+       data-action is what the click handler reads. Only the element around them
+       moved from <div> to <tr>.
+       ---------------------------------------------------------------------- */
+
+    function gridHeadHtml(cols) {
+      return '<thead><tr><th></th>' +
+        cols.map(function (col) { return "<th>" + escHtml(col[1]) + "</th>"; }).join("") +
+        "<th></th></tr></thead>";
+    }
+
     function cageBlockHtml(reinf) {
       var cages = (reinf && reinf.cages) || [];
       var rows = cages.map(function (c, i) { return cageRowHtml(i, c); }).join("");
@@ -385,45 +418,67 @@
           fieldRow("starter_bar_length_m", "Starter bar length (m)", "number",
                    reinf ? reinf.starter_bar_length_m : "") +
         "</div>" +
-        '<div id="bl-cages">' + rows + "</div>" +
+        '<div class="bl-grid-wrap"><table class="bl-grid">' + gridHeadHtml(CAGE_COLS) +
+          '<tbody id="bl-cages">' + rows + "</tbody></table></div>" +
         '<button type="button" data-action="bl-cage-add">+ add a cage</button>' +
         '<p class="muted">Top cage first — the starter bars sit on it. ' +
         "Weight is worked out from these numbers when you confirm.</p>";
     }
 
+    // No data-i on the remove button: the handler finds its own row with
+    // closest(), and an index baked into the markup goes stale the moment a row
+    // above it is removed.
     function cageRowHtml(i, c) {
       c = c || {};
-      return '<div class="claim-form bl-cage" data-cage="' + i + '">' +
-        "<strong>Cage " + (i + 1) + "</strong>" +
+      return '<tr class="bl-cage"><th class="bl-grid-rowhead">Cage ' + (i + 1) + "</th>" +
         CAGE_COLS.map(function (col) {
-          return '<label>' + escHtml(col[1]) +
-                 ' <input type="number" step="any" class="bl-cage-in" data-k="' + esc(col[0]) +
+          return "<td>" +
+                 '<input type="number" step="any" class="bl-cage-in" data-k="' + esc(col[0]) +
                  '" value="' + esc(c[col[0]] === null || c[col[0]] === undefined ? "" : c[col[0]]) +
-                 '" size="5"></label>';
+                 '" aria-label="' + esc(col[1]) + '"></td>';
         }).join("") +
-        '<button type="button" data-action="bl-cage-del" data-i="' + i + '">remove</button>' +
-        "</div>";
+        '<td><button type="button" class="bl-grid-del" data-action="bl-cage-del" ' +
+        'title="remove this cage">&times;</button></td>' +
+        "</tr>";
     }
 
     function strataBlockHtml(layers) {
       var rows = (layers || []).map(function (l, i) { return strataRowHtml(i, l); }).join("");
-      return '<h3>Soil strata</h3><div id="bl-strata">' + rows + "</div>" +
+      return '<h3>Soil strata ' +
+        '<span class="muted">depths measured down from the platform</span></h3>' +
+        '<div class="bl-grid-wrap"><table class="bl-grid">' + gridHeadHtml(STRATA_COLS) +
+          '<tbody id="bl-strata">' + rows + "</tbody></table></div>" +
         '<button type="button" data-action="bl-strata-add">+ add a layer</button>';
     }
 
     function strataRowHtml(i, l) {
       l = l || {};
-      return '<div class="claim-form bl-stratum" data-stratum="' + i + '">' +
+      return '<tr class="bl-stratum"><th class="bl-grid-rowhead">Layer ' + (i + 1) + "</th>" +
         STRATA_COLS.map(function (col) {
           var isText = col[0] === "description";
-          return "<label>" + escHtml(col[1]) +
-            ' <input class="bl-strata-in" data-k="' + esc(col[0]) + '"' +
-            (isText ? ' type="text" size="18"' : ' type="number" step="any" size="6"') +
+          return "<td" + (isText ? ' class="bl-grid-wide"' : "") + ">" +
+            '<input class="bl-strata-in" data-k="' + esc(col[0]) + '"' +
+            (isText ? ' type="text"' : ' type="number" step="any"') +
             ' value="' + esc(l[col[0]] === null || l[col[0]] === undefined ? "" : l[col[0]]) +
-            '"></label>';
+            '" aria-label="' + esc(col[1]) + '"></td>';
         }).join("") +
-        '<button type="button" data-action="bl-strata-del" data-i="' + i + '">remove</button>' +
-        "</div>";
+        '<td><button type="button" class="bl-grid-del" data-action="bl-strata-del" ' +
+        'title="remove this layer">&times;</button></td>' +
+        "</tr>";
+    }
+
+    // A row's number is its POSITION, not its identity — remove cage 2 and what
+    // was cage 3 becomes cage 2. collectFields() already renumbers `seq` from
+    // position so the saved data is right either way; this stops the SCREEN
+    // from saying otherwise. One cell per row is rewritten rather than
+    // re-rendering the block, because a re-render throws away whatever has been
+    // typed and not yet saved.
+    function renumberRows(tbodyId, word) {
+      var rows = document.querySelectorAll("#" + tbodyId + " > tr");
+      for (var i = 0; i < rows.length; i++) {
+        var head = rows[i].querySelector(".bl-grid-rowhead");
+        if (head) head.textContent = word + " " + (i + 1);
+      }
     }
 
     // Has the reviewer put anything in yet? A brand-new submission has no
@@ -566,6 +621,14 @@
             (canEdit || canApprove ? "" : '<span class="muted">View only.</span>') +
           "</div>";
 
+      // The section order follows the certified sheet: which pile it is, then
+      // the hole, then what was found in it, then what went into it. Typing
+      // runs straight down the paper instead of hopping about.
+      //
+      // Levels and Soil strata now sit next to each other and point in OPPOSITE
+      // directions — levels are mRL (down = smaller), strata are depths (down =
+      // bigger). Both headings say so out loud; that is the whole reason those
+      // hints are there.
       document.getElementById("view").innerHTML =
         '<div class="bl-split">' +
           '<div class="bl-left" id="bl-left">' + viewerHtml() + "</div>" +
@@ -575,6 +638,11 @@
             "<h3>Which pile</h3>" +
             '<div class="claim-form">' + pickerHtml("f", s.pile_id) + "</div>" +
             designHtml(s.pile) +
+
+            "<h3>As built</h3>" +
+            '<div class="claim-form">' +
+              ASBUILT.map(function (r) { return fieldRow(r[0], r[1], "number", f[r[0]]); }).join("") +
+            "</div>" +
 
             "<h3>Levels <span class=\"muted\">mRL — going down the pile the numbers get smaller</span></h3>" +
             '<div class="claim-form">' +
@@ -588,10 +656,8 @@
               }).join("") +
             "</div>" +
 
-            "<h3>As built</h3>" +
-            '<div class="claim-form">' +
-              ASBUILT.map(function (r) { return fieldRow(r[0], r[1], "number", f[r[0]]); }).join("") +
-            "</div>" +
+            strataBlockHtml(f.soil_layers) +
+            cageBlockHtml(f.reinforcement) +
 
             "<h3>Concrete</h3>" +
             '<div class="claim-form">' +
@@ -599,9 +665,6 @@
               fieldRow("cast_date", "Cast date", "date", f.cast_date) +
               fieldRow("actual_concrete_m3", "Poured (m³)", "number", f.actual_concrete_m3) +
             "</div>" +
-
-            cageBlockHtml(f.reinforcement) +
-            strataBlockHtml(f.soil_layers) +
 
             "<h3>Remarks</h3>" +
             '<div class="claim-form">' +
@@ -797,22 +860,26 @@
           var host = document.getElementById("bl-cages");
           var n = host.querySelectorAll(".bl-cage").length;
           host.insertAdjacentHTML("beforeend", cageRowHtml(n, {}));
+          renumberRows("bl-cages", "Cage");
           return;
         }
         if (act === "bl-cage-del") {
           var block = btn.closest(".bl-cage");
           if (block) block.remove();
+          renumberRows("bl-cages", "Cage");
           return;
         }
         if (act === "bl-strata-add") {
           var shost = document.getElementById("bl-strata");
           var sn2 = shost.querySelectorAll(".bl-stratum").length;
           shost.insertAdjacentHTML("beforeend", strataRowHtml(sn2, {}));
+          renumberRows("bl-strata", "Layer");
           return;
         }
         if (act === "bl-strata-del") {
           var sblock = btn.closest(".bl-stratum");
           if (sblock) sblock.remove();
+          renumberRows("bl-strata", "Layer");
           return;
         }
 
