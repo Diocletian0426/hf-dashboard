@@ -205,7 +205,7 @@
         '<span class="zone-name">Add a bore log</span>' +
         '<span class="zone-count">scan or photo</span></summary>' +
         '<div class="chase-body"><div class="claim-form">' +
-          '<label>pile <select id="up-pile"></select></label>' +
+          pickerHtml("up", null) +
           '<label>file(s) <input type="file" id="up-file" multiple ' +
             'accept="image/jpeg,image/png,image/webp,image/heic,application/pdf"></label>' +
           '<button type="button" data-action="bl-upload">Upload</button>' +
@@ -236,9 +236,6 @@
 
       document.getElementById("bl-status").value = BL.statusFilter;
 
-      var picker = document.getElementById("up-pile");
-      if (picker) picker.innerHTML = pileOptions(null);
-
       var open = BL.rows.filter(function (r) {
         return OPEN_STATUSES.indexOf(r.status) !== -1;
       }).length;
@@ -247,13 +244,118 @@
         : "Nothing waiting.";
     }
 
-    function pileOptions(selected) {
-      return '<option value="">— not matched yet —</option>' +
-        BL.piles.map(function (p) {
-          return '<option value="' + esc(p.pile_id) + '"' +
-                 (String(p.pile_id) === String(selected) ? " selected" : "") + ">" +
-                 escHtml((p.project_code || "") + " · " + (p.pile_mark_no || "")) + "</option>";
+    /* ------------------- pile picker: site -> zone -> pile -------------------
+       One flat list of 267 piles is unusable — nobody scrolls that to find
+       P4-2. Every pile in the register carries a zone (checked: 0 of 267 are
+       null), no project holds more than 30 piles, and zones run 2-18 per
+       project, so two narrowing steps leave a handful to choose from.
+
+       "all zones" stays available: someone holding the sheet who does not know
+       which pier it belongs to can still find the mark.
+       ---------------------------------------------------------------------- */
+
+    // numeric-aware, so P10 sorts after P9 rather than after P1
+    function byMark(a, b) {
+      return String(a.pile_mark_no || "").localeCompare(
+             String(b.pile_mark_no || ""), undefined, { numeric: true, sensitivity: "base" });
+    }
+
+    function projectsWithPiles() {
+      var seen = {}, out = [];
+      BL.piles.forEach(function (p) {
+        if (seen[p.project_id]) return;
+        seen[p.project_id] = true;
+        out.push({ id: p.project_id, code: p.project_code || "", name: p.project_name || "" });
+      });
+      return out.sort(function (a, b) { return a.code.localeCompare(b.code); });
+    }
+
+    function zonesIn(projectId) {
+      var seen = {}, out = [];
+      BL.piles.forEach(function (p) {
+        if (String(p.project_id) !== String(projectId)) return;
+        var z = p.zone || "";
+        if (seen[z]) return;
+        seen[z] = true;
+        out.push(z);
+      });
+      return out.sort(function (a, b) {
+        return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+      });
+    }
+
+    function pilesIn(projectId, zone) {
+      return BL.piles.filter(function (p) {
+        if (String(p.project_id) !== String(projectId)) return false;
+        return zone === "" || (p.zone || "") === zone;      // "" = every zone
+      }).sort(byMark);
+    }
+
+    function zoneOptionsHtml(projectId, selectedZone) {
+      if (!projectId) return '<option value="">— pick a site first —</option>';
+      return '<option value="">— all zones —</option>' +
+        zonesIn(projectId).map(function (z) {
+          return '<option value="' + esc(z) + '"' +
+                 (z === selectedZone ? " selected" : "") + ">" +
+                 escHtml(z || "(no zone)") + "</option>";
         }).join("");
+    }
+
+    function pileOptionsHtml(projectId, zone, selectedPileId) {
+      if (!projectId) return '<option value="">— pick a site first —</option>';
+      var ps = pilesIn(projectId, zone);
+      if (!ps.length) return '<option value="">— no piles here —</option>';
+      return '<option value="">— not matched yet —</option>' +
+        ps.map(function (p) {
+          return '<option value="' + esc(p.pile_id) + '"' +
+                 (String(p.pile_id) === String(selectedPileId) ? " selected" : "") + ">" +
+                 escHtml(p.pile_mark_no || "") + "</option>";
+        }).join("");
+    }
+
+    // pfx namespaces the three ids, so the upload box and the review screen can
+    // each hold a picker on the same page without colliding.
+    function pickerHtml(pfx, selectedPileId) {
+      var sel = null;
+      if (selectedPileId) {
+        for (var i = 0; i < BL.piles.length; i++) {
+          if (String(BL.piles[i].pile_id) === String(selectedPileId)) { sel = BL.piles[i]; break; }
+        }
+      }
+      // an already-matched pile pre-selects its own site and zone, so the
+      // reviewer sees where it sits rather than three empty boxes
+      var projId = sel ? sel.project_id : "";
+      var zone   = sel ? (sel.zone || "") : "";
+
+      return '<label>site <select id="' + pfx + '-proj" data-pick="' + pfx + '">' +
+               '<option value="">— choose a site —</option>' +
+               projectsWithPiles().map(function (p) {
+                 // code AND name — the office knows sites by name (house rule)
+                 return '<option value="' + esc(p.id) + '"' +
+                        (String(p.id) === String(projId) ? " selected" : "") + ">" +
+                        escHtml(p.code + (p.name ? " — " + p.name : "")) + "</option>";
+               }).join("") +
+             "</select></label>" +
+             '<label>zone <select id="' + pfx + '-zone" data-pick="' + pfx + '">' +
+               zoneOptionsHtml(projId, zone) + "</select></label>" +
+             '<label>pile <select id="' + pfx + '-pile" data-pick="' + pfx + '">' +
+               pileOptionsHtml(projId, zone, selectedPileId) + "</select></label>";
+    }
+
+    function pickedPile(pfx) {
+      var el = document.getElementById(pfx + "-pile");
+      return el ? String(el.value || "") : "";
+    }
+
+    // refill whatever sits downstream of the box that just changed
+    function refillPicker(pfx, which) {
+      var projEl = document.getElementById(pfx + "-proj");
+      var zoneEl = document.getElementById(pfx + "-zone");
+      var pileEl = document.getElementById(pfx + "-pile");
+      var projId = projEl ? String(projEl.value || "") : "";
+      if (which === "proj" && zoneEl) zoneEl.innerHTML = zoneOptionsHtml(projId, "");
+      var zone = zoneEl ? String(zoneEl.value || "") : "";
+      if (pileEl) pileEl.innerHTML = pileOptionsHtml(projId, zone, null);
     }
 
     /* --------------------------- the review screen -------------------------- */
@@ -427,9 +529,7 @@
             '<div id="bl-valid">' + validationHtml(s.validation) + "</div>" +
 
             "<h3>Which pile</h3>" +
-            '<div class="claim-form">' +
-              '<label>pile <select id="f-pile">' + pileOptions(s.pile_id) + "</select></label>" +
-            "</div>" +
+            '<div class="claim-form">' + pickerHtml("f", s.pile_id) + "</div>" +
             designHtml(s.pile) +
 
             "<h3>Levels <span class=\"muted\">mRL — going down the pile the numbers get smaller</span></h3>" +
@@ -563,7 +663,7 @@
     }
 
     async function saveDraft(silent) {
-      var pileId = val("f-pile");
+      var pileId = pickedPile("f");
       var v = await Dash.saveBoreLogDraft(BL.id, collectFields(), {
         pileId: pileId || null,
         clearPile: !pileId
@@ -608,7 +708,15 @@
         if (ev.target.id === "bl-status") {
           BL.statusFilter = ev.target.value;
           renderInbox();
+          return;
         }
+        // site -> zone -> pile: changing one box refills the ones below it.
+        // Only the two upstream boxes cascade; changing the pile itself is the
+        // answer, not a filter.
+        var pfx = ev.target.getAttribute && ev.target.getAttribute("data-pick");
+        if (!pfx) return;
+        if (ev.target.id === pfx + "-proj") refillPicker(pfx, "proj");
+        else if (ev.target.id === pfx + "-zone") refillPicker(pfx, "zone");
       });
 
       document.getElementById("view").addEventListener("click", async function (ev) {
@@ -665,7 +773,7 @@
           btn.disabled = true;
           btn.textContent = "Uploading…";
           try {
-            var pid = val("up-pile");
+            var pid = pickedPile("up");
             var newId = await Dash.uploadBoreLog(input.files, { pileId: pid || null });
             window.location.href = "bore-logs.html?id=" + encodeURIComponent(newId);
           } catch (e) {

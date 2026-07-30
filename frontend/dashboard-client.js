@@ -1099,9 +1099,14 @@
   }
 
   function getAllPiles() {
-    // lightweight pile directory for project-scoped pickers
+    // lightweight pile directory for project-scoped pickers.
+    //
+    // zone + project_name added for the bore-log picker, which narrows
+    // site -> zone -> pile (267 piles in one flat list is unusable, and every
+    // pile in the register carries a zone). Both are additive — existing
+    // callers read fields by name and are unaffected.
     return q(sb.from("v_pile_register")
-      .select("pile_id,project_id,project_code,pile_mark_no")
+      .select("pile_id,project_id,project_code,project_name,zone,pile_mark_no")
       .order("pile_mark_no"));
   }
 
