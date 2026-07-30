@@ -426,7 +426,26 @@
         "</div>";
     }
 
-    function validationHtml(v) {
+    // Has the reviewer put anything in yet? A brand-new submission has no
+    // ai_fields at all (nothing pre-filled it, because nothing reads the
+    // document for us).
+    function draftIsEmpty(s) {
+      var f = s && s.ai_fields;
+      if (!f) return true;
+      for (var k in f) { if (Object.prototype.hasOwnProperty.call(f, k)) return false; }
+      return true;
+    }
+
+    // `untouched` exists because the database is answering "can this be
+    // approved?" — and for an untyped draft the honest answer is no. Correct,
+    // but opening a fresh bore log with a red MUST BE FIXED banner reads as
+    // "something is broken" when the real state is "you haven't started".
+    // The approve button stays disabled either way; only the wording changes.
+    function validationHtml(v, untouched) {
+      if (untouched) {
+        return '<div class="banner banner-info">Read the document on the left and ' +
+               "type the values in. Anything impossible gets flagged before you can confirm.</div>";
+      }
       if (!v) return "";
       var errs = v.errors || [], warns = v.warnings || [];
       var out = "";
@@ -507,7 +526,10 @@
           (pdf ? "open in a new tab" : "open full size") + "</a>" +
         "</div>" +
         '<div class="bl-viewer-frame' + (pdf ? " is-pdf" : "") + '" id="bl-frame">' +
-          (pdf ? '<iframe id="bl-pdf" title="bore log document"></iframe>'
+          // class AND id: the id is what showPage() sets the src on, the class is
+          // what carries the sizing. Styling it by id alone left the iframe at
+          // the browser default of 300x150.
+          (pdf ? '<iframe id="bl-pdf" class="bl-pdf" title="bore log document"></iframe>'
                : '<img id="bl-img" alt="bore log">') +
         "</div></div>";
     }
@@ -548,7 +570,7 @@
         '<div class="bl-split">' +
           '<div class="bl-left" id="bl-left">' + viewerHtml() + "</div>" +
           '<div class="bl-right">' +
-            '<div id="bl-valid">' + validationHtml(s.validation) + "</div>" +
+            '<div id="bl-valid">' + validationHtml(s.validation, draftIsEmpty(s)) + "</div>" +
 
             "<h3>Which pile</h3>" +
             '<div class="claim-form">' + pickerHtml("f", s.pile_id) + "</div>" +
@@ -693,7 +715,8 @@
         clearPile: !pileId
       });
       BL.sub.validation = v;
-      document.getElementById("bl-valid").innerHTML = validationHtml(v);
+      // once they have saved, they HAVE started — show the real verdict
+      document.getElementById("bl-valid").innerHTML = validationHtml(v, false);
       if (!silent) {
         document.getElementById("ok").innerHTML = UI.okBanner("Draft saved.");
       }

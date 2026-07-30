@@ -786,6 +786,8 @@ td.drift { color: var(--warn-ink); font-weight: 600; white-space: nowrap; }
 .banner-amber { background: var(--warn-soft); color: #92400e; border: 1px solid var(--amber-soft); }
 .banner-red   { background: var(--danger-soft); color: #991b1b; border: 1px solid #fecaca; }
 .banner-green { background: var(--ok-soft); color: var(--ok-ink); border: 1px solid #bbf7d0; }  /* NEW */
+/* neutral "here is what to do next" — not a warning, not a success. NEW */
+.banner-info  { background: var(--brand-soft); color: var(--brand-ink); border: 1px solid var(--brand-border); }
 .empty { padding: var(--sp-5); text-align: center; color: var(--ink-2); font-size: var(--fs-md); }
 
 /* flash animations (deep-link landings) */
