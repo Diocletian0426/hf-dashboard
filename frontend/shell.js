@@ -35,6 +35,7 @@
     // leave.html stays in PAGE_ACCESS but is out of the nav until the page
     // is actually built (owner decision — leave UI deferred)
     { href: "tests.html",      label: "Tests"      },
+    { href: "bore-logs.html",  label: "Bore logs"  },
     // only appears for logins holding users.view (the allowed() filter below)
     { href: "users.html",      label: "Users"      }
   ];
@@ -58,6 +59,7 @@
     "manpower.html":   "manpower.view",
     "attendance.html": "attendance.view",
     "tests.html":      "tests.view",
+    "bore-logs.html":  "bore_logs.view",  // inbox + the review screen (?id=…)
     "claims.html":     "claims.view",     // MONEY — the DB re-checks every call too
     "leave.html":      "leave.view",
     "users.html":      "users.view",      // admin — writes carry their own DB gates

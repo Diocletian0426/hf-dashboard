@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HF Dashboard — Bore logs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <header id="nav"></header>
+
+  <main id="main">
+
+    <!-- ================= BORE LOG REVIEW (0073 / 0074) =================
+         Two screens in one page, switched on ?id= (the piles.html precedent):
+
+           bore-logs.html         the inbox — what is waiting to be checked,
+                                  plus the upload box for office scans
+           bore-logs.html?id=…    the review screen — original document on the
+                                  left, the values on the right
+
+         WHY THIS EXISTS: bore_logs has been empty by design since 0024 (a row
+         there means a real bore log was captured, and 'confirmed' is what makes
+         v_pile_register publish the verified figures the claims are built on).
+         There was no way to capture one. This is that way.
+
+         NO AI IS INVOLVED ON THIS PAGE. A person uploads the scan, reads it,
+         types the values, and confirms. If the WhatsApp bot pre-fills a draft
+         it lands in exactly the same review screen — the reviewer's job and
+         this code are identical either way.
+
+         The buttons here are convenience. Every read and write is re-checked
+         by the database (bore_logs.view / .create / .edit / .approve, all
+         project-scoped, seeded back in 0059). -->
+
+    <div class="page-eyebrow">Bore logs</div>
+    <h1 id="bl-title">Bore logs to check</h1>
+    <p id="bl-sub" class="page-caption"></p>
+
+    <div id="error"></div>
+    <div id="ok"></div>
+
+    <div id="view"></div>
+
+  </main>
+
+  <script src="vendor/supabase.js"></script>
+  <script src="config.js"></script>
+  <script src="dashboard-client.js"></script>
+  <script src="ui.js"></script>
+  <script src="shell.js"></script>
+
+  <script>
+    var esc = UI.esc, escHtml = UI.escHtml, dstr = UI.dstr;
+
+    var BL = {
+      id: null,          // submission being reviewed, or null for the inbox
+      rows: [],          // inbox rows
+      sub: null,         // the submission under review
+      piles: [],         // pile picker
+      statusFilter: "open",
+      zoom: 1,
+      rot: 0,
+      page: 0            // which storage_path is showing
+    };
+
+    /* ------------------------------------------------------------------
+       The draft's shape. Keys are bore_logs COLUMN NAMES exactly — 0074
+       casts them straight across on approval, so a typo here becomes a
+       silently-dropped value. Kept as data so rendering the form and
+       reading it back can never drift apart.
+       ------------------------------------------------------------------ */
+
+    // Levels are mRL: higher number = higher up. Going DOWN the pile the
+    // numbers DECREASE — that one sentence is most of the validation.
+    var LEVELS = [
+      ["top_of_casing_level_m",   "Top of casing"],
+      ["piling_platform_level_m", "Platform level (EGL)"],
+      ["cut_off_level_m",         "Cut-off level"],
+      ["rock_socketing_level_m",  "Top of rock socket"],
+      ["toe_level_m",             "Toe level"]
+    ];
+
+    var TIMES = [
+      ["boring_soil_started_at", "Soil boring started"],
+      ["boring_soil_ended_at",   "Soil boring finished"],
+      ["boring_rock_started_at", "Rock boring started"],
+      ["boring_rock_ended_at",   "Rock boring finished"]
+    ];
+
+    var ASBUILT = [
+      ["as_built_diameter_mm",      "As-built diameter (mm)"],
+      ["temporary_casing_length_m", "Temporary casing (m)"],
+      ["permanent_casing_length_m", "Permanent casing (m)"]
+    ];
+
+    var CAGE_COLS = [
+      ["main_count",      "Bars"],
+      ["main_dia_mm",     "Bar Ø mm"],
+      ["length_m",        "Length m"],
+      ["spiral_dia_mm",   "Spiral Ø mm"],
+      ["spiral_pitch_mm", "Pitch mm"],
+      ["lap_to_next_m",   "Lap m"]
+    ];
+
+    // Soil strata shape. NOTE: nothing in the database defined this — the old
+    // piling_records.soil_layers column was dropped in 0029 and bore_logs is
+    // empty, so there was no precedent to follow. Chosen to be LEVEL-based
+    // (mRL) for consistency with every other depth on the record. Cheap to
+    // change while the table has no rows; expensive later.
+    var STRATA_COLS = [
+      ["from_level_m", "From (mRL)"],
+      ["to_level_m",   "To (mRL)"],
+      ["description",  "Description"],
+      ["spt_n",        "SPT N"]
+    ];
+
+    /* ---------------------------- small helpers ---------------------------- */
+
+    function qs(name) {
+      return new URLSearchParams(window.location.search).get(name);
+    }
+
+    function fail(e) {
+      document.getElementById("error").innerHTML =
+        '<div class="banner banner-red">Could not save: ' +
+        escHtml((e && e.message) || e) + "</div>";
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    function clearBanners() {
+      document.getElementById("error").innerHTML = "";
+      document.getElementById("ok").innerHTML = "";
+    }
+
+    function val(id) {
+      var el = document.getElementById(id);
+      return el ? String(el.value || "").trim() : "";
+    }
+
+    // "" -> omitted entirely. A JSON number, never a numeric string: the
+    // validator checks jsonb_typeof(...) = 'number' and rejects "12.5".
+    function putNum(out, key, raw) {
+      if (raw === "") return;
+      var n = Number(raw);
+      if (!isFinite(n)) return;          // let the DB complain about junk
+      out[key] = n;
+    }
+
+    function putText(out, key, raw) {
+      if (raw !== "") out[key] = raw;
+    }
+
+    /* ------------------------------ the inbox ------------------------------ */
+
+    var OPEN_STATUSES = ["pending", "processing", "extracted", "failed"];
+
+    function inboxRows() {
+      return BL.rows.filter(function (r) {
+        if (BL.statusFilter === "all") return true;
+        if (BL.statusFilter === "open") return OPEN_STATUSES.indexOf(r.status) !== -1;
+        return r.status === BL.statusFilter;
+      });
+    }
+
+    function statusBadge(r) {
+      if (r.status === "failed") {
+        return '<span class="badge badge-critical">could not read</span>';
+      }
+      if (r.status === "approved")   return '<span class="badge badge-passed">confirmed</span>';
+      if (r.status === "rejected")   return '<span class="badge badge-failed">rejected</span>';
+      if (r.status === "superseded") return '<span class="badge badge-gray">replaced</span>';
+      if (r.status === "extracted")  return '<span class="badge badge-scheduled">ready to check</span>';
+      if (r.status === "processing") return '<span class="badge badge-gray">reading…</span>';
+      return '<span class="badge badge-pending">needs typing in</span>';
+    }
+
+    function inboxRowHtml(r) {
+      var who = r.source === "whatsapp"
+        ? "WhatsApp" + (r.wa_sender ? " · " + escHtml(r.wa_sender) : "")
+        : "Uploaded" + (r.submitted_by_name ? " · " + escHtml(r.submitted_by_name) : "");
+
+      var where = r.pile_mark_no
+        ? escHtml((r.project_code || "") + " · " + r.pile_mark_no)
+        : '<span class="stale-warn">no pile matched yet</span>';
+
+      var flags = "";
+      if (r.error_count)   flags += ' <span class="badge badge-critical">' + r.error_count + " to fix</span>";
+      if (r.warning_count) flags += ' <span class="badge badge-pending">' + r.warning_count + " to check</span>";
+
+      return "<tr>" +
+        UI.td("Status", statusBadge(r)) +
+        UI.td("Pile", where) +
+        UI.td("Source", who) +
+        UI.td("Files", (r.file_count || 0) + (r.file_count === 1 ? " file" : " files")) +
+        UI.td("Arrived", dstr(String(r.created_at).slice(0, 10))) +
+        UI.td("", flags + ' <a href="bore-logs.html?id=' + esc(r.submission_id) + '">open &rarr;</a>') +
+        "</tr>";
+    }
+
+    function uploadPanelHtml() {
+      if (!Dash.can("bore_logs.create")) return "";
+      return '<details class="zone" id="bl-upload"><summary>' +
+        '<span class="zone-name">Add a bore log</span>' +
+        '<span class="zone-count">scan or photo</span></summary>' +
+        '<div class="chase-body"><div class="claim-form">' +
+          pickerHtml("up", null) +
+          '<label>file(s) <input type="file" id="up-file" multiple ' +
+            'accept="image/jpeg,image/png,image/webp,image/heic,application/pdf"></label>' +
+          '<button type="button" data-action="bl-upload">Upload</button>' +
+          '<span class="muted">The document is kept as the record. ' +
+          'You type the values on the next screen.</span>' +
+        "</div></div></details>";
+    }
+
+    function renderInbox() {
+      var rows = inboxRows();
+      var body = rows.length
+        ? rows.map(inboxRowHtml).join("")
+        : UI.emptyRow(6, BL.rows.length
+            ? "Nothing with that status."
+            : "No bore logs yet. Upload a scan, or wait for one from the site group.");
+
+      document.getElementById("view").innerHTML =
+        uploadPanelHtml() +
+        '<div class="mp-controls"><span>Show: <select id="bl-status">' +
+          '<option value="open">waiting to be checked</option>' +
+          '<option value="approved">confirmed</option>' +
+          '<option value="rejected">rejected</option>' +
+          '<option value="all">everything</option>' +
+        "</select></span></div>" +
+        '<table class="table table-stack"><thead><tr>' +
+          "<th>Status</th><th>Pile</th><th>Source</th><th>Files</th><th>Arrived</th><th></th>" +
+        "</tr></thead><tbody>" + body + "</tbody></table>";
+
+      document.getElementById("bl-status").value = BL.statusFilter;
+
+      var open = BL.rows.filter(function (r) {
+        return OPEN_STATUSES.indexOf(r.status) !== -1;
+      }).length;
+      document.getElementById("bl-sub").textContent = open
+        ? open + (open === 1 ? " bore log waiting to be checked" : " bore logs waiting to be checked")
+        : "Nothing waiting.";
+    }
+
+    /* ------------------- pile picker: site -> zone -> pile -------------------
+       One flat list of 267 piles is unusable — nobody scrolls that to find
+       P4-2. Every pile in the register carries a zone (checked: 0 of 267 are
+       null), no project holds more than 30 piles, and zones run 2-18 per
+       project, so two narrowing steps leave a handful to choose from.
+
+       "all zones" stays available: someone holding the sheet who does not know
+       which pier it belongs to can still find the mark.
+       ---------------------------------------------------------------------- */
+
+    // numeric-aware, so P10 sorts after P9 rather than after P1
+    function byMark(a, b) {
+      return String(a.pile_mark_no || "").localeCompare(
+             String(b.pile_mark_no || ""), undefined, { numeric: true, sensitivity: "base" });
+    }
+
+    function projectsWithPiles() {
+      var seen = {}, out = [];
+      BL.piles.forEach(function (p) {
+        if (seen[p.project_id]) return;
+        seen[p.project_id] = true;
+        out.push({ id: p.project_id, code: p.project_code || "", name: p.project_name || "" });
+      });
+      return out.sort(function (a, b) { return a.code.localeCompare(b.code); });
+    }
+
+    function zonesIn(projectId) {
+      var seen = {}, out = [];
+      BL.piles.forEach(function (p) {
+        if (String(p.project_id) !== String(projectId)) return;
+        var z = p.zone || "";
+        if (seen[z]) return;
+        seen[z] = true;
+        out.push(z);
+      });
+      return out.sort(function (a, b) {
+        return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+      });
+    }
+
+    function pilesIn(projectId, zone) {
+      return BL.piles.filter(function (p) {
+        if (String(p.project_id) !== String(projectId)) return false;
+        return zone === "" || (p.zone || "") === zone;      // "" = every zone
+      }).sort(byMark);
+    }
+
+    function zoneOptionsHtml(projectId, selectedZone) {
+      if (!projectId) return '<option value="">— pick a site first —</option>';
+      return '<option value="">— all zones —</option>' +
+        zonesIn(projectId).map(function (z) {
+          return '<option value="' + esc(z) + '"' +
+                 (z === selectedZone ? " selected" : "") + ">" +
+                 escHtml(z || "(no zone)") + "</option>";
+        }).join("");
+    }
+
+    function pileOptionsHtml(projectId, zone, selectedPileId) {
+      if (!projectId) return '<option value="">— pick a site first —</option>';
+      var ps = pilesIn(projectId, zone);
+      if (!ps.length) return '<option value="">— no piles here —</option>';
+      return '<option value="">— not matched yet —</option>' +
+        ps.map(function (p) {
+          return '<option value="' + esc(p.pile_id) + '"' +
+                 (String(p.pile_id) === String(selectedPileId) ? " selected" : "") + ">" +
+                 escHtml(p.pile_mark_no || "") + "</option>";
+        }).join("");
+    }
+
+    // pfx namespaces the three ids, so the upload box and the review screen can
+    // each hold a picker on the same page without colliding.
+    function pickerHtml(pfx, selectedPileId) {
+      var sel = null;
+      if (selectedPileId) {
+        for (var i = 0; i < BL.piles.length; i++) {
+          if (String(BL.piles[i].pile_id) === String(selectedPileId)) { sel = BL.piles[i]; break; }
+        }
+      }
+      // an already-matched pile pre-selects its own site and zone, so the
+      // reviewer sees where it sits rather than three empty boxes
+      var projId = sel ? sel.project_id : "";
+      var zone   = sel ? (sel.zone || "") : "";
+
+      return '<label>site <select id="' + pfx + '-proj" data-pick="' + pfx + '">' +
+               '<option value="">— choose a site —</option>' +
+               projectsWithPiles().map(function (p) {
+                 // code AND name — the office knows sites by name (house rule)
+                 return '<option value="' + esc(p.id) + '"' +
+                        (String(p.id) === String(projId) ? " selected" : "") + ">" +
+                        escHtml(p.code + (p.name ? " — " + p.name : "")) + "</option>";
+               }).join("") +
+             "</select></label>" +
+             '<label>zone <select id="' + pfx + '-zone" data-pick="' + pfx + '">' +
+               zoneOptionsHtml(projId, zone) + "</select></label>" +
+             '<label>pile <select id="' + pfx + '-pile" data-pick="' + pfx + '">' +
+               pileOptionsHtml(projId, zone, selectedPileId) + "</select></label>";
+    }
+
+    function pickedPile(pfx) {
+      var el = document.getElementById(pfx + "-pile");
+      return el ? String(el.value || "") : "";
+    }
+
+    // refill whatever sits downstream of the box that just changed
+    function refillPicker(pfx, which) {
+      var projEl = document.getElementById(pfx + "-proj");
+      var zoneEl = document.getElementById(pfx + "-zone");
+      var pileEl = document.getElementById(pfx + "-pile");
+      var projId = projEl ? String(projEl.value || "") : "";
+      if (which === "proj" && zoneEl) zoneEl.innerHTML = zoneOptionsHtml(projId, "");
+      var zone = zoneEl ? String(zoneEl.value || "") : "";
+      if (pileEl) pileEl.innerHTML = pileOptionsHtml(projId, zone, null);
+    }
+
+    /* --------------------------- the review screen -------------------------- */
+
+    function fieldRow(key, label, type, v) {
+      var t = type || "number";
+      var attrs = t === "number" ? ' type="number" step="any"'
+                : t === "datetime" ? ' type="datetime-local"'
+                : t === "date" ? ' type="date"'
+                : ' type="text"';
+      return '<label class="bl-f"><span>' + escHtml(label) + "</span>" +
+             '<input id="f-' + esc(key) + '"' + attrs +
+             ' value="' + esc(v === null || v === undefined ? "" : v) + '"></label>';
+    }
+
+    // timestamptz -> what <input type="datetime-local"> wants
+    function toLocalInput(v) {
+      if (!v) return "";
+      return String(v).replace(" ", "T").slice(0, 16);
+    }
+
+    function cageBlockHtml(reinf) {
+      var cages = (reinf && reinf.cages) || [];
+      var rows = cages.map(function (c, i) { return cageRowHtml(i, c); }).join("");
+      return '<h3>Steel cage <span class="muted">as built</span></h3>' +
+        '<div class="claim-form">' +
+          fieldRow("starter_bar_length_m", "Starter bar length (m)", "number",
+                   reinf ? reinf.starter_bar_length_m : "") +
+        "</div>" +
+        '<div id="bl-cages">' + rows + "</div>" +
+        '<button type="button" data-action="bl-cage-add">+ add a cage</button>' +
+        '<p class="muted">Top cage first — the starter bars sit on it. ' +
+        "Weight is worked out from these numbers when you confirm.</p>";
+    }
+
+    function cageRowHtml(i, c) {
+      c = c || {};
+      return '<div class="claim-form bl-cage" data-cage="' + i + '">' +
+        "<strong>Cage " + (i + 1) + "</strong>" +
+        CAGE_COLS.map(function (col) {
+          return '<label>' + escHtml(col[1]) +
+                 ' <input type="number" step="any" class="bl-cage-in" data-k="' + esc(col[0]) +
+                 '" value="' + esc(c[col[0]] === null || c[col[0]] === undefined ? "" : c[col[0]]) +
+                 '" size="5"></label>';
+        }).join("") +
+        '<button type="button" data-action="bl-cage-del" data-i="' + i + '">remove</button>' +
+        "</div>";
+    }
+
+    function strataBlockHtml(layers) {
+      var rows = (layers || []).map(function (l, i) { return strataRowHtml(i, l); }).join("");
+      return '<h3>Soil strata</h3><div id="bl-strata">' + rows + "</div>" +
+        '<button type="button" data-action="bl-strata-add">+ add a layer</button>';
+    }
+
+    function strataRowHtml(i, l) {
+      l = l || {};
+      return '<div class="claim-form bl-stratum" data-stratum="' + i + '">' +
+        STRATA_COLS.map(function (col) {
+          var isText = col[0] === "description";
+          return "<label>" + escHtml(col[1]) +
+            ' <input class="bl-strata-in" data-k="' + esc(col[0]) + '"' +
+            (isText ? ' type="text" size="18"' : ' type="number" step="any" size="6"') +
+            ' value="' + esc(l[col[0]] === null || l[col[0]] === undefined ? "" : l[col[0]]) +
+            '"></label>';
+        }).join("") +
+        '<button type="button" data-action="bl-strata-del" data-i="' + i + '">remove</button>' +
+        "</div>";
+    }
+
+    // Has the reviewer put anything in yet? A brand-new submission has no
+    // ai_fields at all (nothing pre-filled it, because nothing reads the
+    // document for us).
+    function draftIsEmpty(s) {
+      var f = s && s.ai_fields;
+      if (!f) return true;
+      for (var k in f) { if (Object.prototype.hasOwnProperty.call(f, k)) return false; }
+      return true;
+    }
+
+    // `untouched` exists because the database is answering "can this be
+    // approved?" — and for an untyped draft the honest answer is no. Correct,
+    // but opening a fresh bore log with a red MUST BE FIXED banner reads as
+    // "something is broken" when the real state is "you haven't started".
+    // The approve button stays disabled either way; only the wording changes.
+    function validationHtml(v, untouched) {
+      if (untouched) {
+        return '<div class="banner banner-info">Read the document on the left and ' +
+               "type the values in. Anything impossible gets flagged before you can confirm.</div>";
+      }
+      if (!v) return "";
+      var errs = v.errors || [], warns = v.warnings || [];
+      var out = "";
+      if (errs.length) {
+        out += '<div class="banner banner-red"><strong>Must be fixed before this can be confirmed</strong><ul>' +
+          errs.map(function (e) { return "<li>" + escHtml(e) + "</li>"; }).join("") + "</ul></div>";
+      }
+      if (warns.length) {
+        out += '<div class="banner banner-amber"><strong>Worth a look</strong><ul>' +
+          warns.map(function (w) { return "<li>" + escHtml(w) + "</li>"; }).join("") + "</ul></div>";
+      }
+      if (!errs.length && !warns.length) {
+        out += '<div class="banner banner-green">Nothing looks wrong.</div>';
+      }
+      return out;
+    }
+
+    function designHtml(p) {
+      if (!p || !p.pile_id) {
+        return '<div class="muted-line">No pile matched yet — pick one above so the ' +
+               "numbers can be checked against the design.</div>";
+      }
+      // labelHtml is HTML, not text — every caller passes a literal, and one of
+      // them passes UI.help(), which IS markup. Escaping it would print the
+      // <span> at the reviewer. The VALUE is escaped, which is the part that
+      // comes from the database.
+      function line(labelHtml, v, unit) {
+        return '<div><span class="muted">' + labelHtml + "</span> " +
+               (v === null || v === undefined ? "—" : escHtml(String(v) + (unit || ""))) + "</div>";
+      }
+      return '<div class="bl-design">' +
+        line("Register Ø", p.register_diameter_mm, " mm") +
+        line("Design depth", p.design_depth_m, " m") +
+        line(UI.help("rock socket") + " design", p.design_socket_length_m, " m") +
+        line("Design concrete", p.design_concrete_m3, " m³") +
+        line("Design steel", p.design_steel_total_t, " t") +
+        line("Cover used", p.design_cover_mm === null ? "75 (assumed)" : p.design_cover_mm, " mm") +
+        "</div>";
+    }
+
+    function currentPath() {
+      var paths = BL.sub.storage_paths || [];
+      if (!paths.length) return "";
+      return paths[Math.min(BL.page, paths.length - 1)];
+    }
+
+    // Decided per FILE, not per submission: mime_type on the row describes only
+    // the first file, and one submission can mix a PDF cover sheet with photos.
+    // The extension is the reliable signal; mime_type is the fallback for a file
+    // uploaded without one.
+    function currentIsPdf() {
+      var p = currentPath();
+      if (/\.pdf(\?|$)/i.test(p)) return true;
+      if (/\.(jpe?g|png|webp|heic|heif|gif|tiff?)(\?|$)/i.test(p)) return false;
+      return /pdf/i.test(BL.sub.mime_type || "");
+    }
+
+    function viewerHtml() {
+      var paths = (BL.sub.storage_paths) || [];
+      var pdf = currentIsPdf();
+      var nav = paths.length > 1
+        ? '<span class="muted" id="bl-pageno">' + (BL.page + 1) + " / " + paths.length + "</span>" +
+          '<button type="button" data-action="bl-prev">&larr;</button>' +
+          '<button type="button" data-action="bl-next">&rarr;</button>'
+        : "";
+
+      // A PDF gets the browser's own viewer, which already does zoom, rotate and
+      // page navigation — our buttons would only fight it, so they are dropped.
+      var imgCtl = pdf ? "" :
+        '<button type="button" data-action="bl-zoom-in">+</button>' +
+        '<button type="button" data-action="bl-zoom-out">&minus;</button>' +
+        '<button type="button" data-action="bl-rotate">rotate</button>' +
+        '<button type="button" data-action="bl-reset">reset</button>';
+
+      return '<div class="bl-viewer">' +
+        '<div class="bl-viewer-bar">' + imgCtl + nav +
+          '<a id="bl-open" href="#" target="_blank" rel="noopener">' +
+          (pdf ? "open in a new tab" : "open full size") + "</a>" +
+        "</div>" +
+        '<div class="bl-viewer-frame' + (pdf ? " is-pdf" : "") + '" id="bl-frame">' +
+          // class AND id: the id is what showPage() sets the src on, the class is
+          // what carries the sizing. Styling it by id alone left the iframe at
+          // the browser default of 300x150.
+          (pdf ? '<iframe id="bl-pdf" class="bl-pdf" title="bore log document"></iframe>'
+               : '<img id="bl-img" alt="bore log">') +
+        "</div></div>";
+    }
+
+    function renderReview() {
+      var s = BL.sub;
+      var f = s.ai_fields || {};
+      var canEdit = Dash.can("bore_logs.edit");
+      var canApprove = Dash.can("bore_logs.approve");
+      var settled = ["approved", "rejected", "superseded"].indexOf(s.status) !== -1;
+      var errCount = ((s.validation && s.validation.errors) || []).length;
+
+      document.getElementById("bl-title").textContent =
+        (s.pile && s.pile.pile_mark_no)
+          ? "Bore log — " + s.pile.project_code + " · " + s.pile.pile_mark_no
+          : "Bore log — pile not matched yet";
+
+      document.getElementById("bl-sub").innerHTML =
+        '<a href="bore-logs.html">&larr; back to the list</a> · ' +
+        (s.source === "whatsapp" ? "from WhatsApp" : "uploaded") +
+        (s.ai_model ? ' · read by <span class="muted">' + escHtml(s.ai_model) + "</span>" : "") +
+        (settled ? " · " + escHtml(UI.label(s.status)) : "");
+
+      var actions = settled
+        ? '<div class="muted-line">Already dealt with — ' + escHtml(UI.label(s.status)) +
+          (s.review_note ? ": " + escHtml(s.review_note) : "") + "</div>"
+        : '<div class="bl-actions">' +
+            (canEdit ? '<button type="button" data-action="bl-save">Save draft</button>' : "") +
+            (canApprove
+              ? '<button type="button" class="btn-primary" data-action="bl-approve"' +
+                (errCount ? " disabled" : "") + ">Confirm this bore log</button>" +
+                '<button type="button" data-action="bl-reject">Reject…</button>'
+              : "") +
+            (canEdit || canApprove ? "" : '<span class="muted">View only.</span>') +
+          "</div>";
+
+      document.getElementById("view").innerHTML =
+        '<div class="bl-split">' +
+          '<div class="bl-left" id="bl-left">' + viewerHtml() + "</div>" +
+          '<div class="bl-right">' +
+            '<div id="bl-valid">' + validationHtml(s.validation, draftIsEmpty(s)) + "</div>" +
+
+            "<h3>Which pile</h3>" +
+            '<div class="claim-form">' + pickerHtml("f", s.pile_id) + "</div>" +
+            designHtml(s.pile) +
+
+            "<h3>Levels <span class=\"muted\">mRL — going down the pile the numbers get smaller</span></h3>" +
+            '<div class="claim-form">' +
+              LEVELS.map(function (r) { return fieldRow(r[0], r[1], "number", f[r[0]]); }).join("") +
+            "</div>" +
+
+            "<h3>Boring times</h3>" +
+            '<div class="claim-form">' +
+              TIMES.map(function (r) {
+                return fieldRow(r[0], r[1], "datetime", toLocalInput(f[r[0]]));
+              }).join("") +
+            "</div>" +
+
+            "<h3>As built</h3>" +
+            '<div class="claim-form">' +
+              ASBUILT.map(function (r) { return fieldRow(r[0], r[1], "number", f[r[0]]); }).join("") +
+            "</div>" +
+
+            "<h3>Concrete</h3>" +
+            '<div class="claim-form">' +
+              fieldRow("concrete_grade", "Grade", "text", f.concrete_grade) +
+              fieldRow("cast_date", "Cast date", "date", f.cast_date) +
+              fieldRow("actual_concrete_m3", "Poured (m³)", "number", f.actual_concrete_m3) +
+            "</div>" +
+
+            cageBlockHtml(f.reinforcement) +
+            strataBlockHtml(f.soil_layers) +
+
+            "<h3>Remarks</h3>" +
+            '<div class="claim-form">' +
+              '<label>notes <input id="f-remarks" type="text" size="40" value="' +
+              esc(f.remarks || "") + '"></label>' +
+            "</div>" +
+
+            actions +
+          "</div>" +
+        "</div>";
+
+      showPage();
+    }
+
+    // Signed URLs expire, so they are fetched when the image is shown and never
+    // kept anywhere.
+    async function showPage() {
+      var paths = BL.sub.storage_paths || [];
+      if (!paths.length) return;
+      var path = paths[Math.min(BL.page, paths.length - 1)];
+      var counter = document.getElementById("bl-pageno");
+      if (counter) counter.textContent = (BL.page + 1) + " / " + paths.length;
+      try {
+        var url = await Dash.boreLogFileUrl(path);
+        var img = document.getElementById("bl-img");
+        if (img) {
+          img.src = url;
+          img.style.transform = "scale(" + BL.zoom + ") rotate(" + BL.rot + "deg)";
+        }
+        var pdf = document.getElementById("bl-pdf");
+        if (pdf) pdf.src = url;
+        var link = document.getElementById("bl-open");
+        if (link) link.href = url;
+      } catch (e) {
+        document.getElementById("bl-frame").innerHTML =
+          UI.errorBanner((e && e.message) || e);
+      }
+    }
+
+    /* ------------------------- reading the form back ------------------------ */
+
+    function collectFields() {
+      var out = {};
+
+      LEVELS.forEach(function (r) { putNum(out, r[0], val("f-" + r[0])); });
+      ASBUILT.forEach(function (r) { putNum(out, r[0], val("f-" + r[0])); });
+
+      TIMES.forEach(function (r) {
+        var v = val("f-" + r[0]);
+        if (v) out[r[0]] = v;             // "2026-07-20T08:20" casts cleanly
+      });
+
+      putText(out, "concrete_grade", val("f-concrete_grade"));
+      putText(out, "cast_date", val("f-cast_date"));
+      putNum(out, "actual_concrete_m3", val("f-actual_concrete_m3"));
+      putText(out, "remarks", val("f-remarks"));
+
+      // cage — seq is renumbered from position, so a removed cage in the
+      // middle can never leave a gap the validator would flag
+      var cages = [];
+      var blocks = document.querySelectorAll("#bl-cages .bl-cage");
+      for (var i = 0; i < blocks.length; i++) {
+        var cage = { seq: i + 1 }, any = false;
+        var ins = blocks[i].querySelectorAll(".bl-cage-in");
+        for (var j = 0; j < ins.length; j++) {
+          var raw = String(ins[j].value || "").trim();
+          if (raw === "") continue;
+          var n = Number(raw);
+          if (!isFinite(n)) continue;
+          cage[ins[j].getAttribute("data-k")] = n;
+          any = true;
+        }
+        if (any) cages.push(cage);
+      }
+      var starter = val("f-starter_bar_length_m");
+      if (cages.length || starter !== "") {
+        var reinf = { cages: cages };
+        putNum(reinf, "starter_bar_length_m", starter);
+        out.reinforcement = reinf;
+      }
+
+      // strata
+      var layers = [];
+      var sblocks = document.querySelectorAll("#bl-strata .bl-stratum");
+      for (var k = 0; k < sblocks.length; k++) {
+        var layer = {}, got = false;
+        var sins = sblocks[k].querySelectorAll(".bl-strata-in");
+        for (var m = 0; m < sins.length; m++) {
+          var sraw = String(sins[m].value || "").trim();
+          if (sraw === "") continue;
+          var key = sins[m].getAttribute("data-k");
+          if (key === "description") layer[key] = sraw;
+          else {
+            var sn = Number(sraw);
+            if (!isFinite(sn)) continue;
+            layer[key] = sn;
+          }
+          got = true;
+        }
+        if (got) layers.push(layer);
+      }
+      if (layers.length) out.soil_layers = layers;
+
+      return out;
+    }
+
+    async function saveDraft(silent) {
+      var pileId = pickedPile("f");
+      var v = await Dash.saveBoreLogDraft(BL.id, collectFields(), {
+        pileId: pileId || null,
+        clearPile: !pileId
+      });
+      BL.sub.validation = v;
+      // once they have saved, they HAVE started — show the real verdict
+      document.getElementById("bl-valid").innerHTML = validationHtml(v, false);
+      if (!silent) {
+        document.getElementById("ok").innerHTML = UI.okBanner("Draft saved.");
+      }
+      // approve stays locked while anything is still an error
+      var btn = document.querySelector('[data-action="bl-approve"]');
+      if (btn) btn.disabled = ((v.errors || []).length > 0);
+      return v;
+    }
+
+    /* --------------------------------- boot -------------------------------- */
+
+    window.onShellReady = async function () {
+      BL.id = qs("id");
+
+      try {
+        BL.piles = await Dash.getAllPiles();
+      } catch (e) { BL.piles = []; }
+
+      try {
+        if (BL.id) {
+          BL.sub = await Dash.getBoreLogSubmission(BL.id);
+          renderReview();
+        } else {
+          BL.rows = await Dash.getBoreLogSubmissions({});
+          renderInbox();
+        }
+        UI.restoreScroll();
+      } catch (e) {
+        document.getElementById("error").innerHTML =
+          '<div class="banner banner-red">Could not load: ' +
+          escHtml((e && e.message) || e) + "</div>";
+        return;
+      }
+
+      document.getElementById("view").addEventListener("change", function (ev) {
+        if (ev.target.id === "bl-status") {
+          BL.statusFilter = ev.target.value;
+          renderInbox();
+          return;
+        }
+        // site -> zone -> pile: changing one box refills the ones below it.
+        // Only the two upstream boxes cascade; changing the pile itself is the
+        // answer, not a filter.
+        var pfx = ev.target.getAttribute && ev.target.getAttribute("data-pick");
+        if (!pfx) return;
+        if (ev.target.id === pfx + "-proj") refillPicker(pfx, "proj");
+        else if (ev.target.id === pfx + "-zone") refillPicker(pfx, "zone");
+      });
+
+      document.getElementById("view").addEventListener("click", async function (ev) {
+        var btn = ev.target.closest("button[data-action]");
+        if (!btn) return;
+        var act = btn.getAttribute("data-action");
+        clearBanners();
+
+        /* ---- viewer ---- */
+        if (act === "bl-zoom-in")  { BL.zoom = Math.min(BL.zoom * 1.25, 8); return showPage(); }
+        if (act === "bl-zoom-out") { BL.zoom = Math.max(BL.zoom / 1.25, 0.2); return showPage(); }
+        if (act === "bl-rotate")   { BL.rot = (BL.rot + 90) % 360; return showPage(); }
+        if (act === "bl-reset")    { BL.zoom = 1; BL.rot = 0; return showPage(); }
+        // Paging redraws the LEFT COLUMN only — never the form, or the reviewer
+        // loses everything they have typed but not saved. The whole column and
+        // not just the src, because one submission can mix a PDF with photos and
+        // the element itself has to change (<iframe> vs <img>).
+        if (act === "bl-prev" || act === "bl-next") {
+          var last = (BL.sub.storage_paths || []).length - 1;
+          BL.page = act === "bl-prev"
+            ? Math.max(0, BL.page - 1)
+            : Math.min(last, BL.page + 1);
+          BL.zoom = 1; BL.rot = 0;              // a fresh page starts unzoomed
+          var left = document.getElementById("bl-left");
+          if (left) left.innerHTML = viewerHtml();
+          return showPage();
+        }
+
+        /* ---- cage + strata rows ---- */
+        if (act === "bl-cage-add") {
+          var host = document.getElementById("bl-cages");
+          var n = host.querySelectorAll(".bl-cage").length;
+          host.insertAdjacentHTML("beforeend", cageRowHtml(n, {}));
+          return;
+        }
+        if (act === "bl-cage-del") {
+          var block = btn.closest(".bl-cage");
+          if (block) block.remove();
+          return;
+        }
+        if (act === "bl-strata-add") {
+          var shost = document.getElementById("bl-strata");
+          var sn2 = shost.querySelectorAll(".bl-stratum").length;
+          shost.insertAdjacentHTML("beforeend", strataRowHtml(sn2, {}));
+          return;
+        }
+        if (act === "bl-strata-del") {
+          var sblock = btn.closest(".bl-stratum");
+          if (sblock) sblock.remove();
+          return;
+        }
+
+        /* ---- upload ---- */
+        if (act === "bl-upload") {
+          var input = document.getElementById("up-file");
+          if (!input || !input.files || !input.files.length) {
+            return fail(new Error("Choose a file first."));
+          }
+          btn.disabled = true;
+          btn.textContent = "Uploading…";
+          try {
+            var pid = pickedPile("up");
+            var newId = await Dash.uploadBoreLog(input.files, { pileId: pid || null });
+            window.location.href = "bore-logs.html?id=" + encodeURIComponent(newId);
+          } catch (e) {
+            btn.disabled = false;
+            btn.textContent = "Upload";
+            fail(e);
+          }
+          return;
+        }
+
+        /* ---- review actions ---- */
+        if (act === "bl-save") {
+          btn.disabled = true;
+          try { await saveDraft(false); } catch (e) { fail(e); }
+          btn.disabled = false;
+          return;
+        }
+
+        if (act === "bl-approve") {
+          btn.disabled = true;
+          try {
+            // save first: what is on screen is what gets confirmed, not
+            // whatever was last written to the row
+            var v = await saveDraft(true);
+            if ((v.errors || []).length) {
+              btn.disabled = false;
+              return;
+            }
+            await Dash.approveBoreLogSubmission(BL.id, null);
+            window.location.href = "bore-logs.html";
+          } catch (e) {
+            btn.disabled = false;
+            fail(e);
+          }
+          return;
+        }
+
+        if (act === "bl-reject") {
+          var reason = window.prompt("Why is this being rejected? (the site will be told)");
+          if (!reason) return;
+          btn.disabled = true;
+          try {
+            await Dash.rejectBoreLogSubmission(BL.id, reason);
+            window.location.href = "bore-logs.html";
+          } catch (e) {
+            btn.disabled = false;
+            fail(e);
+          }
+          return;
+        }
+      });
+    };
+  </script>
+</body>
+</html>

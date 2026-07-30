@@ -1099,9 +1099,14 @@
   }
 
   function getAllPiles() {
-    // lightweight pile directory for project-scoped pickers
+    // lightweight pile directory for project-scoped pickers.
+    //
+    // zone + project_name added for the bore-log picker, which narrows
+    // site -> zone -> pile (267 piles in one flat list is unusable, and every
+    // pile in the register carries a zone). Both are additive — existing
+    // callers read fields by name and are unaffected.
     return q(sb.from("v_pile_register")
-      .select("pile_id,project_id,project_code,pile_mark_no")
+      .select("pile_id,project_id,project_code,project_name,zone,pile_mark_no")
       .order("pile_mark_no"));
   }
 
@@ -1361,6 +1366,142 @@
   }
 
   // ---- the public commands the UI uses ---------------------------------------
+  // ---- bore logs (0073 / 0074) -----------------------------------------------
+  // A bore log arrives either as an office scan uploaded here, or from the
+  // WhatsApp bot. Either way it lands in bore_log_submissions as a DRAFT and
+  // stays there until a person checks it against the original image and
+  // approves it — only then is a bore_logs row written.
+  //
+  // This is the ONLY place in this file that touches Supabase Storage;
+  // everything else is RPCs and views. The bucket is PRIVATE, so viewing a scan
+  // means asking Storage for a short-lived signed URL. That URL is never stored
+  // anywhere — a saved one is a dead link waiting to happen (0073).
+
+  var BORE_BUCKET = "bore-logs";
+
+  function getBoreLogSubmissions(o) {
+    o = o || {};
+    return q(sb.rpc("get_bore_log_submissions", {
+      p_status: o.status || null,
+      p_project_id: o.projectId || null,
+      p_limit: o.limit || null
+    }));
+  }
+
+  function getBoreLogSubmission(submissionId) {
+    return q(sb.rpc("get_bore_log_submission", { p_submission_id: submissionId }));
+  }
+
+  // FULL REPLACE of the draft (the set_pile_design precedent): the form always
+  // submits complete state, so clearing a field has to work. Never touches
+  // bore_logs — nothing here is official yet.
+  function saveBoreLogDraft(submissionId, fields, o) {
+    o = o || {};
+    return q(sb.rpc("save_bore_log_draft", {
+      p_submission_id: submissionId,
+      p_fields: fields,
+      p_pile_id: o.pileId || null,
+      p_clear_pile: !!o.clearPile
+    }));
+  }
+
+  function approveBoreLogSubmission(submissionId, note) {
+    return q(sb.rpc("approve_bore_log_submission", {
+      p_submission_id: submissionId, p_note: note || null
+    }));
+  }
+
+  function rejectBoreLogSubmission(submissionId, reason) {
+    return q(sb.rpc("reject_bore_log_submission", {
+      p_submission_id: submissionId, p_reason: reason
+    }));
+  }
+
+  // The object path is submissions/{id}/…, so the id must exist BEFORE the file
+  // goes up — hence generated here rather than by the database.
+  function newSubmissionId() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    var b = new Uint8Array(16);
+    crypto.getRandomValues(b);
+    b[6] = (b[6] & 0x0f) | 0x40;          // version 4
+    b[8] = (b[8] & 0x3f) | 0x80;          // variant 1
+    var h = [];
+    for (var i = 0; i < 16; i++) h.push(("0" + b[i].toString(16)).slice(-2));
+    return h.slice(0, 4).join("") + "-" + h.slice(4, 6).join("") + "-" +
+           h.slice(6, 8).join("") + "-" + h.slice(8, 10).join("") + "-" +
+           h.slice(10, 16).join("");
+  }
+
+  // Storage object keys are not a place for spaces, slashes or Chinese
+  // characters. The original name is kept intact on the row.
+  function safeObjectName(name) {
+    var s = String(name || "file").replace(/[^A-Za-z0-9._-]/g, "_");
+    return s.length > 80 ? s.slice(-80) : s;
+  }
+
+  // sha-256, hex. Lets the office be told "this same scan is already in the
+  // system" instead of quietly creating a second submission for it.
+  // crypto.subtle needs a secure origin; on plain http it is simply absent, and
+  // a missing hash is not worth failing an upload over.
+  async function fileHash(file) {
+    if (!(window.crypto && crypto.subtle && file)) return null;
+    try {
+      var digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+      var bytes = new Uint8Array(digest), out = "";
+      for (var i = 0; i < bytes.length; i++) out += ("0" + bytes[i].toString(16)).slice(-2);
+      return out;
+    } catch (e) { return null; }
+  }
+
+  // Upload the file(s) FIRST, then create the row that points at them.
+  //
+  // If the upload succeeds and the row creation then fails, the objects are
+  // orphaned — but harmlessly: the Storage read policy only grants access to
+  // paths a submission row actually references, so an orphan is unreadable by
+  // anyone and invisible in the inbox.
+  async function uploadBoreLog(files, o) {
+    o = o || {};
+    if (!files || !files.length) throw new Error("Choose a file to upload.");
+
+    var submissionId = newSubmissionId();
+    var paths = [];
+    for (var i = 0; i < files.length; i++) {
+      var f = files[i];
+      var path = "submissions/" + submissionId + "/" + (i + 1) + "-" + safeObjectName(f.name);
+      var up = await sb.storage.from(BORE_BUCKET).upload(path, f, {
+        contentType: f.type || "application/octet-stream",
+        upsert: false
+      });
+      if (up.error) throw up.error;
+      paths.push(path);
+    }
+
+    await q(sb.rpc("create_bore_log_submission", {
+      p_submission_id: submissionId,
+      p_source: "dashboard",
+      p_storage_paths: paths,
+      p_project_id: o.projectId || null,
+      p_pile_id: o.pileId || null,
+      p_file_hash: await fileHash(files[0]),
+      p_original_filename: files[0].name || null,
+      p_mime_type: files[0].type || null,
+      p_file_size_bytes: files[0].size || null,
+      p_wa_message_id: null,
+      p_wa_sender: null,
+      p_captured_at: null
+    }));
+
+    return submissionId;
+  }
+
+  // Five minutes is plenty to look at one scan, and keeps a copied link from
+  // being useful for long afterwards.
+  async function boreLogFileUrl(path, seconds) {
+    var res = await sb.storage.from(BORE_BUCKET).createSignedUrl(path, seconds || 300);
+    if (res.error) throw res.error;
+    return res.data.signedUrl;
+  }
+
   window.Dash = {
     signIn: signIn,
     signUp: signUp,
@@ -1449,6 +1590,14 @@
     certifyClaimLine: certifyClaimLine,
     setClaimStatus: setClaimStatus,
     deleteClaim: deleteClaim,
+
+    getBoreLogSubmissions: getBoreLogSubmissions,
+    getBoreLogSubmission: getBoreLogSubmission,
+    saveBoreLogDraft: saveBoreLogDraft,
+    approveBoreLogSubmission: approveBoreLogSubmission,
+    rejectBoreLogSubmission: rejectBoreLogSubmission,
+    uploadBoreLog: uploadBoreLog,
+    boreLogFileUrl: boreLogFileUrl,
 
     getUserAccounts: getUserAccounts,
     getUserEffectiveAccess: getUserEffectiveAccess,
