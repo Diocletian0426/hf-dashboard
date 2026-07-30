@@ -613,9 +613,10 @@ table.claim-lines tfoot td {
   background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-md);
 }
 .claim-form label { display: flex; flex-direction: column; gap: 3px; color: var(--ink-2); }
-/* .bl-grid is here so the bore-log entry tables get the same box as every other
-   form on the site — they sit in a plain <table>, not inside a .claim-form. */
-.claim-form input, .claim-actions input, .bl-grid input {
+/* .bl-grid and .bl-rows are here so the bore-log entry fields get the same box
+   as every other form on the site — they sit in a plain <table> and a grid, not
+   inside a .claim-form. */
+.claim-form input, .claim-actions input, .bl-grid input, .bl-rows input {
   padding: 5px 8px; border: 1px solid var(--line-strong);
   border-radius: var(--r-sm); font-size: var(--fs-sm); background: var(--surface);
 }
@@ -1080,9 +1081,36 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
   display: block; width: 100%; height: 100%; border: 0; background: var(--surface);
 }
 
-/* stacked label above input — long field names would wrap badly inline */
-.bl-f { display: flex; flex-direction: column; gap: 2px; }
-.bl-f > span { font-size: var(--fs-xs); color: var(--ink-2); }
+/* ONE FIELD PER ROW — label | box | unit, as three grid columns.
+
+   Replaces a flex-wrap layout that put two boxes on a line. Two problems with
+   that: the eye zig-zagged while the sheet being copied reads straight down,
+   and the boxes never lined up, so a set of related values could not be checked
+   as a group. Here every box starts and ends at the same x and the numbers are
+   right-aligned, so a column of levels can be scanned for a missing minus sign
+   or a transposed digit without reading a single label. That is the whole point
+   of the layout — it costs roughly seven extra rows of height across the form.
+
+   Units live in their own column rather than inside the label text
+   ("As-built diameter (mm)"), which keeps the labels short and lines the units
+   up too.
+
+   The three cells are siblings, not wrapped — see fieldRow() in bore-logs.html
+   for why. Column 2 is minmax(0, 200px): wide enough for a datetime-local, and
+   allowed to shrink on a phone rather than overflow. Column 1 can wrap. */
+.bl-rows {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) minmax(0, 200px) max-content;
+  gap: 6px var(--sp-2); align-items: center;
+  padding: var(--sp-3); margin-bottom: var(--sp-3); font-size: 12.5px;
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-md);
+}
+.bl-rows .bl-row-label { color: var(--ink-2); }
+.bl-rows .bl-row-unit { color: var(--ink-3); font-size: var(--fs-xs); }
+.bl-rows input { width: 100%; }
+/* right-aligned so the decimal points line up down the column — the alignment
+   IS the check. Same reasoning as td.num on the money tables. */
+.bl-rows input[type="number"] { text-align: right; font-variant-numeric: tabular-nums; }
 
 /* Cages and soil layers are TABLES with one header row, not a label on every
    box. Every row asks for the same six things, so a 4-cage log printed

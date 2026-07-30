@@ -72,14 +72,20 @@
        reading it back can never drift apart.
        ------------------------------------------------------------------ */
 
+    /* [key, label, unit] — the unit is its OWN column on screen, not part of
+       the label text. Two reasons: the labels stop being long and ragged, and
+       the units line up down the section the same way the numbers do. */
+
     // Levels are mRL: higher number = higher up. Going DOWN the pile the
-    // numbers DECREASE — that one sentence is most of the validation.
+    // numbers DECREASE — that one sentence is most of the validation, and it
+    // is why these are stacked in sheet order: read as a column, a missing
+    // minus sign or a transposed digit shows up without reading the labels.
     var LEVELS = [
-      ["top_of_casing_level_m",   "Top of casing"],
-      ["piling_platform_level_m", "Platform level (EGL)"],
-      ["cut_off_level_m",         "Cut-off level"],
-      ["rock_socketing_level_m",  "Top of rock socket"],
-      ["toe_level_m",             "Toe level"]
+      ["top_of_casing_level_m",   "Top of casing (TOC)",  "mRL"],
+      ["piling_platform_level_m", "Platform level (EGL)", "mRL"],
+      ["cut_off_level_m",         "Cut-off level",        "mRL"],
+      ["rock_socketing_level_m",  "Top of rock socket",   "mRL"],
+      ["toe_level_m",             "Toe level",            "mRL"]
     ];
 
     var TIMES = [
@@ -90,9 +96,9 @@
     ];
 
     var ASBUILT = [
-      ["as_built_diameter_mm",      "As-built diameter (mm)"],
-      ["temporary_casing_length_m", "Temporary casing (m)"],
-      ["permanent_casing_length_m", "Permanent casing (m)"]
+      ["as_built_diameter_mm",      "As-built diameter", "mm"],
+      ["temporary_casing_length_m", "Temporary casing",  "m"],
+      ["permanent_casing_length_m", "Permanent casing",  "m"]
     ];
 
     var CAGE_COLS = [
@@ -375,15 +381,31 @@
 
     /* --------------------------- the review screen -------------------------- */
 
-    function fieldRow(key, label, type, v) {
+    /* ONE FIELD PER ROW: label | box | unit, three cells of a grid.
+
+       The boxes wrapped two-across before, which meant the eye zig-zagged while
+       the sheet being copied reads straight down. Worse, the boxes never lined
+       up, so a set of levels could not be checked as a group. Now every box
+       starts and ends at the same place and the numbers are right-aligned, so
+       a column of levels can be scanned for a wrong sign or a transposed digit
+       without reading a single label. It costs about seven extra rows of height
+       across the form, which is the trade.
+
+       The three cells are SIBLINGS, not wrapped in a <label>. A wrapper would
+       have to be display:contents to keep them as grid items, and that has a
+       patchy history in the accessibility tree — <label for> pointing at the
+       input's own id does the same job with none of the doubt. */
+    function fieldRow(key, label, type, v, unit) {
       var t = type || "number";
       var attrs = t === "number" ? ' type="number" step="any"'
                 : t === "datetime" ? ' type="datetime-local"'
                 : t === "date" ? ' type="date"'
                 : ' type="text"';
-      return '<label class="bl-f"><span>' + escHtml(label) + "</span>" +
+      return '<label class="bl-row-label" for="f-' + esc(key) + '">' +
+               escHtml(label) + "</label>" +
              '<input id="f-' + esc(key) + '"' + attrs +
-             ' value="' + esc(v === null || v === undefined ? "" : v) + '"></label>';
+             ' value="' + esc(v === null || v === undefined ? "" : v) + '">' +
+             '<span class="bl-row-unit">' + escHtml(unit || "") + "</span>";
     }
 
     // timestamptz -> what <input type="datetime-local"> wants
@@ -414,9 +436,9 @@
       var cages = (reinf && reinf.cages) || [];
       var rows = cages.map(function (c, i) { return cageRowHtml(i, c); }).join("");
       return '<h3>Steel cage <span class="muted">as built</span></h3>' +
-        '<div class="claim-form">' +
-          fieldRow("starter_bar_length_m", "Starter bar length (m)", "number",
-                   reinf ? reinf.starter_bar_length_m : "") +
+        '<div class="bl-rows">' +
+          fieldRow("starter_bar_length_m", "Starter bar length", "number",
+                   reinf ? reinf.starter_bar_length_m : "", "m") +
         "</div>" +
         '<div class="bl-grid-wrap"><table class="bl-grid">' + gridHeadHtml(CAGE_COLS) +
           '<tbody id="bl-cages">' + rows + "</tbody></table></div>" +
@@ -682,36 +704,38 @@
             '<div class="claim-form">' + pickerHtml("f", s.pile_id) + "</div>" +
 
             "<h3>As built</h3>" +
-            '<div class="claim-form">' +
-              ASBUILT.map(function (r) { return fieldRow(r[0], r[1], "number", f[r[0]]); }).join("") +
+            '<div class="bl-rows">' +
+              ASBUILT.map(function (r) { return fieldRow(r[0], r[1], "number", f[r[0]], r[2]); }).join("") +
             "</div>" +
 
             "<h3>Boring times</h3>" +
-            '<div class="claim-form">' +
+            '<div class="bl-rows">' +
               TIMES.map(function (r) {
                 return fieldRow(r[0], r[1], "datetime", toLocalInput(f[r[0]]));
               }).join("") +
             "</div>" +
 
-            "<h3>Levels <span class=\"muted\">mRL — going down the pile the numbers get smaller</span></h3>" +
-            '<div class="claim-form">' +
-              LEVELS.map(function (r) { return fieldRow(r[0], r[1], "number", f[r[0]]); }).join("") +
+            // the heading no longer has to say mRL — every row carries it now,
+            // so the hint is free to explain the DIRECTION, which is the part
+            // a unit label cannot tell you
+            "<h3>Levels <span class=\"muted\">going down the pile the numbers get smaller</span></h3>" +
+            '<div class="bl-rows">' +
+              LEVELS.map(function (r) { return fieldRow(r[0], r[1], "number", f[r[0]], r[2]); }).join("") +
             "</div>" +
 
             "<h3>Concrete</h3>" +
-            '<div class="claim-form">' +
+            '<div class="bl-rows">' +
               fieldRow("concrete_grade", "Grade", "text", f.concrete_grade) +
               fieldRow("cast_date", "Cast date", "date", f.cast_date) +
-              fieldRow("actual_concrete_m3", "Poured (m³)", "number", f.actual_concrete_m3) +
+              fieldRow("actual_concrete_m3", "Poured", "number", f.actual_concrete_m3, "m³") +
             "</div>" +
 
             cageBlockHtml(f.reinforcement) +
             strataBlockHtml(f.soil_layers) +
 
             "<h3>Remarks</h3>" +
-            '<div class="claim-form">' +
-              '<label>notes <input id="f-remarks" type="text" size="40" value="' +
-              esc(f.remarks || "") + '"></label>' +
+            '<div class="bl-rows">' +
+              fieldRow("remarks", "Notes", "text", f.remarks) +
             "</div>" +
 
             actions +
