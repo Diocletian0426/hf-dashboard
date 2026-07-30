@@ -1054,6 +1054,13 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
   max-width: 100%; transform-origin: top center; transition: transform .12s ease;
 }
 
+/* A PDF is handed to the browser's own viewer, which brings its own scrolling,
+   zoom and page navigation — so this frame must NOT centre it or clip it. */
+.bl-viewer-frame.is-pdf { display: block; max-height: none; }
+.bl-pdf {
+  display: block; width: 100%; height: 72vh; border: 0; background: var(--surface);
+}
+
 /* stacked label above input — long field names would wrap badly inline */
 .bl-f { display: flex; flex-direction: column; gap: 2px; }
 .bl-f > span { font-size: var(--fs-xs); color: var(--ink-2); }
@@ -1081,4 +1088,5 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
   .bl-split { grid-template-columns: 1fr; }
   .bl-left { position: static; }
   .bl-viewer-frame { max-height: 46vh; }
+  .bl-pdf { height: 46vh; }
 }

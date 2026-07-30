@@ -467,26 +467,48 @@
         "</div>";
     }
 
+    function currentPath() {
+      var paths = BL.sub.storage_paths || [];
+      if (!paths.length) return "";
+      return paths[Math.min(BL.page, paths.length - 1)];
+    }
+
+    // Decided per FILE, not per submission: mime_type on the row describes only
+    // the first file, and one submission can mix a PDF cover sheet with photos.
+    // The extension is the reliable signal; mime_type is the fallback for a file
+    // uploaded without one.
+    function currentIsPdf() {
+      var p = currentPath();
+      if (/\.pdf(\?|$)/i.test(p)) return true;
+      if (/\.(jpe?g|png|webp|heic|heif|gif|tiff?)(\?|$)/i.test(p)) return false;
+      return /pdf/i.test(BL.sub.mime_type || "");
+    }
+
     function viewerHtml() {
       var paths = (BL.sub.storage_paths) || [];
-      var isPdf = /pdf/i.test(BL.sub.mime_type || "");
+      var pdf = currentIsPdf();
       var nav = paths.length > 1
         ? '<span class="muted" id="bl-pageno">' + (BL.page + 1) + " / " + paths.length + "</span>" +
           '<button type="button" data-action="bl-prev">&larr;</button>' +
           '<button type="button" data-action="bl-next">&rarr;</button>'
         : "";
+
+      // A PDF gets the browser's own viewer, which already does zoom, rotate and
+      // page navigation — our buttons would only fight it, so they are dropped.
+      var imgCtl = pdf ? "" :
+        '<button type="button" data-action="bl-zoom-in">+</button>' +
+        '<button type="button" data-action="bl-zoom-out">&minus;</button>' +
+        '<button type="button" data-action="bl-rotate">rotate</button>' +
+        '<button type="button" data-action="bl-reset">reset</button>';
+
       return '<div class="bl-viewer">' +
-        '<div class="bl-viewer-bar">' +
-          '<button type="button" data-action="bl-zoom-in">+</button>' +
-          '<button type="button" data-action="bl-zoom-out">&minus;</button>' +
-          '<button type="button" data-action="bl-rotate">rotate</button>' +
-          '<button type="button" data-action="bl-reset">reset</button>' +
-          nav +
-          '<a id="bl-open" href="#" target="_blank" rel="noopener">open full size</a>' +
+        '<div class="bl-viewer-bar">' + imgCtl + nav +
+          '<a id="bl-open" href="#" target="_blank" rel="noopener">' +
+          (pdf ? "open in a new tab" : "open full size") + "</a>" +
         "</div>" +
-        '<div class="bl-viewer-frame" id="bl-frame">' +
-          (isPdf ? '<div class="empty">PDF — use “open full size”.</div>'
-                 : '<img id="bl-img" alt="bore log">') +
+        '<div class="bl-viewer-frame' + (pdf ? " is-pdf" : "") + '" id="bl-frame">' +
+          (pdf ? '<iframe id="bl-pdf" title="bore log document"></iframe>'
+               : '<img id="bl-img" alt="bore log">') +
         "</div></div>";
     }
 
@@ -524,7 +546,7 @@
 
       document.getElementById("view").innerHTML =
         '<div class="bl-split">' +
-          '<div class="bl-left">' + viewerHtml() + "</div>" +
+          '<div class="bl-left" id="bl-left">' + viewerHtml() + "</div>" +
           '<div class="bl-right">' +
             '<div id="bl-valid">' + validationHtml(s.validation) + "</div>" +
 
@@ -587,6 +609,8 @@
           img.src = url;
           img.style.transform = "scale(" + BL.zoom + ") rotate(" + BL.rot + "deg)";
         }
+        var pdf = document.getElementById("bl-pdf");
+        if (pdf) pdf.src = url;
         var link = document.getElementById("bl-open");
         if (link) link.href = url;
       } catch (e) {
@@ -730,13 +754,18 @@
         if (act === "bl-zoom-out") { BL.zoom = Math.max(BL.zoom / 1.25, 0.2); return showPage(); }
         if (act === "bl-rotate")   { BL.rot = (BL.rot + 90) % 360; return showPage(); }
         if (act === "bl-reset")    { BL.zoom = 1; BL.rot = 0; return showPage(); }
-        // Paging swaps the IMAGE only — never re-render the form here, or the
-        // reviewer loses everything they have typed but not saved.
-        if (act === "bl-prev") {
-          BL.page = Math.max(0, BL.page - 1); return showPage();
-        }
-        if (act === "bl-next") {
-          BL.page = Math.min((BL.sub.storage_paths || []).length - 1, BL.page + 1);
+        // Paging redraws the LEFT COLUMN only — never the form, or the reviewer
+        // loses everything they have typed but not saved. The whole column and
+        // not just the src, because one submission can mix a PDF with photos and
+        // the element itself has to change (<iframe> vs <img>).
+        if (act === "bl-prev" || act === "bl-next") {
+          var last = (BL.sub.storage_paths || []).length - 1;
+          BL.page = act === "bl-prev"
+            ? Math.max(0, BL.page - 1)
+            : Math.min(last, BL.page + 1);
+          BL.zoom = 1; BL.rot = 0;              // a fresh page starts unzoomed
+          var left = document.getElementById("bl-left");
+          if (left) left.innerHTML = viewerHtml();
           return showPage();
         }
 
