@@ -1107,6 +1107,17 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
 }
 .bl-rows .bl-row-label { color: var(--ink-2); }
 .bl-rows .bl-row-unit { color: var(--ink-3); font-size: var(--fs-xs); }
+
+/* Red asterisk = the DATABASE will refuse to confirm without this. It is not a
+   copy of the column's NOT NULL setting — only pile_id and review_status are
+   NOT NULL on bore_logs and neither is a box on the form, so that reading would
+   mark nothing at all. Keep it in step with fn_validate_bore_log: an asterisk
+   on a field that saves fine is a lie, and a required field with no asterisk is
+   a trap. <abbr title="required"> so it is announced, not read as "star". */
+.req {
+  color: var(--danger); font-weight: 700;
+  text-decoration: none; border-bottom: none; cursor: help;
+}
 .bl-rows input { width: 100%; }
 /* right-aligned so the decimal points line up down the column — the alignment
    IS the check. Same reasoning as td.num on the money tables. */

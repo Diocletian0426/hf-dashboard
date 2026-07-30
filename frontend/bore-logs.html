@@ -72,20 +72,32 @@
        reading it back can never drift apart.
        ------------------------------------------------------------------ */
 
-    /* [key, label, unit] — the unit is its OWN column on screen, not part of
-       the label text. Two reasons: the labels stop being long and ragged, and
-       the units line up down the section the same way the numbers do. */
+    /* [key, label, unit, required] — the unit is its OWN column on screen, not
+       part of the label text. Two reasons: the labels stop being long and
+       ragged, and the units line up down the section the same way the numbers
+       do.
+
+       `required` draws the red asterisk, and it means ONE thing precisely:
+       the database will refuse to confirm without it. It is not a copy of the
+       column's NOT NULL setting — only pile_id and review_status are NOT NULL
+       on bore_logs, and neither is a box on this form, so that reading would
+       mark nothing. Keep this list and fn_validate_bore_log in step: an
+       asterisk on a field the database lets through is a lie, and a required
+       field with no asterisk is a trap. */
 
     // Levels are mRL: higher number = higher up. Going DOWN the pile the
     // numbers DECREASE — that one sentence is most of the validation, and it
     // is why these are stacked in sheet order: read as a column, a missing
     // minus sign or a transposed digit shows up without reading the labels.
+    // Cut-off and toe are required (0076): every verified figure the pile
+    // register publishes is worked out from them — pile length, cored socket
+    // and theoretical concrete all subtract the toe level.
     var LEVELS = [
       ["top_of_casing_level_m",   "Top of casing (TOC)",  "mRL"],
       ["piling_platform_level_m", "Platform level (EGL)", "mRL"],
-      ["cut_off_level_m",         "Cut-off level",        "mRL"],
+      ["cut_off_level_m",         "Cut-off level",        "mRL", true],
       ["rock_socketing_level_m",  "Top of rock socket",   "mRL"],
-      ["toe_level_m",             "Toe level",            "mRL"]
+      ["toe_level_m",             "Toe level",            "mRL", true]
     ];
 
     var TIMES = [
@@ -101,10 +113,12 @@
       ["permanent_casing_length_m", "Permanent casing",  "m"]
     ];
 
+    // The asterisked ones are required ONCE A CAGE ROW EXISTS — a bore log with
+    // no cage at all is fine, but a half-typed cage is not.
     var CAGE_COLS = [
-      ["main_count",      "Bars"],
-      ["main_dia_mm",     "Bar Ø mm"],
-      ["length_m",        "Length m"],
+      ["main_count",      "Bars",         true],
+      ["main_dia_mm",     "Bar Ø mm",     true],
+      ["length_m",        "Length m",     true],
       ["spiral_dia_mm",   "Spiral Ø mm"],
       ["spiral_pitch_mm", "Pitch mm"],
       ["lap_to_next_m",   "Lap m"]
@@ -122,9 +136,9 @@
     // real sheet settled it the other way. No SPT column: the site does not
     // record it, and a box nobody can fill is a box that gets guessed.
     var STRATA_COLS = [
-      ["from_depth_m", "From (m)"],
-      ["to_depth_m",   "To (m)"],
-      ["description",  "Description"]
+      ["from_depth_m", "From (m)",    true],
+      ["to_depth_m",   "To (m)",      true],
+      ["description",  "Description", true]
     ];
 
     /* ---------------------------- small helpers ---------------------------- */
@@ -336,7 +350,12 @@
 
     // pfx namespaces the three ids, so the upload box and the review screen can
     // each hold a picker on the same page without colliding.
-    function pickerHtml(pfx, selectedPileId) {
+    //
+    // requirePile is per CALLER, not a property of the picker: on the review
+    // screen the pile must be matched before anything can be confirmed, but the
+    // upload box deliberately accepts a scan with no pile yet — that is the
+    // whole reason bore_log_submissions exists as a staging table.
+    function pickerHtml(pfx, selectedPileId, requirePile) {
       var sel = null;
       if (selectedPileId) {
         for (var i = 0; i < BL.piles.length; i++) {
@@ -359,7 +378,8 @@
              "</select></label>" +
              '<label>zone <select id="' + pfx + '-zone" data-pick="' + pfx + '">' +
                zoneOptionsHtml(projId, zone) + "</select></label>" +
-             '<label>pile <select id="' + pfx + '-pile" data-pick="' + pfx + '">' +
+             "<label>pile" + reqMark(requirePile) +
+               ' <select id="' + pfx + '-pile" data-pick="' + pfx + '">' +
                pileOptionsHtml(projId, zone, selectedPileId) + "</select></label>";
     }
 
@@ -395,15 +415,31 @@
        have to be display:contents to keep them as grid items, and that has a
        patchy history in the accessibility tree — <label for> pointing at the
        input's own id does the same job with none of the doubt. */
-    function fieldRow(key, label, type, v, unit) {
+    // <abbr title="required"> rather than a bare "*": the mark is read out as
+    // "required" instead of "star", and hovering says so.
+    function reqMark(required) {
+      return required ? ' <abbr class="req" title="required">*</abbr>' : "";
+    }
+
+    // The tables are the one place the asterisk means something conditional:
+    // no cage and no strata at all is a perfectly valid bore log, but a
+    // half-filled row is not. Say so rather than leave people guessing why a
+    // column they left blank is suddenly an error.
+    function reqNote(word) {
+      return '<abbr class="req" title="required">*</abbr> needed on every ' +
+             escHtml(word) + " you add.";
+    }
+
+    function fieldRow(key, label, type, v, unit, required) {
       var t = type || "number";
       var attrs = t === "number" ? ' type="number" step="any"'
                 : t === "datetime" ? ' type="datetime-local"'
                 : t === "date" ? ' type="date"'
                 : ' type="text"';
       return '<label class="bl-row-label" for="f-' + esc(key) + '">' +
-               escHtml(label) + "</label>" +
+               escHtml(label) + reqMark(required) + "</label>" +
              '<input id="f-' + esc(key) + '"' + attrs +
+             (required ? " required" : "") +
              ' value="' + esc(v === null || v === undefined ? "" : v) + '">' +
              '<span class="bl-row-unit">' + escHtml(unit || "") + "</span>";
     }
@@ -428,7 +464,9 @@
 
     function gridHeadHtml(cols) {
       return '<thead><tr><th></th>' +
-        cols.map(function (col) { return "<th>" + escHtml(col[1]) + "</th>"; }).join("") +
+        cols.map(function (col) {
+          return "<th>" + escHtml(col[1]) + reqMark(col[2]) + "</th>";
+        }).join("") +
         "<th></th></tr></thead>";
     }
 
@@ -446,7 +484,7 @@
         '<p class="muted">Top cage first — the starter bars sit on it. ' +
         "Lap is how far a cage's bars run down into the one below, so the " +
         "bottom cage has none. Weight is worked out from these numbers when " +
-        "you confirm.</p>";
+        "you confirm. " + reqNote("cage") + "</p>";
     }
 
     // No data-i on the remove button: the handler finds its own row with
@@ -472,7 +510,8 @@
         '<span class="muted">depths measured down from the platform</span></h3>' +
         '<div class="bl-grid-wrap"><table class="bl-grid">' + gridHeadHtml(STRATA_COLS) +
           '<tbody id="bl-strata">' + rows + "</tbody></table></div>" +
-        '<button type="button" data-action="bl-strata-add">+ add a layer</button>';
+        '<button type="button" data-action="bl-strata-add">+ add a layer</button>' +
+        '<p class="muted">' + reqNote("layer") + "</p>";
     }
 
     function strataRowHtml(i, l) {
@@ -701,7 +740,7 @@
             designHtml(s.pile) +
 
             "<h3>Which pile</h3>" +
-            '<div class="claim-form">' + pickerHtml("f", s.pile_id) + "</div>" +
+            '<div class="claim-form">' + pickerHtml("f", s.pile_id, true) + "</div>" +
 
             "<h3>As built</h3>" +
             '<div class="bl-rows">' +
@@ -720,7 +759,9 @@
             // a unit label cannot tell you
             "<h3>Levels <span class=\"muted\">going down the pile the numbers get smaller</span></h3>" +
             '<div class="bl-rows">' +
-              LEVELS.map(function (r) { return fieldRow(r[0], r[1], "number", f[r[0]], r[2]); }).join("") +
+              LEVELS.map(function (r) {
+                return fieldRow(r[0], r[1], "number", f[r[0]], r[2], r[3]);
+              }).join("") +
             "</div>" +
 
             "<h3>Concrete</h3>" +
