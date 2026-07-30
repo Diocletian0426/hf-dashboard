@@ -1029,14 +1029,18 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
    the scan stays put while the form scrolls.
    ========================================================================== */
 
-/* Even 50/50. 60/40 (3fr/2fr) was tried on the first real sheet and rejected —
-   it gave the document more room than it needed and squeezed the form for
-   nothing. Retune by changing these two numbers if that ever changes. */
+/* 60/40. The bore log is a dense handwritten A3 sheet and is the thing being
+   READ; the form is short number boxes that stack fine in a narrower column.
+   3fr/2fr is exactly 60/40 — change those two numbers to retune. */
 .bl-split {
-  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
   gap: var(--sp-4); align-items: start;
 }
-.bl-left  { position: sticky; top: var(--sp-2); }
+
+/* Sticks BELOW the nav, not under it. #nav is itself sticky at top:0 with
+   z-index 50, so an offset that ignores --nav-h slides the top of the document
+   behind the bar as soon as the form scrolls. */
+.bl-left  { position: sticky; top: calc(var(--nav-h) + var(--sp-2)); }
 .bl-right { min-width: 0; }
 .bl-right h3 { margin: var(--sp-4) 0 var(--sp-2); font-size: var(--fs-md); }
 .bl-right h3 .muted { font-weight: 400; }
@@ -1051,8 +1055,16 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
   border-bottom: 1px solid var(--line); background: var(--surface);
 }
 .bl-viewer-bar a { margin-left: auto; font-size: var(--fs-sm); }
+/* Fill the screen rather than a guessed 72vh. Once the column is sticky the
+   viewer never scrolls, so any height it does not use is dead space the reviewer
+   stares at while the form scrolls past. The subtraction is what sits above and
+   below it: nav bar, the sticky offset, this viewer's own toolbar and borders,
+   and a little breathing room at the bottom. min-height keeps it usable on a
+   short laptop screen. */
 .bl-viewer-frame {
-  overflow: auto; max-height: 72vh; min-height: 240px;
+  overflow: auto;
+  height: calc(100vh - var(--nav-h) - 78px);
+  min-height: 380px;
   display: flex; align-items: flex-start; justify-content: center;
 }
 .bl-viewer-frame img {
@@ -1061,9 +1073,9 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
 
 /* A PDF is handed to the browser's own viewer, which brings its own scrolling,
    zoom and page navigation — so this frame must NOT centre it or clip it. */
-.bl-viewer-frame.is-pdf { display: block; max-height: none; }
+.bl-viewer-frame.is-pdf { display: block; }
 .bl-pdf {
-  display: block; width: 100%; height: 72vh; border: 0; background: var(--surface);
+  display: block; width: 100%; height: 100%; border: 0; background: var(--surface);
 }
 
 /* stacked label above input — long field names would wrap badly inline */
@@ -1089,9 +1101,10 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
 
 /* Phones: stack, and give the scan a smaller share so the fields are reachable
    without scrolling past a full-height image. */
+/* Stacked on a phone: the column is no longer sticky, so a full-height viewer
+   would push the form entirely off-screen. Fixed share of the screen instead. */
 @media (max-width: 900px) {
   .bl-split { grid-template-columns: 1fr; }
   .bl-left { position: static; }
-  .bl-viewer-frame { max-height: 46vh; }
-  .bl-pdf { height: 46vh; }
+  .bl-viewer-frame { height: 55vh; min-height: 260px; }
 }
