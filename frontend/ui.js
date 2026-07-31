@@ -17,6 +17,8 @@
      numbers     UI.f1 / UI.fmtRM / UI.fmtPct
      labels      UI.LABELS / UI.label / UI.badge  (humanize raw enum values)
      glossary    UI.help  (plain-language tooltip for jargon)
+     icons       UI.ICONS / UI.icon      (inline SVG glyphs, no icon font)
+     charts      UI.donut / UI.sparkline (card-sized SVG, no chart library)
      states      UI.loadingRow / UI.emptyRow / UI.empty / UI.errorBanner / UI.okBanner
      tables      UI.td  (emits <td data-label="…"> for .table-stack)
      memory      UI.openState / UI.saveScroll / UI.restoreScroll
@@ -228,6 +230,108 @@
 
   UI.okBanner = function (msg) {
     return '<div class="banner banner-green">' + UI.escHtml(msg) + "</div>";
+  };
+
+  /* ------------------------------- icons --------------------------------- */
+  // Hand-drawn 24x24 strokes — no icon font, because no CDN is allowed and
+  // vendoring a whole set for a handful of glyphs is not worth it. They
+  // inherit currentColor, so whatever tints the parent tints the icon.
+  // (shell.js keeps its own copy on purpose — attendance.html loads shell
+  // WITHOUT ui.js, so shell must never depend on this file.)
+
+  UI.ICONS = {
+    site:     '<path d="M3 20.5h18"/><path d="M7 20.5V6.5"/><path d="M4 6.5h15"/>' +
+              '<path d="M7 6.5 9.8 3.2h3.6"/><path d="M15 6.5v3.4"/>' +
+              '<rect x="13.4" y="9.9" width="3.2" height="2.8" rx="0.6"/>',
+    issue:    '<path d="M12 4.6 20.6 19.5H3.4z"/><path d="M12 10v4.2"/><path d="M12 17.2v.4"/>',
+    machine:  '<rect x="2.6" y="12.6" width="10" height="6" rx="1.5"/>' +
+              '<path d="M12.6 15.2h3.6l3-5.6"/><path d="M19.2 9.6h2.2"/>' +
+              '<circle cx="6" cy="20.4" r="1.4"/><circle cx="15.6" cy="20.4" r="1.4"/>',
+    worker:   '<circle cx="9" cy="7.4" r="3"/><path d="M3.5 20c0-3 2.5-5.5 5.5-5.5s5.5 2.5 5.5 5.5"/>' +
+              '<circle cx="17.2" cy="9" r="2.2"/><path d="M17.2 13.4c2.3 0 4.2 1.9 4.2 4.2"/>',
+    pile:     '<rect x="9" y="4" width="6" height="16" rx="1.4"/><path d="M9 9h6M9 14h6"/>' +
+              '<path d="M5.5 20.5h13"/>',
+    concrete: '<rect x="2.6" y="10.6" width="9" height="6" rx="1.4"/>' +
+              '<path d="M11.6 12.4h3.2l2.6 4.2"/><circle cx="17.4" cy="12.6" r="3.4"/>' +
+              '<circle cx="6" cy="19" r="1.5"/><circle cx="16.4" cy="19" r="1.5"/>',
+    steel:    '<path d="M4 5.5h16"/><path d="M4 18.5h16"/><path d="M9.5 5.5v13"/><path d="M14.5 5.5v13"/>',
+    tests:    '<path d="M9.5 3.5v6.2L4.7 18a1.6 1.6 0 0 0 1.4 2.5h11.8a1.6 1.6 0 0 0 1.4-2.5l-4.8-8.3V3.5"/>' +
+              '<path d="M8.6 3.5h6.8"/><path d="M7.6 14.5h8.8"/>',
+    alert:    '<circle cx="12" cy="12" r="8.6"/><path d="M12 7.6v5"/><path d="M12 15.9v.4"/>',
+    clock:    '<circle cx="12" cy="12" r="8.6"/><path d="M12 7.2V12l3.2 1.9"/>',
+    person:   '<circle cx="12" cy="8.2" r="3.4"/><path d="M5.4 20a6.6 6.6 0 0 1 13.2 0"/>',
+    check:    '<circle cx="12" cy="12" r="8.6"/><path d="M8.4 12.2l2.5 2.5 4.7-5"/>',
+    plus:     '<path d="M12 5v14"/><path d="M5 12h14"/>',
+    play:     '<circle cx="12" cy="12" r="8.6"/><path d="M10.3 8.9 15.4 12l-5.1 3.1z"/>',
+    search:   '<circle cx="11" cy="11" r="6.4"/><path d="M15.7 15.7 20.4 20.4"/>',
+    download: '<path d="M12 4v11"/><path d="M8.2 11.4 12 15.2l3.8-3.8"/><path d="M4.5 19.5h15"/>',
+    question: '<circle cx="12" cy="12" r="8.6"/>' +
+              '<path d="M9.7 9.5a2.4 2.4 0 1 1 2.9 2.6v1.4"/><path d="M12.6 16.2v.4"/>'
+  };
+
+  UI.icon = function (name, cls) {
+    if (!UI.ICONS[name]) return "";
+    return '<svg class="ic' + (cls ? " " + UI.esc(cls) : "") + '" viewBox="0 0 24 24" fill="none" ' +
+           'stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" ' +
+           'aria-hidden="true">' + UI.ICONS[name] + "</svg>";
+  };
+
+  /* ------------------------- small chart pieces --------------------------- */
+  // Used by the site cards on the Overview and the project cards on Projects.
+
+  var DON_R = 26, DON_C = 2 * Math.PI * DON_R;
+
+  UI.donut = function (pct) {
+    pct = Math.max(0, Math.min(100, Math.round(pct || 0)));
+    return '<svg class="donut" viewBox="0 0 64 64" aria-hidden="true">' +
+             '<circle class="donut-track" cx="32" cy="32" r="' + DON_R + '"/>' +
+             '<circle class="donut-fill" cx="32" cy="32" r="' + DON_R + '" ' +
+                     'stroke-dasharray="' + DON_C.toFixed(1) + '" ' +
+                     'stroke-dashoffset="' + (DON_C * (1 - pct / 100)).toFixed(1) + '" ' +
+                     'transform="rotate(-90 32 32)"/>' +
+             '<text class="donut-num" x="32" y="32">' + pct + "%</text>" +
+           "</svg>";
+  };
+
+  // rows: [{ log_date, <valueKey> }] oldest first. Real data only — an empty
+  // set says so in words rather than drawing a fake flat line.
+  UI.sparkline = function (rows, valueKey, emptyMsg) {
+    rows = rows || [];
+    if (!rows.length)
+      return '<div class="sc-spark-none">' + UI.escHtml(emptyMsg || "No daily data") + "</div>";
+
+    var W = 300, H = 62, L = 20, R = 4, T = 6, B = 15;
+    var vals = rows.map(function (r) { return Number(r[valueKey]) || 0; });
+    var max = Math.max(1, Math.max.apply(null, vals));
+    var n = rows.length;
+    function px(i) { return n === 1 ? (L + W - R) / 2 : L + i * (W - L - R) / (n - 1); }
+    function py(v) { return T + (1 - v / max) * (H - T - B); }
+
+    var pts = vals.map(function (v, i) { return px(i).toFixed(1) + " " + py(v).toFixed(1); });
+    var line = "M" + pts.join(" L");
+    var area = line + " L" + px(n - 1).toFixed(1) + " " + py(0).toFixed(1) +
+                      " L" + px(0).toFixed(1) + " " + py(0).toFixed(1) + " Z";
+    var dots = vals.map(function (v, i) {
+      return '<circle class="spark-dot" cx="' + px(i).toFixed(1) + '" cy="' + py(v).toFixed(1) + '" r="1.9"/>';
+    }).join("");
+
+    // first / last plus two inside — more ticks than that collide at card width
+    var ticks = [0, Math.floor((n - 1) / 3), Math.floor(2 * (n - 1) / 3), n - 1]
+      .filter(function (v, i, a) { return a.indexOf(v) === i; })
+      .map(function (i) {
+        var d = new Date(rows[i].log_date + "T00:00:00");
+        return '<text class="spark-tick" x="' + px(i).toFixed(1) + '" y="' + (H - 3) +
+               '" text-anchor="' + (i === 0 ? "start" : i === n - 1 ? "end" : "middle") + '">' +
+               d.getDate() + " " + d.toLocaleString("en-MY", { month: "short" }) + "</text>";
+      }).join("");
+
+    return '<svg class="sc-spark" viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="' +
+             UI.esc(valueKey.replace(/_/g, " ") + " per day") + '">' +
+             '<text class="spark-ax" x="0" y="' + (py(max) + 3).toFixed(1) + '">' + max + "</text>" +
+             '<text class="spark-ax" x="0" y="' + (py(0) + 3).toFixed(1) + '">0</text>' +
+             '<path class="spark-area" d="' + area + '"/>' +
+             '<path class="spark-line" d="' + line + '"/>' + dots + ticks +
+           "</svg>";
   };
 
   /* ------------------------------- tables -------------------------------- */

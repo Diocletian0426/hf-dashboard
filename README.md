@@ -7,7 +7,9 @@ machines, manpower, attendance and claims, all read from the Supabase
 ## Stack (deliberately boring)
 
 - **Plain HTML + CSS + JS. No frameworks, no build step, no CDN.**
-  supabase-js is vendored at `frontend/vendor/supabase.js`.
+  supabase-js is vendored at `frontend/vendor/supabase.js`, and the UI
+  typeface (Inter, SIL OFL) at `frontend/vendor/inter-latin-var.woff2` —
+  both served from our own origin, never fetched from a third party.
 - **All data goes through `window.Dash`** (`frontend/dashboard-client.js`) —
   pages never call `supabase.from()/rpc()` directly. The header comment in
   that file is the full API contract.
