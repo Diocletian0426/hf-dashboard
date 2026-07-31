@@ -107,6 +107,30 @@
       ["boring_rock_ended_at",   "Rock boring finished"]
     ];
 
+    /* The three lengths that matter commercially. All are ARITHMETIC on the
+       levels above — [key, label, unit, [upper level, lower level]] — and the
+       box is left EMPTY in the normal case, which is what tells the database to
+       use the calculation.
+
+       Typing a number overrides it, and that agreed figure then wins
+       everywhere: the pile register, the claims, the bot. That is the point —
+       sometimes the figure that counts is what was agreed on site, not what the
+       levels give. It is also why the database warns whenever an agreed figure
+       differs from the calculation, and says both numbers out loud.
+
+       Two of these three already existed and were already feeding the claims,
+       invisibly: v_pile_register has published verified_pile_length_m and
+       verified_cored_socket_m since 0023. Bored depth was worked out inside the
+       validator and thrown away. This makes all three visible and correctable. */
+    var DERIVED = [
+      ["agreed_bored_depth_m",        "Bored depth", "m",
+        ["piling_platform_level_m", "toe_level_m"]],
+      ["agreed_pile_length_m",        "Pile length", "m",
+        ["cut_off_level_m", "toe_level_m"]],
+      ["agreed_rock_socket_length_m", "Rock socket", "m",
+        ["rock_socketing_level_m", "toe_level_m"]]
+    ];
+
     var ASBUILT = [
       ["as_built_diameter_mm",      "As-built diameter", "mm"],
       ["temporary_casing_length_m", "Temporary casing",  "m"],
@@ -430,7 +454,7 @@
              escHtml(word) + " you add.";
     }
 
-    function fieldRow(key, label, type, v, unit, required) {
+    function fieldRow(key, label, type, v, unit, required, placeholder) {
       var t = type || "number";
       var attrs = t === "number" ? ' type="number" step="any"'
                 : t === "datetime" ? ' type="datetime-local"'
@@ -440,8 +464,51 @@
                escHtml(label) + reqMark(required) + "</label>" +
              '<input id="f-' + esc(key) + '"' + attrs +
              (required ? " required" : "") +
+             (placeholder ? ' placeholder="' + esc(placeholder) + '"' : "") +
              ' value="' + esc(v === null || v === undefined ? "" : v) + '">' +
              '<span class="bl-row-unit">' + escHtml(unit || "") + "</span>";
+    }
+
+    /* ------------------- the calculated lengths, live ----------------------
+       The calculated figure is shown as the box's PLACEHOLDER, which is exactly
+       the right shape for the rule underneath: an empty box means "no override,
+       use the calculation", and that is what gets stored — null. Nothing has to
+       be typed in the normal case, and nothing redundant is saved.
+
+       Recalculated on every keystroke in the levels, so the number you are
+       about to accept is on screen while you type the levels that produce it.
+       ---------------------------------------------------------------------- */
+
+    function calcDerived(row) {
+      var upper = val("f-" + row[3][0]);
+      var lower = val("f-" + row[3][1]);
+      if (upper === "" || lower === "") return null;
+      var a = Number(upper), b = Number(lower);
+      if (!isFinite(a) || !isFinite(b)) return null;
+      return Math.round((a - b) * 1000) / 1000;   // 3 dp, same as the database
+    }
+
+    function refreshDerived() {
+      DERIVED.forEach(function (row) {
+        var el = document.getElementById("f-" + row[0]);
+        if (!el) return;
+        var c = calcDerived(row);
+        el.placeholder = (c === null) ? "—" : String(c);
+      });
+    }
+
+    function derivedBlockHtml(f) {
+      return '<h3>Lengths <span class="muted">worked out from the levels — ' +
+        "type in a box only if the site agreed a different figure</span></h3>" +
+        '<div class="bl-rows">' +
+          DERIVED.map(function (r) {
+            return fieldRow(r[0], r[1], "number", f[r[0]], r[2], false, "—");
+          }).join("") +
+          fieldRow("agreed_basis", "Why agreed", "text", f.agreed_basis) +
+        "</div>" +
+        '<p class="muted">Leave a box empty and the calculation is used. ' +
+        "A figure you type here is what the pile register and the claims will " +
+        "show, so it is flagged for checking whenever it differs from the levels.</p>";
     }
 
     // timestamptz -> what <input type="datetime-local"> wants
@@ -764,6 +831,9 @@
               }).join("") +
             "</div>" +
 
+            // straight after the levels they are worked out from
+            derivedBlockHtml(f) +
+
             "<h3>Concrete</h3>" +
             '<div class="bl-rows">' +
               fieldRow("concrete_grade", "Grade", "text", f.concrete_grade) +
@@ -784,6 +854,7 @@
         "</div>";
 
       refreshCageLaps();
+      refreshDerived();
       showPage();
     }
 
@@ -829,6 +900,11 @@
       putText(out, "cast_date", val("f-cast_date"));
       putNum(out, "actual_concrete_m3", val("f-actual_concrete_m3"));
       putText(out, "remarks", val("f-remarks"));
+
+      // An empty box is NOT sent, which is what makes the database fall back to
+      // the calculation. putNum already omits "", so this is the whole rule.
+      DERIVED.forEach(function (r) { putNum(out, r[0], val("f-" + r[0])); });
+      putText(out, "agreed_basis", val("f-agreed_basis"));
 
       // cage — seq is renumbered from position, so a removed cage in the
       // middle can never leave a gap the validator would flag
@@ -921,6 +997,15 @@
           escHtml((e && e.message) || e) + "</div>";
         return;
       }
+
+      // The calculated lengths follow the levels as they are typed, so the
+      // figure about to be accepted is on screen while the levels that produce
+      // it are being entered. Cheap enough to run on any field.
+      document.getElementById("view").addEventListener("input", function (ev) {
+        if (ev.target && ev.target.id && ev.target.id.indexOf("f-") === 0) {
+          refreshDerived();
+        }
+      });
 
       document.getElementById("view").addEventListener("change", function (ev) {
         if (ev.target.id === "bl-status") {
