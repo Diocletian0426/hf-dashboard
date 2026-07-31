@@ -1142,7 +1142,8 @@ table.claim-lines input.qty {
    curve — and every browser draws it differently. One inline data-URI SVG
    (no external file) placed well inside the curve fixes both. */
 .mp-controls select, .filters select, .ctx-switch, .move-ctl select,
-.claim-form select, .claim-actions select, .mach-tools select {
+.claim-form select, .claim-actions select, .mach-tools select,
+.tq-toolbar select, .tq-pager select {
   -webkit-appearance: none; appearance: none;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8' fill='none' stroke='%234b5b76' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M1.2 1.6 6 6.4 10.8 1.6'/></svg>");
   background-repeat: no-repeat;
@@ -1201,6 +1202,176 @@ td.drift { color: var(--warn-ink); font-weight: 600; white-space: nowrap; }
 .login-card button:hover { background: #2c3547; }
 .login-card button:disabled { opacity: 0.6; cursor: default; }
 .login-error { color: var(--danger-ink); font-size: var(--fs-sm); margin-top: var(--sp-3); min-height: 18px; }
+
+/* ---- test action queue (tests.html) --------------------------------------
+   A queue you work down, not a list you read: the four counts at the top are
+   the buckets, the tabs are the same buckets again as a filter, and the table
+   is one row per decision. Everything here is prefixed .tq- and used by that
+   page only — the shared .card/.badge/.table-wrap vocabulary is reused where
+   it already fits, and only the parts the design system has no word for are
+   defined below. */
+
+/* the four counters. .card gives the frosted box; this adds the icon-left,
+   number-right split and makes the whole thing a button, because every count
+   is also a filter — clicking "Past grace" should show the 22, not just
+   report them. */
+.stat-cards { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+.tq-stat {
+  display: flex; align-items: center; gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-5);
+  width: 100%; text-align: left; font: inherit; color: inherit;
+  cursor: pointer; transition: box-shadow 0.15s, border-color 0.15s, transform 0.15s;
+}
+.tq-stat:hover { box-shadow: var(--shadow-2); transform: translateY(-1px); }
+.tq-stat[aria-pressed="true"] { border-color: var(--brand-border); box-shadow: var(--shadow-2); }
+.tq-stat .panel-ic { width: 44px; height: 44px; }
+.tq-stat .panel-ic .ic { width: 21px; height: 21px; }
+.tq-stat-n, .tq-stat-l, .tq-stat-s { display: block; }
+.tq-stat-n { font-size: 28px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.15; }
+.tq-stat-l { font-weight: 600; font-size: var(--fs-md); }
+.tq-stat-s { font-size: var(--fs-sm); color: var(--ink-3); }
+/* the tones .panel-ic did not carry yet. No new hues: curing is grey here for
+   the same reason its badge is grey — it is the bucket with nothing to do. */
+.panel-ic.tone-warn { background: var(--warn-soft); color: var(--warn-ink); }
+.panel-ic.tone-ok   { background: var(--ok-soft);   color: var(--ok-ink); }
+.panel-ic.tone-mute { background: #eef2f7;          color: var(--ink-2); }
+
+/* filter bar — one frosted strip, controls left, actions hard right */
+.tq-toolbar {
+  display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap;
+  background: var(--surface); border: 1px solid var(--line);
+  -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+  border-radius: var(--r-lg); box-shadow: var(--shadow-1);
+  padding: var(--sp-3) var(--sp-4); margin-bottom: var(--sp-4);
+}
+.tq-toolbar label {
+  display: inline-flex; align-items: center; gap: var(--sp-2);
+  color: var(--ink-2); font-size: var(--fs-sm);
+}
+.tq-toolbar select, .tq-toolbar input[type="search"] {
+  font: inherit; font-size: var(--fs-md); padding: 8px 14px; color: var(--ink);
+  border: 1px solid var(--line-strong); border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.75);
+}
+/* the longest project option is ~35 characters — let the select size itself
+   but not at the cost of the rest of the bar */
+.tq-toolbar select { max-width: 220px; }
+.tq-search { position: relative; flex: 1 1 220px; min-width: 180px; }
+/* must out-specify .tq-toolbar input[type="search"] above, or the shared
+   padding wins and the magnifier sits under the placeholder */
+.tq-toolbar .tq-search input { width: 100%; padding-left: 38px; }
+.tq-search .ic {
+  position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+  width: 15px; height: 15px; color: var(--ink-3); pointer-events: none;
+}
+.tq-toolbar .tq-spacer { margin-left: auto; }
+.tq-toolbar .btn .ic { width: 15px; height: 15px; margin-right: 6px; vertical-align: -3px; }
+/* buttons that happen to be links must not read as prose */
+.tq-toolbar a, .tq-acts a { text-decoration: none; }
+.tq-toolbar a#tq-clear { color: var(--brand); font-size: var(--fs-sm); }
+.tq-toolbar a#tq-clear:hover { text-decoration: underline; }
+
+/* tabs + table + pager share one card, so the tab you picked visibly owns
+   the rows underneath it */
+.tq-panel {
+  background: var(--surface); border: 1px solid var(--line);
+  -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+  border-radius: var(--r-lg); box-shadow: var(--shadow-1); overflow: hidden;
+}
+.tq-tabs {
+  display: flex; gap: var(--sp-1); flex-wrap: wrap;
+  padding: 0 var(--sp-4); border-bottom: 1px solid var(--line-strong);
+}
+.tq-tab {
+  display: inline-flex; align-items: center; gap: var(--sp-2);
+  background: none; border: 0; border-bottom: 2px solid transparent;
+  padding: var(--sp-4) var(--sp-3); margin-bottom: -1px;
+  font: inherit; font-size: var(--fs-md); font-weight: 600;
+  color: var(--ink-2); cursor: pointer; white-space: nowrap;
+}
+.tq-tab:hover { color: var(--ink); }
+.tq-tab[aria-selected="true"] { color: var(--brand); border-bottom-color: var(--brand); }
+.tq-tab .tq-tab-n {
+  background: #eef2f7; color: var(--ink-2);
+  border-radius: var(--r-pill); padding: 1px 9px; font-size: var(--fs-xs);
+}
+.tq-tab[aria-selected="true"] .tq-tab-n { background: var(--brand-soft); color: var(--brand-ink); }
+
+/* the panel already draws the frame, so the table inside drops its own */
+.tq-panel > .table-wrap {
+  background: none; border: 0; border-radius: 0; box-shadow: none;
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+}
+/* same one-ruler-for-every-block trick as .mach-table on the machines page */
+.tq-table { table-layout: fixed; min-width: 1020px; }
+.tq-table th:nth-child(1) { width: 20%; }   /* Project / site  */
+.tq-table th:nth-child(2) { width: 10%; }   /* Pile            */
+.tq-table th:nth-child(3) { width:  9%; }   /* Test type       */
+.tq-table th:nth-child(4) { width: 11%; }   /* Status          */
+.tq-table th:nth-child(5) { width: 15%; }   /* Curing info     */
+.tq-table th:nth-child(6) { width: 12%; }   /* Scheduled date  */
+.tq-table th:nth-child(7) { width: 23%; }   /* Actions — three controls wide */
+.tq-table td { vertical-align: middle; }
+.tq-site { display: block; font-weight: 600; }
+.tq-sub  { display: block; font-size: var(--fs-sm); color: var(--ink-3); }
+/* its own class, not .tq-sub + .stale-warn: .tq-sub is declared later in this
+   sheet and would win the colour back */
+.tq-late { display: block; font-size: var(--fs-sm); color: var(--warn-ink); }
+.tq-when { display: flex; align-items: flex-start; gap: var(--sp-2); }
+.tq-when .ic { width: 15px; height: 15px; color: var(--ink-3); margin-top: 3px; flex: none; }
+.tq-when-t { line-height: 1.35; }
+/* the two real actions sit under the column heading; the kebab (the rarely
+   wanted one) is pushed to the far edge so the row ends on a quiet control */
+.tq-acts { display: flex; align-items: center; gap: var(--sp-2); }
+.tq-acts .tq-kebab { margin-left: auto; }
+.tq-acts .btn { padding: 6px 14px; font-size: var(--fs-sm); }
+.tq-acts .btn .ic { width: 14px; height: 14px; margin-right: 5px; vertical-align: -2px; }
+/* the expanded book / result form, in a row of its own under its test */
+.tq-form-row > td { padding: 0 16px 14px; background: rgba(47, 111, 220, 0.035); }
+
+/* pager */
+.tq-pager {
+  display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap;
+  padding: var(--sp-4) var(--sp-5); border-top: 1px solid var(--line-strong);
+  font-size: var(--fs-sm); color: var(--ink-2);
+}
+.tq-pages { display: flex; gap: var(--sp-2); margin: 0 auto; }
+.tq-pages button {
+  min-width: 34px; height: 34px; padding: 0 10px;
+  border: 1px solid var(--line-strong); border-radius: var(--r-sm);
+  background: rgba(255, 255, 255, 0.75); color: var(--ink);
+  font: inherit; font-size: var(--fs-sm); cursor: pointer;
+}
+.tq-pages button:hover:not(:disabled) { background: var(--surface-solid); }
+.tq-pages button[aria-current="true"] {
+  background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 600;
+}
+.tq-pages button:disabled { opacity: 0.4; cursor: default; }
+.tq-pager select {
+  font: inherit; font-size: var(--fs-sm); padding: 6px 10px;
+  border: 1px solid var(--line-strong); border-radius: var(--r-sm);
+  background-color: rgba(255, 255, 255, 0.75); color: var(--ink);
+}
+/* the shared select arrow is spaced for full-size controls — pull it in */
+.tq-pager select { background-position: right 10px center; padding-right: 28px; }
+.tq-toolbar select { background-color: rgba(255, 255, 255, 0.75); }
+/* the kebab is an icon, not a word — keep it square so it reads as one */
+.tq-acts .btn.tq-kebab { padding: 6px 0; width: 30px; text-align: center; }
+
+@media (max-width: 760px) {
+  /* the rows are cards down here — a fixed ruler and a desktop min-width
+     would only force a sideways scroll (same reasoning as .mach-table) */
+  .table-stack table.tq-table { table-layout: auto; min-width: 0; }
+  /* the shared .cards phone rule drops to 140px columns, which is fine for a
+     number over a label but not for icon + number + label + caption. Written
+     as .cards.stat-cards because that rule lives further down the sheet and
+     would otherwise win on source order. */
+  .cards.stat-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tq-stat { gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); }
+  .tq-toolbar .tq-spacer { margin-left: 0; }
+  .tq-acts { justify-content: flex-start; }
+  .tq-pages { margin: 0; }
+}
 
 /* ============================== 6. STATES ================================= */
 
@@ -1680,6 +1851,9 @@ summary.zone-rich::before { float: left; margin: 4px 8px 0 0; }
     border-bottom: 1px solid var(--line); white-space: normal;
   }
   .table-stack tr:last-child { border-bottom: none; }
+  /* `display: block` above out-ranks the UA's [hidden] { display: none }, so
+     every collapsed detail row came back as an empty card down here */
+  .table-stack tr[hidden] { display: none; }
   .table-stack td {
     display: flex; justify-content: space-between; align-items: baseline;
     gap: var(--sp-3); border: 0; padding: 3px 0;
@@ -1694,6 +1868,7 @@ summary.zone-rich::before { float: left; margin: 4px 8px 0 0; }
   .table-stack td.num { text-align: right; }
   /* expandable detail rows stay full-width blocks */
   .table-stack tr.pile-card-row > td,
+  .table-stack tr.tq-form-row > td,
   .table-stack tr.claim-lines-row > td { display: block; text-align: left; }
   .table-stack th { position: static; }
 }
