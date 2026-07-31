@@ -52,15 +52,19 @@
                                 read); machines with no history are skipped.
          Chips will jump to the machine's row once the by-site tables
          (element 3) exist — until then clicking is a harmless no-op. -->
-    <div id="attention"></div>
+    <!-- the two panels sit side by side: what is wrong now, and what is
+         planned next. On narrow screens they stack. -->
+    <div class="mach-panels">
+      <div id="attention"></div>
 
-    <!-- ================= UPCOMING MOVES (0048) =================
-         Every PLANNED machine move by date (movement_plans). Plans NEVER
-         apply themselves — the office presses Execute when the move really
-         happened; a plan whose date passed unexecuted shows amber here and
-         in needs-attention. Plans are created from each machine's record
-         card ("Plan move…"). Execute/Cancel = management/office only. -->
-    <div id="upcoming"></div>
+      <!-- ================= UPCOMING MOVES (0048) =================
+           Every PLANNED machine move by date (movement_plans). Plans NEVER
+           apply themselves — the office presses Execute when the move really
+           happened; a plan whose date passed unexecuted shows amber here and
+           in needs-attention. Plans are created from each machine's record
+           card ("Plan move…"). Execute/Cancel = management/office only. -->
+      <div id="upcoming"></div>
+    </div>
 
     <!-- ================= MACHINES BY SITE (element 3) =================
          One collapsible block per site (same details/summary pattern as the
@@ -77,10 +81,24 @@
          summary + full service history (0031 view), recent activity
          (last 14 days of daily reports), and the issue track record.
          Click the row again to close. -->
-    <div class="zone-tools" id="zone-tools" hidden>
+    <!-- Toolbar above the machine list. Rendered once in static HTML so the
+         listeners survive every repaint — only the control VALUES are synced
+         when a fleet card changes the state filter. -->
+    <div class="mach-tools" id="mach-tools" hidden>
+      <label class="mt-search">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+             stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.4"/>
+             <path d="M15.7 15.7 20.4 20.4"/></svg>
+        <input id="mt-q" type="search" autocomplete="off" placeholder="Search machines…"
+               aria-label="Search machines by code, type, brand or model">
+      </label>
+      <select id="mt-status" aria-label="Filter by state"></select>
+      <select id="mt-site" aria-label="Filter by site"></select>
+      <span class="mt-gap"></span>
       <button type="button" onclick="setAllZones(true)">Expand all</button>
       <button type="button" onclick="setAllZones(false)">Collapse all</button>
-      <button type="button" id="add-machine-btn" hidden>+ Add machine</button>
+      <button type="button" id="mt-export">Export</button>
+      <button type="button" id="add-machine-btn" class="btn-primary" hidden>+ Add machine</button>
     </div>
     <div id="add-machine"></div>
     <div id="sites"></div>
@@ -96,13 +114,10 @@
   <script src="shell.js"></script>
 
   <script>
-    // last-known state per machine -> one strip category each
-    var FLEET_STATES = [
-      ["Operating",      "#0ca30c"],
-      ["Standby",        "#2a78d6"],
-      ["Breakdown",      "#d03b3b"],
-      ["Never reported", "#e5e7eb"]
-    ];
+    // last-known state per machine -> one stat card each.
+    // Colour lives on the cards' tone classes in styles.css now; the hex
+    // values that used to sit here belonged to the old segmented bar.
+    var FLEET_STATES = [["Operating"], ["Standby"], ["Breakdown"], ["Never reported"]];
 
     function fleetStateOf(m) {
       var t = m.last_status || "";
@@ -129,6 +144,9 @@
       return '<div class="pipe-note">' + bits.join(" · ") + "</div>";
     }
 
+    /* Fleet state as stat cards — same component as the Issues page (.istat),
+       and like there each card is also the filter for that state, so the
+       number on a card always equals the machines listed underneath. */
     function fleetStrip(machines) {
       var counts = {};
       FLEET_STATES.forEach(function (s) { counts[s[0]] = 0; });
@@ -136,24 +154,32 @@
       var total = machines.length;
       if (!total) return "";
 
-      var segs = FLEET_STATES.map(function (s) {
-        var name = s[0], c = counts[name];
-        if (!c) return "";
-        var pct = Math.round(c * 100 / total);
-        return '<span class="pipe-seg" style="flex-grow:' + c + ";background:" + s[1] +
-               '" title="' + name + " — " + c + " machine" + (c === 1 ? "" : "s") + " (" + pct + '%)"></span>';
-      }).join("");
+      function pct(c) { return total ? (Math.round(c * 1000 / total) / 10) + "%" : "—"; }
 
-      var keys = FLEET_STATES.map(function (s) {
-        var name = s[0], c = counts[name];
-        return '<span class="pipe-key' + (c ? "" : " zero") + '">' +
-               '<i style="background:' + s[1] + '"></i>' +
-               name + " <b>" + c + "</b></span>";
-      }).join("");
+      var cards = [
+        { key: "all", n: total, label: "Total machines", sub: "All sites",
+          icon: "machine", tone: "info" },
+        { key: "Operating", n: counts["Operating"], label: "Operating", sub: pct(counts["Operating"]),
+          icon: "play", tone: "ok" },
+        { key: "Standby", n: counts["Standby"], label: "Standby", sub: pct(counts["Standby"]),
+          icon: "clock", tone: "brand" },
+        { key: "Breakdown", n: counts["Breakdown"], label: "Breakdown", sub: pct(counts["Breakdown"]),
+          icon: "issue", tone: "bad" },
+        { key: "Never reported", n: counts["Never reported"], label: "Never reported",
+          sub: pct(counts["Never reported"]), icon: "question", tone: "grey" }
+      ];
 
-      return '<div class="pipe-card"><div class="pipe-bar">' + segs + "</div>" +
-             '<div class="pipe-legend"><span class="pipe-total">' + total + " machines</span>" +
-             keys + "</div>" + staleNote(machines) + "</div>";
+      return '<div class="istats">' + cards.map(function (c) {
+        var on = FLT.state === c.key;
+        return '<button type="button" class="istat tone-' + c.tone + (on ? " on" : "") +
+                 '" data-fleet="' + esc(c.key) + '" aria-pressed="' + (on ? "true" : "false") + '">' +
+                 '<span class="istat-ic">' + UI.icon(c.icon) + "</span>" +
+                 '<span class="istat-body">' +
+                   '<span class="istat-top"><b>' + c.n + "</b><i>" + escHtml(c.label) + "</i></span>" +
+                   '<span class="istat-sub">' + escHtml(c.sub) + "</span>" +
+                 "</span>" +
+               "</button>";
+      }).join("") + "</div>" + staleNote(machines);
     }
 
     // ================= NEEDS ATTENTION (element 2) =================
@@ -249,10 +275,13 @@
       var body = total === 0
         ? '<div class="muted-line">&#10003; Nothing needs attention.</div>'
         : sections.join("");
-      return '<details class="zone chase-panel" open>' +
-             '<summary><span class="zone-name">Needs attention</span>' +
+      return '<details class="zone chase-panel panel-eq" open>' +
+             '<summary><span class="panel-ic tone-bad">' + UI.icon("alert") + "</span>" +
+             '<span class="zone-name">Needs attention</span>' +
              '<span class="zone-count">' + total + " item" + (total === 1 ? "" : "s") + "</span></summary>" +
-             '<div class="chase-body">' + body + "</div></details>";
+             '<div class="chase-body">' + body + "</div>" +
+             '<div class="panel-foot"><a href="issues.html">View all issues &rarr;</a></div>' +
+             "</details>";
     }
 
     // ================= MACHINES BY SITE (element 3) =================
@@ -370,6 +399,20 @@
     // The database re-checks the caller and logs the move (0039) — this
     // control is convenience, never the guard.
     var MOVE = { can: false, projects: [] };
+    // toolbar + fleet-card filters. state is shared: pressing a card and
+    // choosing from the Status dropdown drive the same value.
+    var FLT = { state: "all", q: "", site: "all" };
+
+    function machineMatches(m) {
+      if (FLT.state !== "all" && fleetStateOf(m) !== FLT.state) return false;
+      if (FLT.site !== "all" && (m.current_site || "Unassigned") !== FLT.site) return false;
+      if (FLT.q) {
+        var hay = [m.machine_code, m.machine_type, m.brand, m.model, m.registration_no]
+          .join(" ").toLowerCase();
+        if (hay.indexOf(FLT.q) === -1) return false;
+      }
+      return true;
+    }
     // 0044 operations data: 30d utilization + tagged productivity per machine,
     // machine move history (transfer_log), machines by id for the edit form
     var UTIL = {}, PROD = {}, MOVELOG = {}, MACHINES_BY_ID = {}, DIR_BY_CODE = {};
@@ -481,8 +524,10 @@
     function planButtons(p) {
       if (!MOVE.can) return "";
       var label = (p.machine_code || p.full_name || "") + " → " + (p.to_project_code || "unassigned");
-      return ' <span class="move-ctl">' +
-             '<button type="button" data-action="mp-execute" data-plan-id="' + p.plan_id +
+      // Execute is the primary action (blue); Cancel stays neutral so the
+      // destructive one is never the easy one to hit by reflex
+      return '<span class="move-ctl mv-actions">' +
+             '<button type="button" class="btn-primary" data-action="mp-execute" data-plan-id="' + p.plan_id +
              '" data-label="' + esc(label) + '">Execute now</button>' +
              '<button type="button" data-action="mp-cancel" data-plan-id="' + p.plan_id +
              '" data-label="' + esc(label) + '">Cancel</button></span>';
@@ -610,29 +655,57 @@
 
     // ================= UPCOMING MOVES (0048) =================
     // every planned machine move, earliest first; overdue rows amber
+    // the panel shows the next few; the footer link opens the rest in place
+    var MOVES_CAP = 3, MOVES_ALL = false;
+
     function upcomingMovesZone() {
       if (!MACHINE_PLANS.length) return "";
       var overdue = 0;
-      var rows = MACHINE_PLANS.map(function (p) {
+      var shown = MOVES_ALL ? MACHINE_PLANS : MACHINE_PLANS.slice(0, MOVES_CAP);
+      // count overdue across ALL plans, not just the visible slice
+      MACHINE_PLANS.forEach(function (p) {
+        var d = daysSince(p.planned_date);
+        if (d !== null && d > 0) overdue++;
+      });
+      var rows = shown.map(function (p) {
         var days = daysSince(p.planned_date);
         var late = days !== null && days > 0;
-        if (late) overdue++;
         var dest = p.to_project_code
           ? escHtml(p.to_project_code + (p.to_project_name ? " — " + p.to_project_name : ""))
           : "unassigned (mob out)";
-        return '<div class="pc-line"><strong>' + escHtml(p.machine_code || "") + "</strong>" +
-               " &rarr; " + dest +
-               ' · <span class="' + (late ? "stale-warn" : "muted") + '">planned ' + dstr(p.planned_date) +
-               (late ? " — " + days + " day" + (days === 1 ? "" : "s") + " ago" : "") + "</span>" +
-               (p.remarks ? ' <span class="muted">(' + escHtml(p.remarks) + ")</span>" : "") +
-               (p.created_by_name ? ' <span class="muted">by ' + escHtml(p.created_by_name) + "</span>" : "") +
-               planButtons(p) + "</div>";
+        // two columns: what is moving where on the left, the actions hard
+        // right — inline buttons used to break the sentence mid-line
+        return '<div class="mv-row">' +
+                 '<div class="mv-text">' +
+                   '<div class="mv-head"><strong>' + escHtml(p.machine_code || "") + "</strong>" +
+                     ' <span class="mv-arrow">&rarr;</span> ' + dest + "</div>" +
+                   '<div class="mv-sub' + (late ? " stale-warn" : "") + '">Planned ' +
+                     dstr(p.planned_date) +
+                     (late ? " — " + days + " day" + (days === 1 ? "" : "s") + " ago" : "") +
+                     (p.created_by_name ? " by " + escHtml(p.created_by_name) : "") +
+                     (p.remarks ? " · " + escHtml(p.remarks) : "") +
+                   "</div>" +
+                 "</div>" +
+                 planButtons(p) +
+               "</div>";
       }).join("");
-      return '<details class="zone" open>' +
-             '<summary><span class="zone-name">Upcoming moves</span>' +
+      // chase-panel gives it the same card as Needs attention — without it the
+      // moves list sat as bare text beside a boxed panel
+      return '<details class="zone chase-panel panel-eq" open>' +
+             '<summary><span class="panel-ic tone-brand">' + UI.icon("machine") + "</span>" +
+             '<span class="zone-name">Upcoming moves</span>' +
              '<span class="zone-count">' + MACHINE_PLANS.length + " planned" +
              (overdue ? " · " + overdue + " overdue" : "") + "</span></summary>" +
-             '<div class="chase-body">' + rows + "</div></details>";
+             '<div class="chase-body">' + rows + "</div>" +
+             // there is no separate moves page to link to, so the link does
+             // the only real thing available: opens the rest of the list here
+             '<div class="panel-foot">' +
+               (MACHINE_PLANS.length > MOVES_CAP
+                 ? '<a href="#" data-action="moves-toggle">' +
+                   (MOVES_ALL ? "Show fewer &larr;" : "View all " + MACHINE_PLANS.length + " moves &rarr;") +
+                   "</a>"
+                 : '<span class="muted">All planned moves shown</span>') +
+             "</div></details>";
     }
 
     function machineCard(m, services, activity, issues) {
@@ -771,7 +844,11 @@
         return '<details class="zone" open data-group="' + esc(k) + '">' +
                '<summary><span class="zone-name">' + title + "</span>" +
                '<span class="group-head">' + chips.join(" ") + "</span></summary>" +
-               '<div class="table-wrap zone-table table-stack"><table>' + THEAD +
+               // mach-table = one shared column ruler for every site block:
+               // each site renders its own <table>, so without it each one
+               // sized its columns from its own rows and the headings landed
+               // on a different x in every block.
+               '<div class="table-wrap zone-table table-stack"><table class="mach-table">' + THEAD +
                "<tbody>" + rows + "</tbody></table></div>" +
                "</details>";
       }).join("");
@@ -1184,12 +1261,86 @@
           }
         });
 
-        document.getElementById("fleet-strip").innerHTML = fleetStrip(machines);
-        document.getElementById("attention").innerHTML = needsAttention(machines, openIssuesByMachine);
-        document.getElementById("upcoming").innerHTML = upcomingMovesZone();
-        document.getElementById("sites").innerHTML =
-          siteTables(machines, allIssuesByMachine, serviceByMachine, activityByMachine);
-        document.getElementById("zone-tools").hidden = false;
+        // ---- toolbar: options built once from the loaded data ----
+        var statusSel = document.getElementById("mt-status");
+        statusSel.innerHTML = ['<option value="all">Status: All</option>']
+          .concat(FLEET_STATES.map(function (s) {
+            return '<option value="' + esc(s[0]) + '">' + escHtml(s[0]) + "</option>";
+          })).join("");
+
+        var siteKeys = {};
+        machines.forEach(function (m) { siteKeys[m.current_site || "Unassigned"] = true; });
+        document.getElementById("mt-site").innerHTML =
+          ['<option value="all">All sites / projects</option>']
+            .concat(Object.keys(siteKeys).sort().map(function (k) {
+              var name = DIR_BY_CODE[k] && DIR_BY_CODE[k].project_name;
+              return '<option value="' + esc(k) + '">' +
+                     escHtml(k + (name ? " — " + name : "")) + "</option>";
+            })).join("");
+
+        var shownNow = machines;    // what Export writes out
+
+        // one place to repaint — the fleet cards and the toolbar both land here
+        function paint() {
+          shownNow = machines.filter(machineMatches);
+          document.getElementById("fleet-strip").innerHTML = fleetStrip(machines);
+          document.getElementById("attention").innerHTML = needsAttention(machines, openIssuesByMachine);
+          document.getElementById("upcoming").innerHTML = upcomingMovesZone();
+          document.getElementById("sites").innerHTML =
+            siteTables(shownNow, allIssuesByMachine, serviceByMachine, activityByMachine);
+          statusSel.value = FLT.state;          // keep the dropdown and cards in step
+        }
+        paint();
+        document.getElementById("mach-tools").hidden = false;
+
+        // the fleet cards are the state filter
+        document.getElementById("fleet-strip").addEventListener("click", function (ev) {
+          var b = ev.target.closest("button[data-fleet]");
+          if (!b) return;
+          var key = b.getAttribute("data-fleet");
+          FLT.state = (FLT.state === key || key === "all") ? "all" : key;
+          paint();
+        });
+
+        // "View all moves" — delegated on the static container, so it survives
+        // every repaint of the panel's innerHTML
+        document.getElementById("upcoming").addEventListener("click", function (ev) {
+          var a = ev.target.closest('a[data-action="moves-toggle"]');
+          if (!a) return;
+          ev.preventDefault();
+          MOVES_ALL = !MOVES_ALL;
+          paint();
+        });
+
+        var tools = document.getElementById("mach-tools");
+        tools.addEventListener("input", function (ev) {
+          if (ev.target.id === "mt-q") { FLT.q = ev.target.value.trim().toLowerCase(); paint(); }
+        });
+        tools.addEventListener("change", function (ev) {
+          if (ev.target.id === "mt-status")    { FLT.state = ev.target.value; paint(); }
+          else if (ev.target.id === "mt-site") { FLT.site = ev.target.value; paint(); }
+        });
+
+        // CSV of exactly what is on screen — built here, no library, no upload
+        document.getElementById("mt-export").addEventListener("click", function () {
+          var cols = ["machine_code", "machine_type", "brand", "model", "registration_no",
+                      "current_site", "current_site_name", "last_status", "last_status_date",
+                      "mobilised_date", "current_hour_meter"];
+          function cell(v) {
+            if (v === null || v === undefined) return "";
+            var s = String(v);
+            return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+          }
+          var csv = [cols.join(",")].concat(shownNow.map(function (m) {
+            return cols.map(function (c) { return cell(m[c]); }).join(",");
+          })).join("\r\n");
+          var url = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }));
+          var a = document.createElement("a");
+          a.href = url;
+          a.download = "hf-machines-" + Dash.todayKL() + ".csv";
+          document.body.appendChild(a); a.click(); a.remove();
+          URL.revokeObjectURL(url);
+        });
 
         // coming back from a save? restore open site blocks + scroll position
         var savedOpen = OPEN.load();

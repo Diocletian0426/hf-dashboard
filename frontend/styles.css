@@ -622,6 +622,15 @@ td.wrap { white-space: normal; max-width: 340px; }
    it, which left the footer floating mid-card instead of on the bottom edge */
 .panel-eq { display: flex; flex-direction: column; height: 100%; }
 .panel-eq > .chase-body { flex: 1 1 auto; }
+/* Chrome 131+ wraps everything after <summary> in a ::details-content box, so
+   the body and footer stopped being flex items of the panel and the two rules
+   above went dead — Needs attention's footer floated mid-card again. Make that
+   box the growing flex column instead. [open] only: a closed panel must not
+   stretch. Browsers without the pseudo-element just fall back to the above. */
+.panel-eq[open]::details-content {
+  flex: 1 1 auto; min-height: 0;
+  display: flex; flex-direction: column;
+}
 .panel-foot {
   margin-top: auto;                    /* pinned to the bottom, both cards */
   padding-top: var(--sp-3);
@@ -815,6 +824,10 @@ details.zone.panel-eq > summary { align-items: center; }
   to   { opacity: 1; transform: none; }
 }
 td.num { text-align: right; font-variant-numeric: tabular-nums; }
+/* the heading has to sit over its own numbers — a left heading above a right
+   column reads as a misaligned column, not as a style choice. .tbl-issues
+   overrides this back to left for its id column (identifier, not quantity). */
+th.num { text-align: right; }
 .neg { color: var(--danger); font-weight: 600; }
 .bold { font-weight: 700; }
 
@@ -841,6 +854,23 @@ details.zone > summary:hover .zone-name { color: var(--ink); }
 .zone-name { font-weight: 600; color: var(--ink); }
 .zone-count { color: var(--ink-3); font-size: var(--fs-sm); }
 details.zone > .table-wrap { margin-top: 6px; }
+
+/* machines page: one table per site, so every block used to measure its own
+   columns and MACHINE / TYPE / BRAND… landed on a different x in each one.
+   Fixed layout + widths declared once = a single ruler down the whole page.
+   Percentages, not px, and they sum to 100: a wide window then grows every
+   column a little instead of dumping all the slack into one, which is what
+   left a hole between Brand / model and Last report. min-width makes a narrow
+   window scroll (.table-wrap) rather than crush the dates; below 760px
+   .table-stack turns the rows into cards, so both are undone there. */
+.mach-table { table-layout: fixed; min-width: 1000px; }
+.mach-table th:nth-child(1) { width: 11%; }   /* Machine       */
+.mach-table th:nth-child(2) { width: 13%; }   /* Type          */
+.mach-table th:nth-child(3) { width: 22%; }   /* Brand / model */
+.mach-table th:nth-child(4) { width: 19%; }   /* Last report   */
+.mach-table th:nth-child(5) { width: 10%; }   /* Diesel 7d     */
+.mach-table th:nth-child(6) { width: 13%; }   /* Mobilised     */
+.mach-table th:nth-child(7) { width: 12%; }   /* Problems      */
 .zone-tools { display: flex; gap: 14px; margin: var(--sp-4) 0 0; }
 .zone-tools button {
   background: none; border: none; padding: 0;
@@ -1641,6 +1671,9 @@ summary.zone-rich::before { float: left; margin: 4px 8px 0 0; }
 
   /* stacked card rows (opt-in per table) */
   .table-stack table, .table-stack tbody { display: block; width: 100%; }
+  /* there are no columns left to rule once the rows are cards — the desktop
+     min-width would only force the phone into a sideways scroll */
+  .table-stack table.mach-table { table-layout: auto; min-width: 0; }
   .table-stack thead { display: none; }
   .table-stack tr {
     display: block; padding: var(--sp-3) var(--sp-4);
