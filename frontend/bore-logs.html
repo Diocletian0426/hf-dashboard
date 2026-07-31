@@ -62,7 +62,9 @@
       statusFilter: "open",
       zoom: 1,
       rot: 0,
-      page: 0            // which storage_path is showing
+      page: 0,           // which storage_path is showing
+      over: {},          // which length rows are overridden (agreed, not calculated)
+      len: {}            // what has been typed into them, kept across re-renders
     };
 
     /* ------------------------------------------------------------------
@@ -488,27 +490,93 @@
       return Math.round((a - b) * 1000) / 1000;   // 3 dp, same as the database
     }
 
+    // Updates BOTH states: the plain number on a calculated row, and the
+    // "levels give X" reference on an overridden one — so someone deviating
+    // can see exactly what they are deviating from while they type.
     function refreshDerived() {
       DERIVED.forEach(function (row) {
-        var el = document.getElementById("f-" + row[0]);
-        if (!el) return;
         var c = calcDerived(row);
-        el.placeholder = (c === null) ? "—" : String(c);
+        var txt = (c === null) ? "—" : String(c);
+        var cells = document.querySelectorAll('[data-calc="' + row[0] + '"]');
+        for (var i = 0; i < cells.length; i++) cells[i].textContent = txt;
       });
     }
 
-    function derivedBlockHtml(f) {
+    /* TWO VISIBLY DIFFERENT STATES, which is the whole point of this section.
+
+       calculated  a plain number, no box. Obviously not something you typed,
+                   and nothing is stored — the database does the arithmetic.
+       agreed      an input box. What you type here is what the pile register
+                   and the claims will show.
+
+       The first version put the calculated figure in a box as a placeholder.
+       It worked, but a number in a box reads as a value whatever its colour,
+       and the owner asked for a button to "compute" figures that were already
+       computing themselves — which is exactly the confusion this replaces.
+
+       ⚠ A button that FILLED the box would have been worse than nothing: the
+         moment a box holds a value it is an override, so every pile would carry
+         three of them, figures_agreed would be true everywhere, and the flag
+         that marks a negotiated figure would stop meaning anything. Overriding
+         has to stay a deliberate act, because it is a commercial one. */
+
+    function lengthRowHtml(r, isOver, typed) {
+      var key = r[0];
+      if (!isOver) {
+        return '<span class="bl-row-label">' + escHtml(r[1]) + "</span>" +
+               '<span class="bl-calc" data-calc="' + esc(key) + '">—</span>' +
+               '<span class="bl-row-unit">' + escHtml(r[2]) + "</span>" +
+               '<span class="bl-len-state">calculated ' +
+                 '<button type="button" class="bl-linkbtn" data-action="bl-override" ' +
+                 'data-k="' + esc(key) + '">override</button></span>';
+      }
+      return '<label class="bl-row-label" for="f-' + esc(key) + '">' + escHtml(r[1]) + "</label>" +
+             '<input id="f-' + esc(key) + '" type="number" step="any" value="' +
+               esc(typed === null || typed === undefined ? "" : typed) + '">' +
+             '<span class="bl-row-unit">' + escHtml(r[2]) + "</span>" +
+             '<span class="bl-len-state"><span class="bl-agreed">agreed</span> ' +
+               '<span class="muted">levels give <b data-calc="' + esc(key) + '">—</b></span> ' +
+               '<button type="button" class="bl-linkbtn" data-action="bl-use-calc" ' +
+               'data-k="' + esc(key) + '">use calculated</button></span>';
+    }
+
+    function lengthRowsHtml() {
+      return DERIVED.map(function (r) {
+        return lengthRowHtml(r, !!BL.over[r[0]], BL.len[r[0]]);
+      }).join("") +
+      '<label class="bl-row-label" for="f-agreed_basis">Why agreed</label>' +
+      '<input id="f-agreed_basis" type="text" value="' + esc(BL.len.agreed_basis || "") + '">' +
+      '<span class="bl-row-unit"></span><span class="bl-len-state"></span>';
+    }
+
+    function derivedBlockHtml() {
       return '<h3>Lengths <span class="muted">worked out from the levels — ' +
-        "type in a box only if the site agreed a different figure</span></h3>" +
-        '<div class="bl-rows">' +
-          DERIVED.map(function (r) {
-            return fieldRow(r[0], r[1], "number", f[r[0]], r[2], false, "—");
-          }).join("") +
-          fieldRow("agreed_basis", "Why agreed", "text", f.agreed_basis) +
-        "</div>" +
-        '<p class="muted">Leave a box empty and the calculation is used. ' +
-        "A figure you type here is what the pile register and the claims will " +
-        "show, so it is flagged for checking whenever it differs from the levels.</p>";
+        "override one only if the site agreed a different figure</span></h3>" +
+        '<div class="bl-rows bl-lengths" id="bl-lengths">' + lengthRowsHtml() + "</div>" +
+        '<p class="muted">A calculated figure is not stored — the levels are, and ' +
+        "the figure follows them. An overridden one IS stored, and is what the pile " +
+        "register and the claims will show, so it is flagged whenever it differs " +
+        "from the levels.</p>";
+    }
+
+    // Pull what is on screen back into state before any re-render, or a
+    // half-typed override is lost the moment another row is toggled.
+    function readLengthState() {
+      DERIVED.forEach(function (r) {
+        var el = document.getElementById("f-" + r[0]);
+        if (el) BL.len[r[0]] = String(el.value || "");
+      });
+      var b = document.getElementById("f-agreed_basis");
+      if (b) BL.len.agreed_basis = String(b.value || "");
+    }
+
+    // Re-renders THIS SECTION ONLY. The rest of the form is never touched, for
+    // the same reason paging between scans does not touch it: unsaved typing.
+    function renderLengths() {
+      var host = document.getElementById("bl-lengths");
+      if (!host) return;
+      host.innerHTML = lengthRowsHtml();
+      refreshDerived();
     }
 
     // timestamptz -> what <input type="datetime-local"> wants
@@ -760,6 +828,18 @@
       var settled = ["approved", "rejected", "superseded"].indexOf(s.status) !== -1;
       var errCount = ((s.validation && s.validation.errors) || []).length;
 
+      // A stored agreed figure means that row was overridden — reopen it in the
+      // state it was left in, or the reviewer would see "calculated" over a
+      // number the database is not actually calculating.
+      DERIVED.forEach(function (r) {
+        var stored = f[r[0]];
+        if (stored !== null && stored !== undefined && stored !== "") {
+          BL.over[r[0]] = true;
+          BL.len[r[0]] = stored;
+        }
+      });
+      BL.len.agreed_basis = f.agreed_basis || "";
+
       document.getElementById("bl-title").textContent =
         (s.pile && s.pile.pile_mark_no)
           ? "Bore log — " + s.pile.project_code + " · " + s.pile.pile_mark_no
@@ -832,7 +912,7 @@
             "</div>" +
 
             // straight after the levels they are worked out from
-            derivedBlockHtml(f) +
+            derivedBlockHtml() +
 
             "<h3>Concrete</h3>" +
             '<div class="bl-rows">' +
@@ -1046,6 +1126,22 @@
           var left = document.getElementById("bl-left");
           if (left) left.innerHTML = viewerHtml();
           return showPage();
+        }
+
+        /* ---- lengths: calculated <-> agreed ---- */
+        if (act === "bl-override" || act === "bl-use-calc") {
+          var lk = btn.getAttribute("data-k");
+          readLengthState();                 // keep whatever is already typed
+          if (act === "bl-override") {
+            BL.over[lk] = true;
+          } else {
+            BL.over[lk] = false;
+            BL.len[lk] = "";                 // back to nothing stored = calculated
+          }
+          renderLengths();
+          var opened = document.getElementById("f-" + lk);
+          if (opened) opened.focus();
+          return;
         }
 
         /* ---- cage + strata rows ---- */
