@@ -1123,6 +1123,43 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
    IS the check. Same reasoning as td.num on the money tables. */
 .bl-rows input[type="number"] { text-align: right; font-variant-numeric: tabular-nums; }
 
+/* ---- Lengths: calculated vs agreed ------------------------------------------
+   A calculated figure is NOT in a box. That is the entire design: a number in a
+   box reads as something you typed, whatever colour it is, and the first version
+   of this section proved it — the calculated figures were placeholders and were
+   still read as entries. So the two states get different SHAPES, not different
+   shades: plain text when the database will work it out, an input when it will
+   not. Fourth column carries the state word and the button that swaps them. */
+.bl-lengths {
+  grid-template-columns:
+    minmax(0, max-content) minmax(0, 130px) max-content minmax(0, max-content);
+}
+.bl-lengths .bl-calc {
+  text-align: right; font-variant-numeric: tabular-nums;
+  padding: 5px 8px;                 /* sits where the input's text would sit */
+  color: var(--ink); font-weight: 600;
+}
+.bl-lengths .bl-len-state {
+  font-size: var(--fs-xs); color: var(--ink-3);
+  display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap;
+}
+/* an overridden row is the exception and is allowed to look like one */
+.bl-lengths .bl-agreed {
+  color: var(--warn-ink); font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.bl-linkbtn {
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: var(--brand); font-size: var(--fs-xs); text-decoration: underline;
+}
+.bl-linkbtn:hover { color: var(--brand-ink); }
+
+@media (max-width: 900px) {
+  /* the state cell drops under the row rather than squeezing the box */
+  .bl-lengths { grid-template-columns: minmax(0, max-content) minmax(0, 1fr) max-content; }
+  .bl-lengths .bl-len-state { grid-column: 1 / -1; margin: -2px 0 4px; }
+}
+
 /* Cages and soil layers are TABLES with one header row, not a label on every
    box. Every row asks for the same six things, so a 4-cage log printed
    "Bars / Bar Ø mm / Length m / Spiral Ø mm / Pitch mm / Lap m" four times and
