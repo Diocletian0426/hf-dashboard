@@ -1675,9 +1675,19 @@ summary.zone-rich::before { float: left; margin: 4px 8px 0 0; }
   flex-wrap: wrap; margin-bottom: var(--sp-2);
 }
 .map-title { font-size: var(--fs-lg); font-weight: 500; }
+/* zoom controls + the state jumper, pushed to the header's right edge */
+.map-tools { margin-left: auto; display: inline-flex; align-items: center; gap: var(--sp-2); }
+.map-tools .ctx-switch { max-width: 170px; }
+.map-tools .btn { padding: 4px 12px; min-height: 0; line-height: 1.4; }
 /* Height-constrained and centred. Smaller than it was — the map is context,
    not the headline, and the reclaimed width now carries the live feed. */
 .map-svg { display: block; height: min(44vh, 420px); width: auto; max-width: 100%; margin: 0 auto; }
+/* zoom & pan: wheel zoom needs the cursor to say the map is grabbable, and
+   pan-y keeps one-finger page scrolling alive on phones (buttons + the
+   state dropdown do the zooming there) */
+.map-svg { touch-action: pan-y; }
+.map-svg.zoomed { cursor: grab; }
+.map-svg.dragging { cursor: grabbing; user-select: none; }
 
 /* ---- states: recessive geographic context, NOT a data encoding ----
    Four tints, assigned so no two neighbouring states share one (four-colour
