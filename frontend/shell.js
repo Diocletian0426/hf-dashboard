@@ -366,7 +366,7 @@
       nav.innerHTML =
         '<aside class="rail">' +
           '<a class="rail-brand" href="index.html">' +
-            '<span class="rail-logo">HF</span><span class="rail-word">HF Dashboard</span>' +
+            '<span class="rail-logo">HF</span><span class="rail-word">Nexus</span>' +
           "</a>" +
           '<div class="rail-label">Menu</div>' +
           '<nav class="rail-links">' + links + "</nav>" +

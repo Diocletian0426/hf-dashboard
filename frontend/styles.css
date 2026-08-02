@@ -92,11 +92,13 @@
   --viz-cast: #008300;
 
   /* type scale */
-  /* Inter (vendored above) on every machine. The system stack stays behind it
-     as the fallback: if the font file ever fails to load, the page lands on
-     SF Pro / Segoe UI rather than on Times. */
-  --font: "Inter", -apple-system, BlinkMacSystemFont, system-ui,
-          "Segoe UI", Roboto, Arial, sans-serif;
+  /* Georgia (owner pick, 2026-08-03) — a serif designed FOR screens, so it
+     holds up at dashboard sizes where Times New Roman goes spindly. Ships
+     with every Windows and macOS machine: no font file to download.
+     (The vendored Inter @font-face above stays but is dormant — a browser
+     only fetches a font that something actually uses, so it costs nothing.
+     Put "Inter" back at the front of this stack to switch back.) */
+  --font: Georgia, "Times New Roman", "Noto Serif", serif;
   --fs-xs: 12px;
   --fs-sm: 13px;
   --fs-md: 14px;
