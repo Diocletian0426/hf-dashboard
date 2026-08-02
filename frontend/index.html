@@ -14,10 +14,73 @@
     <h1>Overview</h1>
     <p id="freshness" class="page-caption">Loading…</p>
 
-    <div id="cards" class="pcards"></div>
+    <!-- ================= SITE MAP =================================
+         Peninsular Malaysia as inline SVG. No map library and no tile
+         server: Leaflet/Mapbox/Google all need an external fetch at run
+         time, which this project forbids (and would ship our site
+         locations to a third party). The outline is a simplified
+         coastline stored as lon/lat pairs; pins run through the SAME
+         projection, so a pin can never drift off the coast.
+
+         Pin position, best source first:
+           1. real coordinates, if the pulse view ever carries them
+           2. the state in the project code (HF-SGR-001 -> Selangor)
+         Sites sharing one state fan out around that state's point with a
+         leader line back to it — nothing is silently stacked. -->
+    <div class="map-layout">
+      <section class="map-panel" id="map-panel">
+        <div class="map-head">
+          <span class="map-title">Where our sites are</span>
+          <span class="muted" id="map-count"></span>
+        </div>
+        <div id="map-host"></div>
+        <div class="map-legend">
+          <span><i class="dot status-ok"></i> Reported yesterday or today</span>
+          <span><i class="dot status-warn"></i> 2–3 days silent</span>
+          <span><i class="dot status-bad"></i> 4+ days silent</span>
+        </div>
+        <!-- the pin popup is created here by JS -->
+      </section>
+
+      <!-- ================= LIVE FEED ==================================
+           Open site issues, newest first, refreshed every 60s. Anything
+           that was NOT in the previous poll slides in highlighted and
+           (unless muted) chimes.
+
+           Why polling and not a live socket: the realtime channel is not
+           part of the Dash contract, and dashboard-client.js is owned by
+           the backend team — adding a subscription here would mean editing
+           their file. Polling stays inside the contract; it pauses while
+           the tab is hidden so a forgotten tab costs nothing.
+
+           The chime is synthesised with the Web Audio API rather than
+           shipped as an .mp3: no binary in the repo, no external fetch. -->
+      <aside class="feed-panel" id="feed-panel">
+        <div class="feed-head">
+          <span class="map-title">Live issues</span>
+          <button type="button" id="feed-sound" class="feed-sound" aria-pressed="true"
+                  title="Mute the new-issue chime"></button>
+        </div>
+        <div class="feed-sub" id="feed-sub">Loading…</div>
+        <ul class="feed-list" id="feed-list"></ul>
+        <div class="feed-foot" id="feed-foot"></div>
+      </aside>
+    </div>
 
     <h2 class="section-title">Needs attention</h2>
     <div id="attention" class="cards"></div>
+
+    <!-- ================= SITE BOARD =================================
+         Cards are RANKED, not listed. Visual weight tracks urgency so the
+         eye lands on the sites that need work: a site in trouble gets a red
+         edge and full contrast, a finished one is muted and compact.
+         Everything zero-valued is dropped — repeating "bored 0 · cast 0" on
+         nine cards is noise, not data. The schedule verdict (work done % vs
+         contract time used %) comes from the same rule the Projects page
+         uses, so the two pages never disagree. -->
+    <h2 class="section-title">Sites</h2>
+    <div class="mp-controls" id="site-controls"></div>
+    <div id="sites"></div>
 
     <div id="error"></div>
   </main>
@@ -29,58 +92,571 @@
   <script src="shell.js"></script>
 
   <script>
-    // ---- how stale is a site's last report? ----
-    function reportHealth(lastDate) {
-      if (!lastDate) return { cls: "status-bad", text: "never reported" };
-      var days = UI.daysSince(lastDate);
-      if (days <= 1) return { cls: "status-ok",   text: UI.dstr(lastDate) + " ✓" };
-      if (days <= 3) return { cls: "status-warn", text: UI.dstr(lastDate) + " (" + days + " days ago)" };
-      return { cls: "status-bad", text: UI.dstr(lastDate) + " (" + days + " days ago!)" };
+    /* =====================================================================
+       1. MAP GEOMETRY
+       ===================================================================== */
+
+    // viewBox window, in degrees. Peninsular Malaysia only (owner decision —
+    // every current site is on the peninsula, so drawing Sabah/Sarawak would
+    // shrink the pins for no gain). Widen LON1/LAT1 here if that changes.
+    var LON0 = 99.4, LON1 = 104.8, LAT0 = 7.0, LAT1 = 1.0;
+    var SCALE = 100;
+    var MAP_W = (LON1 - LON0) * SCALE, MAP_H = (LAT0 - LAT1) * SCALE;
+
+    // Equirectangular. Across 6 degrees of latitude this close to the equator
+    // the meridian convergence is under 0.5%, so no projection maths needed.
+    function project(lon, lat) {
+      return { x: (lon - LON0) * SCALE, y: (LAT0 - lat) * SCALE };
     }
 
-    function projectCard(p) {
-      var health = reportHealth(p.last_report_date);
-      var total  = p.total_piles_planned || p.total_piles_registered || 0;
-      var pct    = Math.max(0, Math.min(100, Number(p.progress_pct) || 0));
-      var daysLeft = p.days_remaining;
+    // Simplified coastline, clockwise from the Perlis corner: north border,
+    // down the east coast, around Johor, back up the Straits of Malacca.
+    var COAST = [
+      /* Thai border, west to east */
+      [100.12, 6.55], [100.18, 6.72], [100.35, 6.60], [100.55, 6.52], [100.78, 6.35],
+      [100.92, 6.13], [101.10, 5.90], [101.32, 5.80], [101.55, 5.83], [101.78, 5.93],
+      [101.98, 6.03], [102.10, 6.24],
+      /* east coast, north to south */
+      [102.22, 6.12], [102.35, 6.00], [102.50, 5.85], [102.65, 5.75], [102.85, 5.60],
+      [103.00, 5.50], [103.14, 5.33], [103.20, 5.15], [103.32, 4.95], [103.42, 4.70],
+      [103.45, 4.45], [103.43, 4.20], [103.38, 4.00], [103.33, 3.82], [103.35, 3.70],
+      [103.38, 3.50], [103.40, 3.35], [103.48, 3.10], [103.60, 2.85], [103.75, 2.60],
+      [103.84, 2.43], [103.90, 2.30], [104.00, 2.15], [104.12, 1.95], [104.20, 1.80],
+      [104.25, 1.60],
+      /* Johor's southern tip */
+      [104.12, 1.48], [104.00, 1.42], [103.80, 1.45], [103.65, 1.35], [103.51, 1.27],
+      /* west coast, south to north */
+      [103.45, 1.35], [103.35, 1.50], [103.15, 1.70], [102.95, 1.85], [102.80, 1.92],
+      [102.60, 2.02], [102.45, 2.10], [102.25, 2.20], [102.15, 2.30], [102.00, 2.40],
+      [101.80, 2.55], [101.62, 2.70], [101.45, 2.85], [101.32, 3.10], [101.28, 3.30],
+      [101.20, 3.50], [101.10, 3.70], [100.95, 3.90], [100.80, 4.10], [100.70, 4.30],
+      [100.63, 4.60], [100.60, 4.85], [100.50, 5.05], [100.42, 5.30], [100.40, 5.55],
+      [100.36, 5.75], [100.30, 5.95], [100.28, 6.15], [100.20, 6.35]
+    ];
+    var PENANG_ISLE = [
+      [100.19, 5.28], [100.21, 5.45], [100.30, 5.47], [100.36, 5.42],
+      [100.35, 5.30], [100.28, 5.24]
+    ];
+    var LANGKAWI = [
+      [99.68, 6.32], [99.73, 6.43], [99.86, 6.42], [99.90, 6.32], [99.80, 6.24]
+    ];
 
-      var activity = p.last_report_date
-        ? '<div class="pcard-line muted-line">On ' + UI.dstr(p.last_report_date) + ": bored " +
-          (p.piles_bored_on_last_report || 0) + " · cast " + (p.piles_cast_on_last_report || 0) + "</div>"
-        : "";
+    /* ---- states -------------------------------------------------------
+       Each state is built from a run of COAST indices plus interior border
+       nodes. Neighbours reuse the SAME node objects, so the states tile with
+       no gaps or overlaps and every coastal edge matches the outline exactly.
+       Borders are approximate — this is a locator map, not a survey.
 
-      var chips = [];
-      if (p.critical_open_issues > 0) chips.push('<span class="badge badge-critical">' + p.critical_open_issues + " critical!</span>");
-      chips.push('<span class="badge ' + (p.open_issues > 0 ? "badge-medium" : "badge-gray") + '">' + (p.open_issues || 0) + " issues</span>");
-      if (p.tests_overdue > 0) chips.push('<span class="badge badge-rejected">' + p.tests_overdue + " tests overdue</span>");
-      chips.push('<span class="badge badge-gray">' + (p.machines_on_site || 0) + " machines</span>");
-      chips.push('<span class="badge badge-gray">' + (p.workers_assigned || 0) + " workers</span>");
-      if (daysLeft !== null && daysLeft !== undefined)
-        chips.push('<span class="badge ' + (daysLeft < 0 ? "badge-rejected" : "badge-gray") + '">' +
-                   (daysLeft < 0 ? Math.abs(daysLeft) + " days OVER" : daysLeft + " days left") + "</span>");
+       Fills use four tints assigned so no two neighbours share one (the
+       four-colour theorem: on a map only adjacency matters, so 12 separate
+       hues would be noise). Tints stay pale on purpose — red/amber/green are
+       reserved for pin status and must remain the loudest thing here. */
+    var K2 = [100.95, 5.72], PG_NE = [100.60, 5.52], PG_SE = [100.66, 5.15];
+    var R1 = [101.55, 5.55], R2 = [101.60, 4.75], R3 = [101.50, 4.05], R4 = [101.55, 3.72];
+    var S1 = [101.88, 3.45], S2 = [101.95, 2.92];
+    var N1 = [102.50, 2.82], N2 = [102.40, 2.42], M1 = [102.62, 2.18];
+    var T1 = [102.45, 4.85], T3 = [103.05, 4.45];
+
+    function run(a, b) {                    // inclusive run of coast indices
+      var out = []; for (var i = a; i <= b; i++) out.push(i); return out;
+    }
+
+    var STATES = [
+      // `at` = where the state's name sits. Deliberately offset from
+      // STATE_POINT (where that state's pins land) or the label ends up
+      // buried under a pin — which is exactly what happened first try.
+      { name: "Perlis",     tint: 1, at: null,           spec: [71, 0, 1, 2] },
+      { name: "Kedah",      tint: 2, at: [100.80, 6.18], spec: run(2, 6).concat([K2, PG_NE], run(67, 71)) },
+      { name: "Penang",     tint: 3, at: null,           spec: [65, 66, 67, PG_NE, PG_SE] },
+      { name: "Perak",      tint: 1, at: [100.98, 4.45], spec: [6, 7, R1, R2, R3, R4].concat(run(60, 65), [PG_SE, PG_NE, K2]) },
+      { name: "Kelantan",   tint: 3, at: [101.80, 5.25], spec: run(7, 14).concat([T1, R2, R1]) },
+      { name: "Terengganu", tint: 1, at: [103.10, 4.62], spec: run(14, 23).concat([T3, T1]) },
+      { name: "Pahang",     tint: 2, at: [102.55, 3.60], spec: run(23, 31).concat([N1, S2, S1, R4, R3, R2, T1, T3]) },
+      { name: "Selangor",   tint: 3, at: [101.32, 3.62], spec: [R4, S1, S2].concat(run(54, 60)) },
+      { name: "KL",         tint: 4, at: null,           spec: [[101.60, 3.06], [101.60, 3.22], [101.78, 3.22], [101.78, 3.06]] },
+      { name: "N. Sembilan", tint: 1, at: [102.22, 2.60], spec: run(51, 54).concat([S2, N1, N2]) },
+      { name: "Melaka",     tint: 3, at: null,           spec: run(48, 51).concat([N2, M1]) },
+      { name: "Johor",      tint: 4, at: [103.55, 2.20], spec: run(31, 48).concat([M1, N2, N1]) }
+    ];
+
+    // number -> a point on the coastline; array -> an interior node
+    function resolve(spec) {
+      return spec.map(function (s) { return typeof s === "number" ? COAST[s] : s; });
+    }
+
+    // Fallback pin position: the state encoded in the project code.
+    // HF-SGR-001 -> SGR -> Selangor. Sabah/Sarawak are listed so an east
+    // Malaysian site is reported as off-map rather than drawn in the sea.
+    var STATE_POINT = {
+      PLS: [100.20, 6.44], KDH: [100.62, 5.92], PNG: [100.30, 5.38], PPG: [100.30, 5.38],
+      PRK: [101.10, 4.60], SGR: [101.42, 3.28], KUL: [101.69, 3.14], PJY: [101.69, 2.93],
+      NSN: [102.08, 2.72], MLK: [102.30, 2.24], JHR: [103.30, 1.90],
+      PHG: [102.90, 3.60], TRG: [102.95, 5.05], KLT: [102.20, 5.65], KTN: [102.20, 5.65],
+      SBH: null, SWK: null
+    };
+
+    function stateOf(code) {
+      var m = String(code || "").toUpperCase().match(/^HF-([A-Z]{3})/);
+      return m ? m[1] : null;
+    }
+
+    // Real coordinates win if the view ever grows them; otherwise the state.
+    function siteLonLat(p) {
+      var lat = p.latitude !== undefined ? p.latitude : p.lat;
+      var lon = p.longitude !== undefined ? p.longitude : (p.lng !== undefined ? p.lng : p.long);
+      if (lat !== null && lat !== undefined && lon !== null && lon !== undefined &&
+          !isNaN(Number(lat)) && !isNaN(Number(lon))) {
+        return { lonlat: [Number(lon), Number(lat)], exact: true };
+      }
+      var st = stateOf(p.project_code);
+      var pt = st ? STATE_POINT[st] : undefined;
+      if (pt) return { lonlat: pt, exact: false };
+      return null;                       // unplaceable — listed under the map
+    }
+
+    /* =====================================================================
+       2. MAP RENDERING
+       ===================================================================== */
+
+    function pathOf(points, close) {
+      return points.map(function (c, i) {
+        var p = project(c[0], c[1]);
+        return (i ? "L" : "M") + p.x.toFixed(1) + " " + p.y.toFixed(1);
+      }).join(" ") + (close === false ? "" : " Z");
+    }
+
+    function health(lastDate) {
+      if (!lastDate) return { cls: "bad", dot: "status-bad", text: "Never reported" };
+      var days = UI.daysSince(lastDate);
+      if (days <= 1) return { cls: "ok",   dot: "status-ok",   text: UI.dstr(lastDate) + " ✓" };
+      if (days <= 3) return { cls: "warn", dot: "status-warn", text: UI.dstr(lastDate) + " (" + days + " days ago)" };
+      return { cls: "bad", dot: "status-bad", text: UI.dstr(lastDate) + " (" + days + " days ago!)" };
+    }
+
+    // Same-state sites would land on one another — fan them evenly around the
+    // state point and keep a leader line so the grouping stays honest.
+    function placePins(sites) {
+      var groups = {};
+      sites.forEach(function (s) {
+        var k = s.lonlat[0].toFixed(3) + "," + s.lonlat[1].toFixed(3);
+        (groups[k] = groups[k] || []).push(s);
+      });
+      var out = [];
+      Object.keys(groups).forEach(function (k) {
+        var list = groups[k];
+        var base = project(list[0].lonlat[0], list[0].lonlat[1]);
+        if (list.length === 1) {
+          out.push({ site: list[0], x: base.x, y: base.y, ax: base.x, ay: base.y });
+          return;
+        }
+        var r = 16 + list.length * 3;
+        list.forEach(function (s, i) {
+          var a = (Math.PI * 2 * i) / list.length - Math.PI / 2;
+          out.push({
+            site: s, ax: base.x, ay: base.y,
+            x: base.x + Math.cos(a) * r, y: base.y + Math.sin(a) * r,
+            // labels go on the OUTWARD side of the fan, or they collide
+            side: Math.cos(a) < -0.25 ? "l" : "r"
+          });
+        });
+      });
+      return out;
+    }
+
+    function renderMap(pins) {
+      var parts = ['<svg class="map-svg" viewBox="0 0 ' + MAP_W + " " + MAP_H +
+                   '" role="img" aria-label="Map of our active sites in Peninsular Malaysia">'];
+
+      // states first (fills + internal borders), then one coastline stroke on
+      // top so the outer edge reads as a single continuous line
+      STATES.forEach(function (st) {
+        parts.push('<path class="st st-' + st.tint + '" d="' + pathOf(resolve(st.spec)) + '"/>');
+      });
+      parts.push('<path class="map-coast" d="' + pathOf(COAST) + '"/>');
+      parts.push('<path class="map-isle" d="' + pathOf(PENANG_ISLE) + '"/>');
+      parts.push('<path class="map-isle" d="' + pathOf(LANGKAWI) + '"/>');
+
+      STATES.forEach(function (st) {
+        if (!st.at) return;                 // too small to carry a label
+        var c = project(st.at[0], st.at[1]);
+        parts.push('<text class="st-label" x="' + c.x.toFixed(1) + '" y="' + c.y.toFixed(1) + '">' +
+                   UI.escHtml(st.name) + "</text>");
+      });
+
+      pins.forEach(function (pin) {
+        var p = pin.site.pulse;
+        var h = health(p.last_report_date);
+        var label = String(p.project_code || "").replace(/^HF-/, "");
+        var leader = (pin.x !== pin.ax || pin.y !== pin.ay)
+          ? '<line class="pin-leader" x1="' + pin.ax.toFixed(1) + '" y1="' + pin.ay.toFixed(1) +
+            '" x2="' + pin.x.toFixed(1) + '" y2="' + pin.y.toFixed(1) + '"/>'
+          : "";
+        var left = pin.side === "l";
+        parts.push(
+          '<g class="pin ' + h.cls + '" data-project="' + UI.esc(p.project_id) + '" ' +
+             'tabindex="0" role="button" aria-label="' + UI.esc(p.project_code + " " + (p.project_name || "")) + '">' +
+            leader +
+            '<circle class="pin-halo" cx="' + pin.x.toFixed(1) + '" cy="' + pin.y.toFixed(1) + '" r="15"/>' +
+            '<circle class="pin-dot" cx="' + pin.x.toFixed(1) + '" cy="' + pin.y.toFixed(1) + '" r="7"/>' +
+            '<text class="pin-label" text-anchor="' + (left ? "end" : "start") + '" ' +
+                  'x="' + (pin.x + (left ? -12 : 12)).toFixed(1) + '" y="' + (pin.y + 4).toFixed(1) + '">' +
+              UI.escHtml(label) + "</text>" +
+          "</g>"
+        );
+      });
+
+      parts.push("</svg>");
+      return parts.join("");
+    }
+
+    /* =====================================================================
+       3. DETAIL PANEL (who and what is on the clicked site)
+       ===================================================================== */
+
+    function listBlock(title, items, emptyMsg) {
+      var body = items.length
+        ? '<ul class="md-list">' + items.join("") + "</ul>"
+        : '<div class="md-none">' + UI.escHtml(emptyMsg) + "</div>";
+      return '<div class="md-sec"><h4>' + UI.escHtml(title) + " (" + items.length + ")</h4>" + body + "</div>";
+    }
+
+    function renderDetail(p, staff, machines) {
+      var h = health(p.last_report_date);
+      var total = p.total_piles_planned || p.total_piles_registered || 0;
+      var pct = Math.max(0, Math.min(100, Number(p.progress_pct) || 0));
+
+      var crew = staff
+        .filter(function (s) { return String(s.current_project_id) === String(p.project_id); })
+        .map(function (s) {
+          return "<li><span>" + UI.escHtml(s.full_name) + "</span>" +
+                 '<span class="md-sub">' + UI.escHtml(UI.label(s.role)) +
+                 (s.company ? " · " + UI.escHtml(s.company) : "") + "</span></li>";
+        });
+
+      var fleet = machines
+        .filter(function (m) { return m.current_site === p.project_code; })
+        .map(function (m) {
+          // same status->colour mapping machines.html uses, so a machine never
+          // wears one colour here and another there
+          var cls = m.last_status === "operating" ? "approved"
+                  : m.last_status === "breakdown" ? "breakdown" : "gray";
+          var status = m.last_status
+            ? UI.badge(m.last_status, "badge-" + cls)
+            : '<span class="muted-line">Never reported</span>';
+          return "<li><span>" + UI.escHtml(m.machine_code) +
+                 '<br><span class="md-sub">' + UI.escHtml(UI.label(m.machine_type)) + "</span></span>" +
+                 '<span class="md-sub">' + status + "</span></li>";
+        });
 
       return (
-        '<a class="pcard" href="project.html?project=' + p.project_id + '">' +
-          '<div class="pcard-head">' +
-            "<strong>" + p.project_code + "</strong> " + (p.project_name || "") +
+        '<div class="md-code">' + UI.escHtml(p.project_code) + "</div>" +
+        '<div class="md-name">' + UI.escHtml(p.project_name || "") + "</div>" +
+        '<div class="pcard-line"><span class="dot ' + h.dot + '"></span>Last report: ' + h.text + "</div>" +
+        '<div class="pcard-line">' +
+          '<span class="bar"><span style="width:' + pct + '%"></span></span>' +
+          "<span>" + pct + "% (" + (p.piles_completed || 0) + "/" + total + " piles)</span>" +
+        "</div>" +
+        '<div class="md-stats">' +
+          '<div class="md-stat"><b>' + crew.length + "</b><i>workers</i></div>" +
+          '<div class="md-stat"><b>' + fleet.length + "</b><i>machines</i></div>" +
+          '<div class="md-stat"><b>' + (p.open_issues || 0) + "</b><i>issues</i></div>" +
+        "</div>" +
+        listBlock("Workers on site", crew, "Nobody assigned to this site.") +
+        listBlock("Machines on site", fleet, "No machines on this site.") +
+        '<a class="md-open" href="project.html?project=' + UI.esc(p.project_id) + '">Open site hub</a>'
+      );
+    }
+
+    /* =====================================================================
+       3b. LIVE ISSUE FEED — poll, diff, chime
+       ===================================================================== */
+
+    var SOUND_KEY = "hf-feed-sound";
+    var soundOn = true;
+    try { soundOn = localStorage.getItem(SOUND_KEY) !== "off"; } catch (e) {}
+
+    // Synthesised two-note chime — no audio file, so nothing to vendor and
+    // nothing to fetch. Browsers refuse to start audio before the user has
+    // interacted with the page, so the context is created/resumed on the
+    // first click and a blocked chime is simply skipped (the row still
+    // flashes, so the alert never depends on sound alone).
+    var _ac = null;
+    function primeAudio() {
+      try {
+        var AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return;
+        _ac = _ac || new AC();
+        if (_ac.state === "suspended") _ac.resume();
+      } catch (e) {}
+    }
+    document.addEventListener("click", primeAudio, { once: true });
+
+    function chime() {
+      if (!soundOn || !_ac) return;
+      try {
+        var t = _ac.currentTime;
+        [[880, 0], [1174.7, 0.13]].forEach(function (n) {
+          var osc = _ac.createOscillator(), g = _ac.createGain();
+          osc.type = "sine";
+          osc.frequency.value = n[0];
+          g.gain.setValueAtTime(0.0001, t + n[1]);
+          g.gain.exponentialRampToValueAtTime(0.16, t + n[1] + 0.012);
+          g.gain.exponentialRampToValueAtTime(0.0001, t + n[1] + 0.38);
+          osc.connect(g); g.connect(_ac.destination);
+          osc.start(t + n[1]); osc.stop(t + n[1] + 0.42);
+        });
+      } catch (e) {}
+    }
+
+    function ago(dateStr) {
+      var d = UI.daysSince(dateStr);
+      if (d === null) return "";
+      if (d <= 0) return "Today";
+      if (d === 1) return "Yesterday";
+      return d + " days ago";
+    }
+
+    function feedItem(i, isNew) {
+      var pri = String(i.priority || "low");
+      return '<li class="fd-item' + (isNew ? " fd-new" : "") + '" data-id="' + UI.esc(i.issue_id) + '">' +
+               '<span class="badge badge-' + UI.esc(pri) + ' fd-pri">' + UI.escHtml(UI.label(pri)) + "</span>" +
+               '<span class="fd-body">' +
+                 '<span class="fd-title">' + UI.escHtml(i.title || "(No title)") + "</span>" +
+                 '<span class="fd-meta">' + UI.escHtml(i.project_code || "—") +
+                   " · " + UI.escHtml(ago(i.raised_date)) +
+                   (i.machine_code ? " · " + UI.escHtml(i.machine_code) : "") + "</span>" +
+               "</span>" +
+             "</li>";
+    }
+
+    function initFeed() {
+      var listEl = document.getElementById("feed-list");
+      var subEl = document.getElementById("feed-sub");
+      var footEl = document.getElementById("feed-foot");
+      var btn = document.getElementById("feed-sound");
+      var seen = null;                 // null until the first successful load
+
+      function paintSound() {
+        btn.textContent = soundOn ? "🔔" : "🔕";
+        btn.setAttribute("aria-pressed", soundOn ? "true" : "false");
+        btn.title = soundOn ? "Mute the new-issue chime" : "Unmute the new-issue chime";
+      }
+      paintSound();
+      btn.addEventListener("click", function () {
+        soundOn = !soundOn;
+        try { localStorage.setItem(SOUND_KEY, soundOn ? "on" : "off"); } catch (e) {}
+        paintSound();
+        if (soundOn) { primeAudio(); chime(); }   // confirm it works when switched on
+      });
+
+      function newest(rows) {
+        return rows.slice().sort(function (a, b) {
+          var d = String(b.raised_date || "").localeCompare(String(a.raised_date || ""));
+          return d !== 0 ? d : (b.issue_number || 0) - (a.issue_number || 0);
+        });
+      }
+
+      async function load() {
+        if (seen && document.hidden) return;       // don't poll a hidden tab
+        try {
+          var rows = newest(await Dash.getIssues("open"));
+          var first = seen === null;
+          var fresh = first ? [] : rows.filter(function (r) { return !seen[r.issue_id]; });
+
+          seen = {};
+          rows.forEach(function (r) { seen[r.issue_id] = true; });
+
+          // Only the newest few. This panel exists to say "something came in,
+          // here is what" — the working queue is the Issues page, and a
+          // scrolling wall of rows here just competes with it.
+          var SHOW = 3;
+          // if several landed while you were away, show them all rather than
+          // hiding an arrival behind the cap
+          var top = rows.slice(0, Math.max(SHOW, fresh.length));
+
+          listEl.innerHTML = rows.length
+            ? top.map(function (r) {
+                return feedItem(r, fresh.some(function (f) { return f.issue_id === r.issue_id; }));
+              }).join("")
+            : '<li class="fd-empty">No open issues right now.</li>';
+
+          footEl.innerHTML = rows.length > top.length
+            ? '<a href="issues.html">View all ' + rows.length + " open issues &rsaquo;</a>"
+            : '<a href="issues.html">Open the issue queue &rsaquo;</a>';
+
+          // klTime formats an instant into Malaysia time — it needs the
+          // instant passed in, and house rule says never hand-roll the clock
+          subEl.textContent = rows.length + (rows.length === 1 ? " open issue" : " open issues") +
+                              " · checked " + Dash.klTime(new Date());
+          subEl.classList.remove("fd-stale");
+
+          if (fresh.length) {
+            chime();
+            // let the highlight fade so a returning admin can still see what
+            // arrived, but not forever
+            setTimeout(function () {
+              listEl.querySelectorAll(".fd-new").forEach(function (el) { el.classList.remove("fd-new"); });
+            }, 12000);
+          }
+        } catch (e) {
+          // keep the last good list on screen — but never fail silently
+          if (seen === null) listEl.innerHTML = '<li class="fd-empty">Could not load issues.</li>';
+          subEl.textContent = "Could not refresh: " + (e.message || e);
+          subEl.classList.add("fd-stale");
+        }
+      }
+
+      load();
+      setInterval(load, 60000);
+      document.addEventListener("visibilitychange", function () {
+        if (!document.hidden) load();             // catch up the moment you return
+      });
+    }
+
+    /* =====================================================================
+       4. THE SITE BOARD — rank, tier, render
+       ===================================================================== */
+
+    // Work done % vs contract time used %. Same thresholds and wording as
+    // projects.html so a site never reads "Behind" on one page and "On track"
+    // on the other. rank feeds the urgency score.
+    function schedule(p) {
+      if (Number(p.progress_pct) >= 100) return { label: "Complete", cls: "badge-approved", rank: 0 };
+      var el = p.days_elapsed, rem = p.days_remaining;
+      if (el === null || el === undefined || rem === null || rem === undefined) return null;
+      var total = el + Math.max(rem, 0);
+      if (total <= 0) return null;
+      var timePct = rem < 0 ? 100 : Math.min(100, Math.round(el / total * 100));
+      var diff = (Number(p.progress_pct) || 0) - timePct;
+      var out = { timePct: timePct };
+      if (rem < 0)          { out.label = "Overdue";    out.cls = "badge-critical"; out.rank = 40; }
+      else if (diff >= 10)  { out.label = "Ahead";      out.cls = "badge-approved"; out.rank = 0; }
+      else if (diff >= -10) { out.label = "On track";   out.cls = "badge-gray";     out.rank = 0; }
+      else if (diff >= -25) { out.label = "Behind";     out.cls = "badge-medium";   out.rank = 12; }
+      else                  { out.label = "Far behind"; out.cls = "badge-critical"; out.rank = 26; }
+      return out;
+    }
+
+    function silentDays(p) {
+      return p.last_report_date ? UI.daysSince(p.last_report_date) : 99;
+    }
+
+    // one number that decides the order — bigger = look at me first
+    function urgency(p) {
+      var s = schedule(p);
+      return silentDays(p) * 2 +
+             (p.critical_open_issues || 0) * 25 +
+             (p.tests_overdue || 0) * 8 +
+             (s ? s.rank : 0);
+    }
+
+    function tierOf(p) {
+      if (Number(p.progress_pct) >= 100) return "done";
+      var s = schedule(p);
+      if (silentDays(p) > 3 || (p.critical_open_issues || 0) > 0 || (p.tests_overdue || 0) > 0 ||
+          (s && (s.label === "Overdue" || s.label === "Far behind"))) return "urgent";
+      return "normal";
+    }
+
+    // icons, donut and sparkline now live in ui.js — the projects page draws
+    // the same card, and one copy beats two that drift apart
+    var icon = UI.icon, donut = UI.donut;
+    function sparkline(rows) {
+      return UI.sparkline(rows, "piles_cast", "No daily reports in the last 14 days");
+    }
+
+    // One accent colour per card, driven by the schedule verdict. The pill
+    // beside it states the same verdict in words, so colour is never alone.
+    function toneOf(s) {
+      if (!s) return "neutral";
+      if (s.label === "Overdue" || s.label === "Far behind") return "bad";
+      if (s.label === "Behind") return "warn";
+      return "ok";
+    }
+
+    function siteCard(p, tier, daily) {
+      var h = health(p.last_report_date);
+      var total = p.total_piles_planned || p.total_piles_registered || 0;
+      var pct = Math.max(0, Math.min(100, Math.round(Number(p.progress_pct) || 0)));
+      var s = schedule(p);
+      var days = silentDays(p);
+
+      var when = !p.last_report_date ? "Never reported"
+               : days <= 1 ? "Last report: " + UI.dstr(p.last_report_date)
+               : days + " days silent";
+
+      var chips = [];
+      if (p.critical_open_issues > 0)
+        chips.push('<span class="sc-chip tone-bad">' + icon("issue") + p.critical_open_issues + " critical</span>");
+      if (p.open_issues > 0)
+        chips.push('<span class="sc-chip tone-warn">' + icon("issue") + p.open_issues +
+                   (p.open_issues === 1 ? " issue" : " issues") + "</span>");
+      if (p.tests_overdue > 0)
+        chips.push('<span class="sc-chip tone-bad">' + icon("issue") + p.tests_overdue + " tests overdue</span>");
+      chips.push('<span class="sc-chip">' + icon("machine") + (p.machines_on_site || 0) +
+                 (p.machines_on_site === 1 ? " machine" : " machines") + "</span>");
+      // zero workers on a live site is a finding, not a blank
+      chips.push('<span class="sc-chip' + (p.workers_assigned > 0 ? "" : " tone-warn") + '">' +
+                 icon("worker") + (p.workers_assigned || 0) +
+                 (p.workers_assigned === 1 ? " worker" : " workers") + "</span>");
+
+      var activity = p.last_report_date
+        ? "On " + UI.dstr(p.last_report_date) + ": bored " + (p.piles_bored_on_last_report || 0) +
+          " · cast " + (p.piles_cast_on_last_report || 0)
+        : "No site report yet";
+
+      return (
+        '<a class="pcard site-card tier-' + tier + " tone-" + toneOf(s) + '" ' +
+           'href="project.html?project=' + UI.esc(p.project_id) + '">' +
+          '<div class="sc-top">' +
+            '<span class="sc-icon">' + icon("site") + "</span>" +
+            '<span class="sc-title">' +
+              '<span class="sc-code">' + UI.escHtml(p.project_code) + "</span>" +
+              '<span class="sc-name">' + UI.escHtml(p.project_name || "") + "</span>" +
+            "</span>" +
+            '<span class="sc-go" aria-hidden="true">&rsaquo;</span>' +
           "</div>" +
-          '<div class="pcard-line"><span class="dot ' + health.cls + '"></span>Last report: ' + health.text + "</div>" +
-          '<div class="pcard-line">' +
-            '<span class="bar"><span style="width:' + pct + '%"></span></span> ' +
-            "<span>" + pct + "% (" + (p.piles_completed || 0) + "/" + total + " piles)</span>" +
+          '<div class="sc-rule"></div>' +
+          '<div class="sc-status">' +
+            '<span class="dot ' + h.dot + '"></span><span>' + UI.escHtml(when) + "</span>" +
+            (s ? '<span class="badge ' + s.cls + '" title="' + pct + "% of piles done" +
+                 (s.timePct === undefined ? "" : " · " + s.timePct + "% of contract time used") + '">' +
+                 UI.escHtml(s.label) + "</span>" : "") +
           "</div>" +
-          activity +
-          '<div class="pcard-chips">' + chips.join(" ") + "</div>" +
+          '<div class="sc-mid">' + donut(pct) +
+            '<div class="sc-mid-body">' +
+              '<div class="sc-barline">' +
+                '<span class="sc-bar"><span style="width:' + pct + '%"></span></span>' +
+                '<span class="sc-num"><b>' + pct + "%</b> <i>(" +
+                  (p.piles_completed || 0) + "/" + total + " piles)</i></span>" +
+              "</div>" +
+              '<div class="sc-activity">' + UI.escHtml(activity) + "</div>" +
+            "</div>" +
+          "</div>" +
+          sparkline(daily || []) +
+          '<div class="sc-chips">' + chips.join("") + "</div>" +
         "</a>"
       );
     }
 
+    /* =====================================================================
+       5. BOOT
+       ===================================================================== */
+
     window.onShellReady = async function () {
-      var cardsEl = document.getElementById("cards");
+      var cardsEl = document.getElementById("sites");
+      var mapHost = document.getElementById("map-host");
       cardsEl.innerHTML = UI.empty("Loading today's site picture…");
+
       try {
+        // the map needs people + machines; neither should be able to blank the
+        // page, so a failure there degrades to empty lists, not a dead map
         var pulseP = Dash.getProjectPulse();
         var leaveP = Dash.getLeaveRequests(Dash.currentYearKL(), "pending").catch(function () { return null; });
+        var staffP = Dash.getManpowerBySite().catch(function () { return []; });
+        var machP  = Dash.getMachines().catch(function () { return []; });
+        // powers each card's sparkline; a failure just means no sparklines
+        var dailyP = Dash.getProjectDailyOutput().catch(function () { return []; });
         var pulse  = await pulseP;
 
         // freshness line: latest report anywhere + how many sites reported that day
@@ -92,12 +668,219 @@
             " active sites reported that day. Site reports arrive nightly (~10:30pm)."
           : "No site reports found yet.";
 
-        cardsEl.innerHTML = pulse.length
-          ? pulse.map(projectCard).join("")
-          : UI.empty("No active projects.", "Completed and on-hold projects live on the Projects page.");
+        // ---- map ----
+        var placed = [], offMap = [];
+        pulse.forEach(function (p) {
+          var loc = siteLonLat(p);
+          if (loc) placed.push({ pulse: p, lonlat: loc.lonlat, exact: loc.exact });
+          else offMap.push(p);
+        });
+
+        var pins = placePins(placed);
+        mapHost.innerHTML = renderMap(pins);
+        initFeed();
+
+        var anyExact = placed.some(function (s) { return s.exact; });
+        document.getElementById("map-count").textContent =
+          placed.length + " of " + pulse.length + " sites shown" +
+          (anyExact ? "" : " — positioned by state, not exact coordinates") +
+          (offMap.length ? " · off-map: " + offMap.map(function (p) { return p.project_code; }).join(", ") : "");
+
+        // ---- pin selection -> popup beside the pin ----
+        var staff = await staffP, machines = await machP;
+        var byId = {};
+        pulse.forEach(function (p) { byId[String(p.project_id)] = p; });
+
+        var panelEl = document.getElementById("map-panel");
+        var popEl = null, popDot = null;
+
+        function closePop() {
+          if (popEl) { popEl.remove(); popEl = null; }
+          popDot = null;
+          var g = mapHost.querySelectorAll(".pin");
+          for (var i = 0; i < g.length; i++) g[i].classList.remove("sel");
+        }
+
+        // The map is a tall narrow shape centred in a wide panel, so there is
+        // clear margin either side of it. Park the popup in that margin —
+        // BESIDE the drawing, never on top of it — picking the side the pin
+        // is already on. West-coast sites open left, east-coast open right,
+        // which is what makes the page feel balanced instead of lopsided.
+        // Anchor to the pin's DOT, not the <g>: the <g> box includes the
+        // label, which would drag the popup off to one side.
+        function placePop() {
+          if (!popEl || !popDot) return;
+          if (getComputedStyle(popEl).position === "static") return;   // phone: docked under the map
+          var svg = mapHost.querySelector(".map-svg");
+          if (!svg) return;
+          var pr = panelEl.getBoundingClientRect();
+          var sr = svg.getBoundingClientRect();
+          var br = popDot.getBoundingClientRect();
+          var w = popEl.offsetWidth, h = popEl.offsetHeight;
+          var gap = 18, edge = 12;
+
+          var svgL = sr.left - pr.left, svgR = sr.right - pr.left;
+          var pinX = br.left + br.width / 2 - pr.left;
+          var leftSlot = svgL - gap - w;               // popup's left edge, parked left
+          var rightSlot = svgR + gap;                  // popup's left edge, parked right
+          var fitsLeft = leftSlot >= edge;
+          var fitsRight = rightSlot + w <= pr.width - edge;
+          var preferLeft = pinX < (svgL + svgR) / 2;
+
+          var left, origin;
+          if (preferLeft && fitsLeft)       { left = leftSlot;  origin = "right center"; }
+          else if (!preferLeft && fitsRight){ left = rightSlot; origin = "left center"; }
+          else if (fitsLeft)                { left = leftSlot;  origin = "right center"; }
+          else if (fitsRight)               { left = rightSlot; origin = "left center"; }
+          else {
+            // window too narrow for a margin — fall back to beside the pin
+            left = pinX + gap; origin = "left center";
+            if (left + w > pr.width - edge) { left = pinX - gap - w; origin = "right center"; }
+            left = Math.max(edge, Math.min(left, pr.width - w - edge));
+          }
+
+          // vertically centred on the pin — that alignment is what ties the
+          // popup back to the pin now that it no longer touches it
+          var cy = br.top + br.height / 2 - pr.top;
+          popEl.style.left = left + "px";
+          popEl.style.top = Math.max(edge, Math.min(cy - h / 2, pr.height - h - edge)) + "px";
+          popEl.style.setProperty("--pop-origin", origin);
+        }
+
+        function select(id) {
+          var p = byId[String(id)];
+          if (!p) return;
+          closePop();
+          var chosen = mapHost.querySelector('.pin[data-project="' + id + '"]');
+          if (chosen) {
+            chosen.classList.add("sel");
+            chosen.parentNode.appendChild(chosen);   // bring to front
+            popDot = chosen.querySelector(".pin-dot");
+          }
+          popEl = document.createElement("div");
+          popEl.className = "map-pop";
+          popEl.innerHTML =
+            '<button type="button" class="map-pop-close" aria-label="Close">&times;</button>' +
+            '<div class="map-pop-body">' + renderDetail(p, staff, machines) + "</div>";
+          panelEl.appendChild(popEl);
+          popEl.querySelector(".map-pop-close").addEventListener("click", closePop);
+          placePop();
+        }
+
+        mapHost.addEventListener("click", function (ev) {
+          var pin = ev.target.closest ? ev.target.closest(".pin") : null;
+          if (pin) select(pin.getAttribute("data-project"));
+        });
+        mapHost.addEventListener("keydown", function (ev) {
+          if (ev.key !== "Enter" && ev.key !== " ") return;
+          var pin = ev.target.closest ? ev.target.closest(".pin") : null;
+          if (pin) { ev.preventDefault(); select(pin.getAttribute("data-project")); }
+        });
+        document.addEventListener("keydown", function (ev) {
+          if (ev.key === "Escape") closePop();
+        });
+        window.addEventListener("resize", placePop);
+
+        // open on the site that most needs looking at: longest silent
+        if (placed.length) {
+          var worst = placed.slice().sort(function (a, b) {
+            var da = a.pulse.last_report_date ? UI.daysSince(a.pulse.last_report_date) : 9999;
+            var db = b.pulse.last_report_date ? UI.daysSince(b.pulse.last_report_date) : 9999;
+            return db - da;
+          })[0];
+          select(worst.pulse.project_id);
+        }
+
+        // ---- the site board under the map ----
+        var TIERS = [
+          ["urgent", "Needs attention"],
+          ["normal", "Running normally"],
+          ["done",   "Complete"]
+        ];
+        var view = { filter: "all" };
+
+        // last 14 days of daily rows per project, oldest first (the view hands
+        // them back newest first)
+        var daily = await dailyP;
+        var dailyBy = {};
+        (daily || []).forEach(function (r) {
+          (dailyBy[r.project_id] = dailyBy[r.project_id] || []).push(r);
+        });
+        Object.keys(dailyBy).forEach(function (k) {
+          dailyBy[k] = dailyBy[k]
+            .sort(function (a, b) { return a.log_date < b.log_date ? -1 : 1; })
+            .slice(-14);
+        });
+
+        function passes(p) {
+          if (view.filter === "all") return true;
+          if (view.filter === "behind") {
+            var s = schedule(p);
+            return !!s && ["Behind", "Far behind", "Overdue"].indexOf(s.label) !== -1;
+          }
+          return tierOf(p) === view.filter;
+        }
+
+        // always most-urgent-first: an explicit sort control was noise on top
+        // of a board that is already ranked
+        function sorted(list) {
+          return list.slice().sort(function (a, b) { return urgency(b) - urgency(a); });
+        }
+
+        function drawBoard() {
+          var shown = pulse.filter(passes);
+          if (!shown.length) {
+            cardsEl.innerHTML = UI.empty("No sites match this filter.");
+            return;
+          }
+          // grouping only makes sense on the unfiltered view; once a filter is
+          // on, the user wants ONE ordered list, not three buckets
+          if (view.filter !== "all") {
+            cardsEl.innerHTML = '<div class="pcards">' +
+              sorted(shown).map(function (p) {
+                return siteCard(p, tierOf(p), dailyBy[p.project_id]);
+              }).join("") + "</div>";
+            return;
+          }
+          cardsEl.innerHTML = TIERS.map(function (t) {
+            var group = sorted(shown.filter(function (p) { return tierOf(p) === t[0]; }));
+            if (!group.length) return "";
+            return '<div class="sites-group tier-' + t[0] + '">' +
+                     '<h3 class="sites-head">' + t[1] +
+                       '<span class="sites-count">' + group.length + "</span></h3>" +
+                     '<div class="pcards">' +
+                       group.map(function (p) {
+                         return siteCard(p, t[0], dailyBy[p.project_id]);
+                       }).join("") +
+                     "</div>" +
+                   "</div>";
+          }).join("");
+        }
+
+        function drawControls() {
+          var f = [["all", "All"], ["urgent", "Needs attention"],
+                   ["behind", "Behind schedule"], ["done", "Complete"]];
+          document.getElementById("site-controls").innerHTML =
+            "<span>Show: " + f.map(function (o) {
+              return '<button type="button" class="chip' + (view.filter === o[0] ? " active" : "") +
+                     '" data-filter="' + o[0] + '">' + o[1] + "</button>";
+            }).join(" ") + "</span>";
+        }
+
+        document.getElementById("site-controls").addEventListener("click", function (ev) {
+          var b = ev.target.closest ? ev.target.closest("button[data-filter]") : null;
+          if (!b) return;
+          view.filter = b.getAttribute("data-filter");
+          drawControls();
+          drawBoard();
+        });
+
+        if (pulse.length) { drawControls(); drawBoard(); }
+        else cardsEl.innerHTML = UI.empty("No active projects.",
+               "Completed and on-hold projects live on the Projects page.");
 
         // ---- needs-attention totals ----
-        var silent   = pulse.filter(function (p) { return reportHealth(p.last_report_date).cls !== "status-ok"; }).length;
+        var silent   = pulse.filter(function (p) { return health(p.last_report_date).cls !== "ok"; }).length;
         var critical = pulse.reduce(function (s, p) { return s + (p.critical_open_issues || 0); }, 0);
         var overdue  = pulse.reduce(function (s, p) { return s + (p.tests_overdue || 0); }, 0);
         var pending  = await leaveP;   // null if this account can't read leave
@@ -117,6 +900,7 @@
         }).join("");
       } catch (e) {
         cardsEl.innerHTML = "";
+        mapHost.innerHTML = "";
         document.getElementById("error").innerHTML = UI.errorBanner(e.message || e);
       }
     };
