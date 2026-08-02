@@ -976,14 +976,21 @@
         svgEl.addEventListener("pointerdown", function (ev) {
           if (ev.pointerType !== "mouse" || ev.button !== 0) return;
           if (VB.w >= MAP_W - 0.5) return;               // not zoomed in
-          drag = { x: ev.clientX, y: ev.clientY, moved: false };
-          svgEl.setPointerCapture(ev.pointerId);
-          svgEl.classList.add("dragging");
+          // NO pointer capture here: capturing on the down-stroke retargets
+          // the coming click to the svg, which silently killed every pin
+          // click while zoomed (owner bug report). Capture is taken only
+          // once real movement makes this an actual drag.
+          drag = { id: ev.pointerId, x: ev.clientX, y: ev.clientY, moved: false };
         });
         svgEl.addEventListener("pointermove", function (ev) {
           if (!drag) return;
+          if (!drag.moved) {
+            if (Math.abs(ev.clientX - drag.x) + Math.abs(ev.clientY - drag.y) <= 4) return;
+            drag.moved = true;                           // now it's a drag
+            svgEl.setPointerCapture(drag.id);
+            svgEl.classList.add("dragging");
+          }
           var k = toMap(0, 0).k;
-          if (Math.abs(ev.clientX - drag.x) + Math.abs(ev.clientY - drag.y) > 4) drag.moved = true;
           VB.x -= (ev.clientX - drag.x) / k;
           VB.y -= (ev.clientY - drag.y) / k;
           clampVB(); applyView();

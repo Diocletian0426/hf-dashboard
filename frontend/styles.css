@@ -1660,15 +1660,13 @@ summary.zone-rich::before { float: left; margin: 4px 8px 0 0; }
    x/y projection in index.html, so pins always land where they should.
    Layout: map beside a detail panel; on phones the panel drops underneath. */
 
-/* The card HUGS the drawing (owner request): the peninsula is a tall narrow
-   shape, so a wide card only manufactures empty side margins. The auto column
-   sizes to the panel, the panel's max-width is tied to the SVG's rendered
-   width (its height cap x the 540:600 viewBox aspect + side padding), and
-   every spare pixel goes to the live feed. The popup now overlays beside the
-   pin instead of parking in a margin that no longer exists. */
+/* The map is the headline (owner decision): it fills its card's WIDTH and
+   takes the height its 540:600 shape demands, so there is no empty side
+   margin and the drawing is as large as the column allows. The popup
+   overlays beside the clicked pin. */
 .map-layout {
-  display: grid; grid-template-columns: auto minmax(300px, 1fr);
-  gap: var(--sp-4); align-items: stretch; margin-bottom: var(--sp-5);
+  display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(300px, 1fr);
+  gap: var(--sp-4); align-items: start; margin-bottom: var(--sp-5);
 }
 .map-panel {
   position: relative;                    /* the pin popup anchors to this */
@@ -1677,7 +1675,6 @@ summary.zone-rich::before { float: left; margin: 4px 8px 0 0; }
   border-radius: var(--r-lg); box-shadow: var(--shadow-1);
   padding: var(--sp-4) var(--sp-5) var(--sp-5);
   display: flex; flex-direction: column;
-  max-width: calc(min(58vh, 580px) * 0.9 + 2 * var(--sp-5) + 2px);
 }
 .map-head {
   display: flex; align-items: baseline; gap: var(--sp-3);
@@ -1696,10 +1693,9 @@ summary.zone-rich::before { float: left; margin: 4px 8px 0 0; }
   -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
 }
 .map-tools .btn:hover, .map-tools .ctx-switch:hover { background: rgba(255, 255, 255, 0.85); }
-/* Sized to actually fill its card (owner request — the first cut capped it at
-   420px and left the panel mostly empty margin). The popup parks in whatever
-   margin is left and falls back to sitting beside the pin when there is none. */
-.map-svg { display: block; height: min(58vh, 580px); width: auto; max-width: 100%; margin: 0 auto; }
+/* Width-sized: the drawing spans the card and its height follows the
+   viewBox shape — no internal letterboxing, no wasted margin. */
+.map-svg { display: block; width: 100%; height: auto; }
 /* zoom & pan: wheel zoom needs the cursor to say the map is grabbable, and
    pan-y keeps one-finger page scrolling alive on phones (buttons + the
    state dropdown do the zooming there) */
@@ -1808,7 +1804,6 @@ summary.zone-rich::before { float: left; margin: 4px 8px 0 0; }
 
 @media (max-width: 900px) {
   .map-layout { grid-template-columns: 1fr; }
-  .map-panel { max-width: none; }        /* stacked: the card is the full row */
 }
 
 /* ---- the pin popup ----
@@ -1875,9 +1870,9 @@ summary.zone-rich::before { float: left; margin: 4px 8px 0 0; }
 }
 .pin.sel .pin-halo { animation: pin-ping 0.45s ease-out; }
 
-/* phones: the popup can't float beside a narrow map — dock it under the map */
+/* phones: the popup can't float beside a narrow map — dock it under the map.
+   (No height override: the map stays width-sized everywhere.) */
 @media (max-width: 700px) {
-  .map-svg { height: 54vh; }
   .map-pop {
     position: static; width: auto; max-width: none;
     margin-top: var(--sp-4); animation: pop-in 0.18s ease-out;
