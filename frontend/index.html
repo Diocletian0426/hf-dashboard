@@ -781,15 +781,11 @@
         });
         window.addEventListener("resize", placePop);
 
-        // open on the site that most needs looking at: longest silent
-        if (placed.length) {
-          var worst = placed.slice().sort(function (a, b) {
-            var da = a.pulse.last_report_date ? UI.daysSince(a.pulse.last_report_date) : 9999;
-            var db = b.pulse.last_report_date ? UI.daysSince(b.pulse.last_report_date) : 9999;
-            return db - da;
-          })[0];
-          select(worst.pulse.project_id);
-        }
+        // No auto-open (owner decision 2026-08-03): the redesign opened the
+        // longest-silent site's popup on every load, but a newly registered
+        // site that has not started work has no reports at all, so it won the
+        // "most neglected" contest forever. The map now loads clean; the
+        // freshness colours still tell the story, and the popup is one click.
 
         // ---- the site board under the map ----
         var TIERS = [
