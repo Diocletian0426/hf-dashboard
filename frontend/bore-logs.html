@@ -72,14 +72,32 @@
        reading it back can never drift apart.
        ------------------------------------------------------------------ */
 
+    /* [key, label, unit, required] — the unit is its OWN column on screen, not
+       part of the label text. Two reasons: the labels stop being long and
+       ragged, and the units line up down the section the same way the numbers
+       do.
+
+       `required` draws the red asterisk, and it means ONE thing precisely:
+       the database will refuse to confirm without it. It is not a copy of the
+       column's NOT NULL setting — only pile_id and review_status are NOT NULL
+       on bore_logs, and neither is a box on this form, so that reading would
+       mark nothing. Keep this list and fn_validate_bore_log in step: an
+       asterisk on a field the database lets through is a lie, and a required
+       field with no asterisk is a trap. */
+
     // Levels are mRL: higher number = higher up. Going DOWN the pile the
-    // numbers DECREASE — that one sentence is most of the validation.
+    // numbers DECREASE — that one sentence is most of the validation, and it
+    // is why these are stacked in sheet order: read as a column, a missing
+    // minus sign or a transposed digit shows up without reading the labels.
+    // Cut-off and toe are required (0076): every verified figure the pile
+    // register publishes is worked out from them — pile length, cored socket
+    // and theoretical concrete all subtract the toe level.
     var LEVELS = [
-      ["top_of_casing_level_m",   "Top of casing"],
-      ["piling_platform_level_m", "Platform level (EGL)"],
-      ["cut_off_level_m",         "Cut-off level"],
-      ["rock_socketing_level_m",  "Top of rock socket"],
-      ["toe_level_m",             "Toe level"]
+      ["top_of_casing_level_m",   "Top of casing (TOC)",  "mRL"],
+      ["piling_platform_level_m", "Platform level (EGL)", "mRL"],
+      ["cut_off_level_m",         "Cut-off level",        "mRL", true],
+      ["rock_socketing_level_m",  "Top of rock socket",   "mRL"],
+      ["toe_level_m",             "Toe level",            "mRL", true]
     ];
 
     var TIMES = [
@@ -90,30 +108,37 @@
     ];
 
     var ASBUILT = [
-      ["as_built_diameter_mm",      "As-built diameter (mm)"],
-      ["temporary_casing_length_m", "Temporary casing (m)"],
-      ["permanent_casing_length_m", "Permanent casing (m)"]
+      ["as_built_diameter_mm",      "As-built diameter", "mm"],
+      ["temporary_casing_length_m", "Temporary casing",  "m"],
+      ["permanent_casing_length_m", "Permanent casing",  "m"]
     ];
 
+    // The asterisked ones are required ONCE A CAGE ROW EXISTS — a bore log with
+    // no cage at all is fine, but a half-typed cage is not.
     var CAGE_COLS = [
-      ["main_count",      "Bars"],
-      ["main_dia_mm",     "Bar Ø mm"],
-      ["length_m",        "Length m"],
+      ["main_count",      "Bars",         true],
+      ["main_dia_mm",     "Bar Ø mm",     true],
+      ["length_m",        "Length m",     true],
       ["spiral_dia_mm",   "Spiral Ø mm"],
       ["spiral_pitch_mm", "Pitch mm"],
       ["lap_to_next_m",   "Lap m"]
     ];
 
-    // Soil strata shape. NOTE: nothing in the database defined this — the old
-    // piling_records.soil_layers column was dropped in 0029 and bore_logs is
-    // empty, so there was no precedent to follow. Chosen to be LEVEL-based
-    // (mRL) for consistency with every other depth on the record. Cheap to
-    // change while the table has no rows; expensive later.
+    // Soil strata shape (0076). DEPTHS IN METRES BELOW THE PLATFORM — bigger
+    // number = further down. This is the one thing on this screen that does NOT
+    // run in levels, and it is deliberate: the strata table on the certified
+    // sheet is written in depths, so typing it as levels would mean converting
+    // every row in your head, which is how wrong numbers get in.
+    //
+    // The first version of this page guessed LEVELS (mRL) for consistency with
+    // the rest of the record — nothing in the database defined a shape, because
+    // 0029 dropped the old column and bore_logs has always been empty. Reading a
+    // real sheet settled it the other way. No SPT column: the site does not
+    // record it, and a box nobody can fill is a box that gets guessed.
     var STRATA_COLS = [
-      ["from_level_m", "From (mRL)"],
-      ["to_level_m",   "To (mRL)"],
-      ["description",  "Description"],
-      ["spt_n",        "SPT N"]
+      ["from_depth_m", "From (m)",    true],
+      ["to_depth_m",   "To (m)",      true],
+      ["description",  "Description", true]
     ];
 
     /* ---------------------------- small helpers ---------------------------- */
@@ -181,8 +206,15 @@
         ? "WhatsApp" + (r.wa_sender ? " · " + escHtml(r.wa_sender) : "")
         : "Uploaded" + (r.submitted_by_name ? " · " + escHtml(r.submitted_by_name) : "");
 
-      var where = r.pile_mark_no
-        ? escHtml((r.project_code || "") + " · " + r.pile_mark_no)
+      // Site, zone and pile each get their own cell. The code alone ("HF-KLT-001")
+      // is what the database calls the job; the office calls it by name, so both
+      // are shown. Zone is the pier/abutment — the same narrowing the picker uses.
+      var site = r.project_code
+        ? escHtml(r.project_code + (r.project_name ? " — " + r.project_name : ""))
+        : "—";
+
+      var pile = r.pile_mark_no
+        ? escHtml(r.pile_mark_no)
         : '<span class="stale-warn">no pile matched yet</span>';
 
       var flags = "";
@@ -191,7 +223,9 @@
 
       return "<tr>" +
         UI.td("Status", statusBadge(r)) +
-        UI.td("Pile", where) +
+        UI.td("Site", site) +
+        UI.td("Zone", r.zone ? escHtml(r.zone) : "—") +
+        UI.td("Pile", pile) +
         UI.td("Source", who) +
         UI.td("Files", (r.file_count || 0) + (r.file_count === 1 ? " file" : " files")) +
         UI.td("Arrived", dstr(String(r.created_at).slice(0, 10))) +
@@ -218,7 +252,7 @@
       var rows = inboxRows();
       var body = rows.length
         ? rows.map(inboxRowHtml).join("")
-        : UI.emptyRow(6, BL.rows.length
+        : UI.emptyRow(8, BL.rows.length
             ? "Nothing with that status."
             : "No bore logs yet. Upload a scan, or wait for one from the site group.");
 
@@ -231,7 +265,8 @@
           '<option value="all">everything</option>' +
         "</select></span></div>" +
         '<table class="table table-stack"><thead><tr>' +
-          "<th>Status</th><th>Pile</th><th>Source</th><th>Files</th><th>Arrived</th><th></th>" +
+          "<th>Status</th><th>Site</th><th>Zone</th><th>Pile</th>" +
+          "<th>Source</th><th>Files</th><th>Arrived</th><th></th>" +
         "</tr></thead><tbody>" + body + "</tbody></table>";
 
       document.getElementById("bl-status").value = BL.statusFilter;
@@ -315,7 +350,12 @@
 
     // pfx namespaces the three ids, so the upload box and the review screen can
     // each hold a picker on the same page without colliding.
-    function pickerHtml(pfx, selectedPileId) {
+    //
+    // requirePile is per CALLER, not a property of the picker: on the review
+    // screen the pile must be matched before anything can be confirmed, but the
+    // upload box deliberately accepts a scan with no pile yet — that is the
+    // whole reason bore_log_submissions exists as a staging table.
+    function pickerHtml(pfx, selectedPileId, requirePile) {
       var sel = null;
       if (selectedPileId) {
         for (var i = 0; i < BL.piles.length; i++) {
@@ -338,7 +378,8 @@
              "</select></label>" +
              '<label>zone <select id="' + pfx + '-zone" data-pick="' + pfx + '">' +
                zoneOptionsHtml(projId, zone) + "</select></label>" +
-             '<label>pile <select id="' + pfx + '-pile" data-pick="' + pfx + '">' +
+             "<label>pile" + reqMark(requirePile) +
+               ' <select id="' + pfx + '-pile" data-pick="' + pfx + '">' +
                pileOptionsHtml(projId, zone, selectedPileId) + "</select></label>";
     }
 
@@ -360,15 +401,47 @@
 
     /* --------------------------- the review screen -------------------------- */
 
-    function fieldRow(key, label, type, v) {
+    /* ONE FIELD PER ROW: label | box | unit, three cells of a grid.
+
+       The boxes wrapped two-across before, which meant the eye zig-zagged while
+       the sheet being copied reads straight down. Worse, the boxes never lined
+       up, so a set of levels could not be checked as a group. Now every box
+       starts and ends at the same place and the numbers are right-aligned, so
+       a column of levels can be scanned for a wrong sign or a transposed digit
+       without reading a single label. It costs about seven extra rows of height
+       across the form, which is the trade.
+
+       The three cells are SIBLINGS, not wrapped in a <label>. A wrapper would
+       have to be display:contents to keep them as grid items, and that has a
+       patchy history in the accessibility tree — <label for> pointing at the
+       input's own id does the same job with none of the doubt. */
+    // <abbr title="required"> rather than a bare "*": the mark is read out as
+    // "required" instead of "star", and hovering says so.
+    function reqMark(required) {
+      return required ? ' <abbr class="req" title="required">*</abbr>' : "";
+    }
+
+    // The tables are the one place the asterisk means something conditional:
+    // no cage and no strata at all is a perfectly valid bore log, but a
+    // half-filled row is not. Say so rather than leave people guessing why a
+    // column they left blank is suddenly an error.
+    function reqNote(word) {
+      return '<abbr class="req" title="required">*</abbr> needed on every ' +
+             escHtml(word) + " you add.";
+    }
+
+    function fieldRow(key, label, type, v, unit, required) {
       var t = type || "number";
       var attrs = t === "number" ? ' type="number" step="any"'
                 : t === "datetime" ? ' type="datetime-local"'
                 : t === "date" ? ' type="date"'
                 : ' type="text"';
-      return '<label class="bl-f"><span>' + escHtml(label) + "</span>" +
+      return '<label class="bl-row-label" for="f-' + esc(key) + '">' +
+               escHtml(label) + reqMark(required) + "</label>" +
              '<input id="f-' + esc(key) + '"' + attrs +
-             ' value="' + esc(v === null || v === undefined ? "" : v) + '"></label>';
+             (required ? " required" : "") +
+             ' value="' + esc(v === null || v === undefined ? "" : v) + '">' +
+             '<span class="bl-row-unit">' + escHtml(unit || "") + "</span>";
     }
 
     // timestamptz -> what <input type="datetime-local"> wants
@@ -377,53 +450,129 @@
       return String(v).replace(" ", "T").slice(0, 16);
     }
 
+    /* ------------------- repeating rows: cages and strata -------------------
+       Both are TABLES with a single header row. Every row asks for the same
+       six (or three) things, so repeating the labels on each one just pushed
+       the boxes into a narrower and narrower column — a 4-cage log printed
+       "Bars / Bar Ø mm / Length m / Spiral Ø mm / Pitch mm / Lap m" four times.
+
+       The markup hooks are unchanged on purpose: .bl-cage / .bl-cage-in /
+       .bl-stratum / .bl-strata-in / data-k are what collectFields() walks, and
+       data-action is what the click handler reads. Only the element around them
+       moved from <div> to <tr>.
+       ---------------------------------------------------------------------- */
+
+    function gridHeadHtml(cols) {
+      return '<thead><tr><th></th>' +
+        cols.map(function (col) {
+          return "<th>" + escHtml(col[1]) + reqMark(col[2]) + "</th>";
+        }).join("") +
+        "<th></th></tr></thead>";
+    }
+
     function cageBlockHtml(reinf) {
       var cages = (reinf && reinf.cages) || [];
       var rows = cages.map(function (c, i) { return cageRowHtml(i, c); }).join("");
       return '<h3>Steel cage <span class="muted">as built</span></h3>' +
-        '<div class="claim-form">' +
-          fieldRow("starter_bar_length_m", "Starter bar length (m)", "number",
-                   reinf ? reinf.starter_bar_length_m : "") +
+        '<div class="bl-rows">' +
+          fieldRow("starter_bar_length_m", "Starter bar length", "number",
+                   reinf ? reinf.starter_bar_length_m : "", "m") +
         "</div>" +
-        '<div id="bl-cages">' + rows + "</div>" +
+        '<div class="bl-grid-wrap"><table class="bl-grid">' + gridHeadHtml(CAGE_COLS) +
+          '<tbody id="bl-cages">' + rows + "</tbody></table></div>" +
         '<button type="button" data-action="bl-cage-add">+ add a cage</button>' +
         '<p class="muted">Top cage first — the starter bars sit on it. ' +
-        "Weight is worked out from these numbers when you confirm.</p>";
+        "Lap is how far a cage's bars run down into the one below, so the " +
+        "bottom cage has none. Weight is worked out from these numbers when " +
+        "you confirm. " + reqNote("cage") + "</p>";
     }
 
+    // No data-i on the remove button: the handler finds its own row with
+    // closest(), and an index baked into the markup goes stale the moment a row
+    // above it is removed.
     function cageRowHtml(i, c) {
       c = c || {};
-      return '<div class="claim-form bl-cage" data-cage="' + i + '">' +
-        "<strong>Cage " + (i + 1) + "</strong>" +
+      return '<tr class="bl-cage"><th class="bl-grid-rowhead">Cage ' + (i + 1) + "</th>" +
         CAGE_COLS.map(function (col) {
-          return '<label>' + escHtml(col[1]) +
-                 ' <input type="number" step="any" class="bl-cage-in" data-k="' + esc(col[0]) +
+          return "<td>" +
+                 '<input type="number" step="any" class="bl-cage-in" data-k="' + esc(col[0]) +
                  '" value="' + esc(c[col[0]] === null || c[col[0]] === undefined ? "" : c[col[0]]) +
-                 '" size="5"></label>';
+                 '" aria-label="' + esc(col[1]) + '"></td>';
         }).join("") +
-        '<button type="button" data-action="bl-cage-del" data-i="' + i + '">remove</button>' +
-        "</div>";
+        '<td><button type="button" class="bl-grid-del" data-action="bl-cage-del" ' +
+        'title="remove this cage">&times;</button></td>' +
+        "</tr>";
     }
 
     function strataBlockHtml(layers) {
       var rows = (layers || []).map(function (l, i) { return strataRowHtml(i, l); }).join("");
-      return '<h3>Soil strata</h3><div id="bl-strata">' + rows + "</div>" +
-        '<button type="button" data-action="bl-strata-add">+ add a layer</button>';
+      return '<h3>Soil strata ' +
+        '<span class="muted">depths measured down from the platform</span></h3>' +
+        '<div class="bl-grid-wrap"><table class="bl-grid">' + gridHeadHtml(STRATA_COLS) +
+          '<tbody id="bl-strata">' + rows + "</tbody></table></div>" +
+        '<button type="button" data-action="bl-strata-add">+ add a layer</button>' +
+        '<p class="muted">' + reqNote("layer") + "</p>";
     }
 
     function strataRowHtml(i, l) {
       l = l || {};
-      return '<div class="claim-form bl-stratum" data-stratum="' + i + '">' +
+      return '<tr class="bl-stratum"><th class="bl-grid-rowhead">Layer ' + (i + 1) + "</th>" +
         STRATA_COLS.map(function (col) {
           var isText = col[0] === "description";
-          return "<label>" + escHtml(col[1]) +
-            ' <input class="bl-strata-in" data-k="' + esc(col[0]) + '"' +
-            (isText ? ' type="text" size="18"' : ' type="number" step="any" size="6"') +
+          return "<td" + (isText ? ' class="bl-grid-wide"' : "") + ">" +
+            '<input class="bl-strata-in" data-k="' + esc(col[0]) + '"' +
+            (isText ? ' type="text"' : ' type="number" step="any"') +
             ' value="' + esc(l[col[0]] === null || l[col[0]] === undefined ? "" : l[col[0]]) +
-            '"></label>';
+            '" aria-label="' + esc(col[1]) + '"></td>';
         }).join("") +
-        '<button type="button" data-action="bl-strata-del" data-i="' + i + '">remove</button>' +
-        "</div>";
+        '<td><button type="button" class="bl-grid-del" data-action="bl-strata-del" ' +
+        'title="remove this layer">&times;</button></td>' +
+        "</tr>";
+    }
+
+    // A row's number is its POSITION, not its identity — remove cage 2 and what
+    // was cage 3 becomes cage 2. collectFields() already renumbers `seq` from
+    // position so the saved data is right either way; this stops the SCREEN
+    // from saying otherwise. One cell per row is rewritten rather than
+    // re-rendering the block, because a re-render throws away whatever has been
+    // typed and not yet saved.
+    function renumberRows(tbodyId, word) {
+      var rows = document.querySelectorAll("#" + tbodyId + " > tr");
+      for (var i = 0; i < rows.length; i++) {
+        var head = rows[i].querySelector(".bl-grid-rowhead");
+        if (head) head.textContent = word + " " + (i + 1);
+      }
+    }
+
+    /* A lap is the length one cage's bars run DOWN INTO the cage below it, so
+       n cages have n-1 laps and THE BOTTOM CAGE HAS NONE.
+
+       This matters in money, not just tidiness: the weight calculation adds
+       (length + lap) x bar count, so a lap typed on the bottom cage invents
+       steel that was never tied — measured at +23.1 kg on 3 cages of 6 x T25
+       with a 1.0 m lap — and that total is what the "as-built vs design
+       tonnage" check compares. The database refuses it too (0076) and the
+       weight function ignores it regardless; this just stops the box being
+       offered in the first place.
+
+       Runs on every add and remove, because which row is last keeps changing.
+       Any value already sitting in a newly-last row is cleared — it was never
+       real steel, and leaving it would mean saving a figure the database will
+       reject on Confirm. */
+    function refreshCageLaps() {
+      var rows = document.querySelectorAll("#bl-cages > tr");
+      for (var i = 0; i < rows.length; i++) {
+        var input = rows[i].querySelector('[data-k="lap_to_next_m"]');
+        if (!input) continue;
+        var isLast = (i === rows.length - 1);
+        input.disabled = isLast;
+        if (isLast) input.value = "";       // blank -> collectFields() omits it
+        if (input.parentNode && input.parentNode.classList) {
+          input.parentNode.classList.toggle("bl-cell-na", isLast);
+          input.parentNode.title = isLast
+            ? "The bottom cage has nothing to lap onto." : "";
+        }
+      }
     }
 
     // Has the reviewer put anything in yet? A brand-new submission has no
@@ -463,9 +612,11 @@
       return out;
     }
 
+    // Sits at the TOP of the review column, above the picker — so "pick one
+    // below", not "above". Getting that wrong points the reviewer at nothing.
     function designHtml(p) {
       if (!p || !p.pile_id) {
-        return '<div class="muted-line">No pile matched yet — pick one above so the ' +
+        return '<div class="muted-line">No pile matched yet — pick one below so the ' +
                "numbers can be checked against the design.</div>";
       }
       // labelHtml is HTML, not text — every caller passes a literal, and one of
@@ -566,53 +717,73 @@
             (canEdit || canApprove ? "" : '<span class="muted">View only.</span>') +
           "</div>";
 
+      // Section order, owner's call:
+      //
+      //   Design → Which pile → As built → Boring times → Levels →
+      //   Concrete → Steel cage → Soil strata → Remarks
+      //
+      // The DESIGN figures sit at the very top because they are the reference
+      // the whole screen is checked against — what this pile was supposed to be,
+      // in view while every other number is typed. As-built lands directly under
+      // it so the two diameters can be compared without scrolling.
+      //
+      // Levels still says mRL and Soil strata still says depth: they point in
+      // OPPOSITE directions (levels down = smaller, depths down = bigger) and
+      // are no longer adjacent, so both hints have to carry their own weight.
       document.getElementById("view").innerHTML =
         '<div class="bl-split">' +
           '<div class="bl-left" id="bl-left">' + viewerHtml() + "</div>" +
           '<div class="bl-right">' +
             '<div id="bl-valid">' + validationHtml(s.validation, draftIsEmpty(s)) + "</div>" +
 
-            "<h3>Which pile</h3>" +
-            '<div class="claim-form">' + pickerHtml("f", s.pile_id) + "</div>" +
+            '<h3>Design <span class="muted">what this pile was meant to be</span></h3>' +
             designHtml(s.pile) +
 
-            "<h3>Levels <span class=\"muted\">mRL — going down the pile the numbers get smaller</span></h3>" +
-            '<div class="claim-form">' +
-              LEVELS.map(function (r) { return fieldRow(r[0], r[1], "number", f[r[0]]); }).join("") +
+            "<h3>Which pile</h3>" +
+            '<div class="claim-form">' + pickerHtml("f", s.pile_id, true) + "</div>" +
+
+            "<h3>As built</h3>" +
+            '<div class="bl-rows">' +
+              ASBUILT.map(function (r) { return fieldRow(r[0], r[1], "number", f[r[0]], r[2]); }).join("") +
             "</div>" +
 
             "<h3>Boring times</h3>" +
-            '<div class="claim-form">' +
+            '<div class="bl-rows">' +
               TIMES.map(function (r) {
                 return fieldRow(r[0], r[1], "datetime", toLocalInput(f[r[0]]));
               }).join("") +
             "</div>" +
 
-            "<h3>As built</h3>" +
-            '<div class="claim-form">' +
-              ASBUILT.map(function (r) { return fieldRow(r[0], r[1], "number", f[r[0]]); }).join("") +
+            // the heading no longer has to say mRL — every row carries it now,
+            // so the hint is free to explain the DIRECTION, which is the part
+            // a unit label cannot tell you
+            "<h3>Levels <span class=\"muted\">going down the pile the numbers get smaller</span></h3>" +
+            '<div class="bl-rows">' +
+              LEVELS.map(function (r) {
+                return fieldRow(r[0], r[1], "number", f[r[0]], r[2], r[3]);
+              }).join("") +
             "</div>" +
 
             "<h3>Concrete</h3>" +
-            '<div class="claim-form">' +
+            '<div class="bl-rows">' +
               fieldRow("concrete_grade", "Grade", "text", f.concrete_grade) +
               fieldRow("cast_date", "Cast date", "date", f.cast_date) +
-              fieldRow("actual_concrete_m3", "Poured (m³)", "number", f.actual_concrete_m3) +
+              fieldRow("actual_concrete_m3", "Poured", "number", f.actual_concrete_m3, "m³") +
             "</div>" +
 
             cageBlockHtml(f.reinforcement) +
             strataBlockHtml(f.soil_layers) +
 
             "<h3>Remarks</h3>" +
-            '<div class="claim-form">' +
-              '<label>notes <input id="f-remarks" type="text" size="40" value="' +
-              esc(f.remarks || "") + '"></label>' +
+            '<div class="bl-rows">' +
+              fieldRow("remarks", "Notes", "text", f.remarks) +
             "</div>" +
 
             actions +
           "</div>" +
         "</div>";
 
+      refreshCageLaps();
       showPage();
     }
 
@@ -797,22 +968,28 @@
           var host = document.getElementById("bl-cages");
           var n = host.querySelectorAll(".bl-cage").length;
           host.insertAdjacentHTML("beforeend", cageRowHtml(n, {}));
+          renumberRows("bl-cages", "Cage");
+          refreshCageLaps();          // the old bottom cage can now hold a lap
           return;
         }
         if (act === "bl-cage-del") {
           var block = btn.closest(".bl-cage");
           if (block) block.remove();
+          renumberRows("bl-cages", "Cage");
+          refreshCageLaps();          // whatever is last now loses its lap
           return;
         }
         if (act === "bl-strata-add") {
           var shost = document.getElementById("bl-strata");
           var sn2 = shost.querySelectorAll(".bl-stratum").length;
           shost.insertAdjacentHTML("beforeend", strataRowHtml(sn2, {}));
+          renumberRows("bl-strata", "Layer");
           return;
         }
         if (act === "bl-strata-del") {
           var sblock = btn.closest(".bl-stratum");
           if (sblock) sblock.remove();
+          renumberRows("bl-strata", "Layer");
           return;
         }
 

@@ -613,7 +613,10 @@ table.claim-lines tfoot td {
   background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-md);
 }
 .claim-form label { display: flex; flex-direction: column; gap: 3px; color: var(--ink-2); }
-.claim-form input, .claim-actions input {
+/* .bl-grid and .bl-rows are here so the bore-log entry fields get the same box
+   as every other form on the site — they sit in a plain <table> and a grid, not
+   inside a .claim-form. */
+.claim-form input, .claim-actions input, .bl-grid input, .bl-rows input {
   padding: 5px 8px; border: 1px solid var(--line-strong);
   border-radius: var(--r-sm); font-size: var(--fs-sm); background: var(--surface);
 }
@@ -1078,12 +1081,92 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
   display: block; width: 100%; height: 100%; border: 0; background: var(--surface);
 }
 
-/* stacked label above input — long field names would wrap badly inline */
-.bl-f { display: flex; flex-direction: column; gap: 2px; }
-.bl-f > span { font-size: var(--fs-xs); color: var(--ink-2); }
+/* ONE FIELD PER ROW — label | box | unit, as three grid columns.
 
-.bl-cage, .bl-stratum { align-items: flex-end; }
-.bl-cage strong { align-self: center; }
+   Replaces a flex-wrap layout that put two boxes on a line. Two problems with
+   that: the eye zig-zagged while the sheet being copied reads straight down,
+   and the boxes never lined up, so a set of related values could not be checked
+   as a group. Here every box starts and ends at the same x and the numbers are
+   right-aligned, so a column of levels can be scanned for a missing minus sign
+   or a transposed digit without reading a single label. That is the whole point
+   of the layout — it costs roughly seven extra rows of height across the form.
+
+   Units live in their own column rather than inside the label text
+   ("As-built diameter (mm)"), which keeps the labels short and lines the units
+   up too.
+
+   The three cells are siblings, not wrapped — see fieldRow() in bore-logs.html
+   for why. Column 2 is minmax(0, 200px): wide enough for a datetime-local, and
+   allowed to shrink on a phone rather than overflow. Column 1 can wrap. */
+.bl-rows {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) minmax(0, 200px) max-content;
+  gap: 6px var(--sp-2); align-items: center;
+  padding: var(--sp-3); margin-bottom: var(--sp-3); font-size: 12.5px;
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-md);
+}
+.bl-rows .bl-row-label { color: var(--ink-2); }
+.bl-rows .bl-row-unit { color: var(--ink-3); font-size: var(--fs-xs); }
+
+/* Red asterisk = the DATABASE will refuse to confirm without this. It is not a
+   copy of the column's NOT NULL setting — only pile_id and review_status are
+   NOT NULL on bore_logs and neither is a box on the form, so that reading would
+   mark nothing at all. Keep it in step with fn_validate_bore_log: an asterisk
+   on a field that saves fine is a lie, and a required field with no asterisk is
+   a trap. <abbr title="required"> so it is announced, not read as "star". */
+.req {
+  color: var(--danger); font-weight: 700;
+  text-decoration: none; border-bottom: none; cursor: help;
+}
+.bl-rows input { width: 100%; }
+/* right-aligned so the decimal points line up down the column — the alignment
+   IS the check. Same reasoning as td.num on the money tables. */
+.bl-rows input[type="number"] { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Cages and soil layers are TABLES with one header row, not a label on every
+   box. Every row asks for the same six things, so a 4-cage log printed
+   "Bars / Bar Ø mm / Length m / Spiral Ø mm / Pitch mm / Lap m" four times and
+   squeezed the inputs into what was left of a column that is only 40% of the
+   page. Labels once at the top, bare boxes underneath.
+
+   The wrapper scrolls sideways instead of letting the table burst the column —
+   six number boxes do not fit in 40% of a laptop screen, and shrinking them
+   further would make them unusable. */
+.bl-grid-wrap { overflow-x: auto; margin: 0 0 var(--sp-3); }
+.bl-grid { width: auto; min-width: 100%; font-size: 12.5px; }
+
+/* Undo the roomy global table padding and the sticky uppercase header: this is
+   a dense entry grid, not a report table. */
+.bl-grid th, .bl-grid td {
+  padding: 2px 4px; border-bottom: none; position: static;
+}
+.bl-grid thead th {
+  background: none; font-size: var(--fs-xs); font-weight: 600;
+  text-transform: none; letter-spacing: 0; color: var(--ink-2);
+  padding-bottom: 3px;
+}
+.bl-grid .bl-grid-rowhead {
+  background: none; text-transform: none; letter-spacing: 0;
+  font-size: var(--fs-xs); color: var(--ink-2);
+  padding-right: var(--sp-2); white-space: nowrap;
+}
+.bl-grid tbody tr:hover { background: none; }
+.bl-grid input { width: 100%; min-width: 58px; }
+.bl-grid .bl-grid-wide input { min-width: 170px; }
+
+/* A cell that cannot apply to this row — currently only the lap on the bottom
+   cage, which has no cage below it to lap onto. The input stays in the DOM
+   (disabled and emptied) so the row keeps its shape and collectFields() keeps
+   finding what it expects; the dash is what the reviewer sees. */
+.bl-grid td.bl-cell-na input { display: none; }
+.bl-grid td.bl-cell-na { text-align: center; color: var(--ink-3); }
+.bl-grid td.bl-cell-na::after { content: "—"; }
+.bl-grid-del {
+  padding: 1px 7px; line-height: 1.4; cursor: pointer;
+  border: 1px solid var(--line-strong); border-radius: var(--r-sm);
+  background: var(--surface); color: var(--ink-2);
+}
+.bl-grid-del:hover { background: var(--danger-soft); border-color: #fecaca; color: var(--danger-ink); }
 
 .bl-design {
   display: flex; flex-wrap: wrap; gap: 4px var(--sp-4);
