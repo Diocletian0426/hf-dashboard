@@ -832,11 +832,13 @@
         var VB = { x: 0, y: 0, w: MAP_W, h: MAP_H };     // current camera
         var MAXZ = 8, flying = null;
 
-        // the dropdown is filled from the same table the map is drawn from,
-        // so the two can never disagree
+        // The dropdown is filled from the same table the map is drawn from,
+        // so the two can never disagree. The map keeps its short labels
+        // (cartographic shorthand), the dropdown speaks in full names.
+        var STATE_FULL = { "KL": "Kuala Lumpur", "N. Sembilan": "Negeri Sembilan" };
         STATES.forEach(function (st) {
           var o = document.createElement("option");
-          o.value = st.name; o.textContent = st.name;
+          o.value = st.name; o.textContent = STATE_FULL[st.name] || st.name;
           stateSel.appendChild(o);
         });
 
@@ -844,11 +846,16 @@
           svgEl.setAttribute("viewBox", VB.x.toFixed(2) + " " + VB.y.toFixed(2) +
                              " " + VB.w.toFixed(2) + " " + VB.h.toFixed(2));
           var s = VB.w / MAP_W;                          // = 1 / zoom
+          // Pins grow as you zoom, but at HALF the rate of the geography
+          // (square root): at 4x zoom a pin looks 2x bigger. Full growth made
+          // them comical balloons, full counter-scale felt like nothing was
+          // happening (owner feedback) — closer should FEEL closer.
+          var ps = Math.sqrt(s);
           var els = mapHost.querySelectorAll(".pin"), i, el, ax, ay;
           for (i = 0; i < els.length; i++) {
             el = els[i]; ax = +el.getAttribute("data-ax"); ay = +el.getAttribute("data-ay");
-            el.setAttribute("transform", "translate(" + (ax * (1 - s)).toFixed(2) + " " +
-                            (ay * (1 - s)).toFixed(2) + ") scale(" + s.toFixed(4) + ")");
+            el.setAttribute("transform", "translate(" + (ax * (1 - ps)).toFixed(2) + " " +
+                            (ay * (1 - ps)).toFixed(2) + ") scale(" + ps.toFixed(4) + ")");
           }
           els = mapHost.querySelectorAll(".st-label");
           for (i = 0; i < els.length; i++) {
@@ -942,10 +949,14 @@
           flyTo({ x: 0, y: 0, w: MAP_W, h: MAP_H });
         });
 
-        // wheel to zoom at the cursor — the standard map gesture
+        // Wheel to zoom at the cursor — the standard map gesture. The factor
+        // is exponential in the wheel delta rather than a fixed step: a mouse
+        // notch (deltaY ±100) gives a gentle ~9%, a trackpad's stream of small
+        // deltas glides smoothly, and one event can never jump more than 25%.
         svgEl.addEventListener("wheel", function (ev) {
           ev.preventDefault();
-          zoomAt(ev.deltaY < 0 ? 1.25 : 1 / 1.25, ev.clientX, ev.clientY);
+          var f = Math.exp(-ev.deltaY * 0.00085);
+          zoomAt(Math.min(1.25, Math.max(0.8, f)), ev.clientX, ev.clientY);
         }, { passive: false });
 
         svgEl.addEventListener("dblclick", function (ev) {

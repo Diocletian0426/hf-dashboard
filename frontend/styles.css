@@ -156,7 +156,9 @@ a { color: var(--brand); }
   border-radius: 3px;
 }
 
-button { font-family: var(--font); }
+/* Form controls do NOT inherit the page font — without this, every select
+   and input falls back to the browser's default (Arial on Windows). */
+button, input, select, textarea { font-family: var(--font); }
 
 .muted { color: var(--ink-3); font-size: var(--fs-xs); }
 
@@ -1658,8 +1660,10 @@ summary.zone-rich::before { float: left; margin: 4px 8px 0 0; }
    x/y projection in index.html, so pins always land where they should.
    Layout: map beside a detail panel; on phones the panel drops underneath. */
 
+/* Map column trimmed so the card hugs the drawing instead of framing it in
+   empty margin; the freed width goes to the live feed. */
 .map-layout {
-  display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(280px, 0.9fr);
+  display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(300px, 1fr);
   gap: var(--sp-4); align-items: stretch; margin-bottom: var(--sp-5);
 }
 .map-panel {
@@ -1677,11 +1681,20 @@ summary.zone-rich::before { float: left; margin: 4px 8px 0 0; }
 .map-title { font-size: var(--fs-lg); font-weight: 500; }
 /* zoom controls + the state jumper, pushed to the header's right edge */
 .map-tools { margin-left: auto; display: inline-flex; align-items: center; gap: var(--sp-2); }
-.map-tools .ctx-switch { max-width: 170px; }
+.map-tools .ctx-switch { max-width: 190px; }
 .map-tools .btn { padding: 4px 12px; min-height: 0; line-height: 1.4; }
-/* Height-constrained and centred. Smaller than it was — the map is context,
-   not the headline, and the reclaimed width now carries the live feed. */
-.map-svg { display: block; height: min(44vh, 420px); width: auto; max-width: 100%; margin: 0 auto; }
+/* frosted controls (owner request): translucent over the map so they read as
+   part of the glass, firming up under the pointer */
+.map-tools .btn, .map-tools .ctx-switch {
+  background: rgba(255, 255, 255, 0.5);
+  border-color: rgba(255, 255, 255, 0.65);
+  -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+}
+.map-tools .btn:hover, .map-tools .ctx-switch:hover { background: rgba(255, 255, 255, 0.85); }
+/* Sized to actually fill its card (owner request — the first cut capped it at
+   420px and left the panel mostly empty margin). The popup parks in whatever
+   margin is left and falls back to sitting beside the pin when there is none. */
+.map-svg { display: block; height: min(58vh, 580px); width: auto; max-width: 100%; margin: 0 auto; }
 /* zoom & pan: wheel zoom needs the cursor to say the map is grabbable, and
    pan-y keeps one-finger page scrolling alive on phones (buttons + the
    state dropdown do the zooming there) */
