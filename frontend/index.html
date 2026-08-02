@@ -306,7 +306,12 @@
           ? '<line class="pin-leader" x1="' + pin.ax.toFixed(1) + '" y1="' + pin.ay.toFixed(1) +
             '" x2="' + pin.x.toFixed(1) + '" y2="' + pin.y.toFixed(1) + '"/>'
           : "";
+        // Labels flip inward near the map edges: a left-pointing label on a
+        // pin near the west edge runs past the viewBox and gets clipped
+        // (Kedah's fan was losing "...2A"/"...2B" — owner screenshot).
         var left = pin.side === "l";
+        if (pin.x < 75) left = false;
+        if (pin.x > MAP_W - 75) left = true;
         parts.push(
           // data-ax/-ay = the pin's geographic anchor. The zoom engine scales
           // the whole group around it, so dot, label, leader and fan radius
