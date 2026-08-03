@@ -773,7 +773,8 @@
 
       var tracking =
         "<div><h3>Service tracking</h3>" +
-        '<div class="pc-line">Hour meter: ' + numOr(m.current_hour_meter, "h") + "</div>" +
+        '<div class="pc-line">Hour meter: ' + numOr(m.current_hour_meter, "h") +
+        (m.hour_meter_date ? ' <span class="muted">· read ' + dstr(m.hour_meter_date) + "</span>" : "") + "</div>" +
         '<div class="pc-line">Next service due: ' + numOr(m.next_service_due_hours, "h") +
         (m.hour_service_overdue ? ' <span class="badge badge-critical">overdue</span>' : "") + "</div>" +
         '<div class="pc-line">Last touched: ' + dstr(m.last_touched_date) + "</div>" +
