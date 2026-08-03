@@ -150,14 +150,14 @@
 
     // ---- controls (status chips + project filter) ----
     function renderControls() {
-      var statusBtns = [["open", "Open + in progress"], ["resolved", "Resolved"],
+      var statusBtns = [["open", "Open + In Progress"], ["resolved", "Resolved"],
                         ["closed", "Closed"], ["all", "All"]]
         .map(function (f) {
           return '<button type="button" data-status="' + f[0] + '"' +
                  (IS.status === f[0] ? ' class="active"' : "") + ">" + f[1] + "</button>";
         }).join("");
 
-      var projOpts = ['<option value="all">all projects</option>'].concat(
+      var projOpts = ['<option value="all">All Projects</option>'].concat(
         IS.projects.filter(function (p) {
           return IS.rows.some(function (i) { return i.project_code === p.project_code; });
         }).map(function (p) {
@@ -171,15 +171,15 @@
       IS.rows.forEach(function (i) {
         if (i.assigned_to_name_resolved) picNames[i.assigned_to_name_resolved] = true;
       });
-      var picOpts = ['<option value="all">any PIC</option>',
+      var picOpts = ['<option value="all">Any PIC</option>',
                      '<option value="__none"' + (IS.pic === "__none" ? " selected" : "") + ">— unassigned —</option>"]
         .concat(Object.keys(picNames).sort().map(function (n) {
           return '<option value="' + esc(n) + '"' + (IS.pic === n ? " selected" : "") + ">" + escHtml(n) + "</option>";
         })).join("");
-      var priOpts = ['<option value="all">any priority</option>'].concat(PRIORITIES.map(function (p) {
+      var priOpts = ['<option value="all">Any Priority</option>'].concat(PRIORITIES.map(function (p) {
         return '<option value="' + p + '"' + (IS.priority === p ? " selected" : "") + ">" + UI.label(p) + "</option>";
       })).join("");
-      var catOpts = ['<option value="all">any category</option>'].concat(CATEGORIES.map(function (c) {
+      var catOpts = ['<option value="all">Any Category</option>'].concat(CATEGORIES.map(function (c) {
         return '<option value="' + c + '"' + (IS.category === c ? " selected" : "") + ">" + UI.label(c) + "</option>";
       })).join("");
 
@@ -189,7 +189,7 @@
         '<select id="is-pic">' + picOpts + "</select>" +
         '<select id="is-priority">' + priOpts + "</select>" +
         '<select id="is-category">' + catOpts + "</select>" +
-        '<label class="mc-check">open ≥ <input type="number" id="is-mindays" min="0" ' +
+        '<label class="mc-check">Open ≥ <input type="number" id="is-mindays" min="0" ' +
           'style="width:56px" value="' + (IS.minDays === null ? "" : IS.minDays) + '"> days</label></span>';
         // the stale / no-PIC chips and "+ Raise issue" moved up into the cards
 
@@ -251,20 +251,20 @@
 
     function actionBox(i) {
       if (!IS.canAct) return "";
-      var picOpts = ['<option value="">— keep current —</option>', '<option value="__clear">— clear PIC —</option>']
+      var picOpts = ['<option value="">— Keep Current —</option>', '<option value="__clear">— Clear PIC —</option>']
         .concat(IS.staff.map(function (s) {
           return '<option value="' + s.staff_id + '">' + escHtml(s.full_name) + "</option>";
         })).join("");
-      var catOpts = ['<option value="">— keep —</option>'].concat(CATEGORIES.map(function (c) {
-        return '<option value="' + c + '"' + (c === i.category ? " selected" : "") + ">" + c + "</option>";
+      var catOpts = ['<option value="">— Keep —</option>'].concat(CATEGORIES.map(function (c) {
+        return '<option value="' + c + '"' + (c === i.category ? " selected" : "") + ">" + UI.label(c) + "</option>";
       })).join("");
-      var priOpts = ['<option value="">— keep —</option>'].concat(PRIORITIES.map(function (p) {
-        return '<option value="' + p + '"' + (p === i.priority ? " selected" : "") + ">" + p + "</option>";
+      var priOpts = ['<option value="">— Keep —</option>'].concat(PRIORITIES.map(function (p) {
+        return '<option value="' + p + '"' + (p === i.priority ? " selected" : "") + ">" + UI.label(p) + "</option>";
       })).join("");
       // retro-links (0047): machine, and piles OF THIS ISSUE'S PROJECT only —
       // the database independently refuses a pile from another project
-      var machOpts = ['<option value="">— keep' + (i.machine_code ? " (" + escHtml(i.machine_code) + ")" : "") + " —</option>",
-                      '<option value="__clear">— clear machine link —</option>']
+      var machOpts = ['<option value="">— Keep' + (i.machine_code ? " (" + escHtml(i.machine_code) + ")" : "") + " —</option>",
+                      '<option value="__clear">— Clear machine link —</option>']
         .concat(IS.machines.map(function (m) {
           return '<option value="' + m.machine_id + '">' + escHtml(m.machine_code) + "</option>";
         })).join("");
