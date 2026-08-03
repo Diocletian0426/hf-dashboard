@@ -92,18 +92,18 @@
 
     /* pile construction status */
     planned: "Planned",
-    casing_installed: "Casing installed",
+    casing_installed: "Casing Installed",
     boring_in_progress: "Boring",
     bored_complete: "Bored",
-    cage_in_progress: "Cage going in",
-    cage_installed: "Cage installed",
+    cage_in_progress: "Cage Going In",
+    cage_installed: "Cage Installed",
     casting_in_progress: "Casting",
-    cast_complete: "Cast complete",
-    head_trimmed: "Head trimmed",
+    cast_complete: "Cast Complete",
+    head_trimmed: "Head Trimmed",
 
     /* generic statuses (issues, tests, claims, leave, plans) */
     open: "Open",
-    in_progress: "In progress",
+    in_progress: "In Progress",
     resolved: "Resolved",
     closed: "Closed",
     pending: "Pending",
@@ -118,28 +118,28 @@
     submitted: "Submitted",
     certified: "Certified",
     paid: "Paid",
-    pending_review: "Pending review",
+    pending_review: "Pending Review",
 
     /* punch verification */
     verified: "Verified",
-    outside_geofence: "Outside site area",
-    low_accuracy: "Weak GPS signal",
+    outside_geofence: "Outside Site Area",
+    low_accuracy: "Weak GPS Signal",
     no_gps: "No GPS",
-    no_geofence: "Site has no GPS boundary",
+    no_geofence: "Site Has No GPS Boundary",
 
     /* machine status + common machine types */
     operating: "Operating",
     standby: "Standby",
     breakdown: "Breakdown",
-    maintenance: "Under maintenance",
-    rotary_drilling_rig: "Rotary drilling rig",
-    crawler_crane: "Crawler crane",
-    mobile_crane: "Mobile crane",
+    maintenance: "Under Maintenance",
+    rotary_drilling_rig: "Rotary Drilling Rig",
+    crawler_crane: "Crawler Crane",
+    mobile_crane: "Mobile Crane",
     excavator: "Excavator",
-    vibro_hammer: "Vibro hammer",
+    vibro_hammer: "Vibro Hammer",
     generator: "Generator",
-    welding_machine: "Welding machine",
-    concrete_pump: "Concrete pump",
+    welding_machine: "Welding Machine",
+    concrete_pump: "Concrete Pump",
 
     /* issue categories */
     machinery: "Machinery",
@@ -148,7 +148,7 @@
     design: "Design",
     safety: "Safety",
     weather: "Weather",
-    client: "Client / consultant",
+    client: "Client / Consultant",
     other: "Other",
 
     /* priorities */
@@ -162,8 +162,11 @@
     if (v === null || v === undefined || v === "") return "—";
     var key = String(v);
     if (UI.LABELS[key] !== undefined) return UI.LABELS[key];
-    var s = key.replace(/_/g, " ");
-    return s.charAt(0).toUpperCase() + s.slice(1);
+    // Title Case (owner rule 2026-08-03): every word of a label or
+    // parameter value gets a capital — "in_progress" -> "In Progress"
+    return key.replace(/_/g, " ").replace(/(^|\s)([a-z])/g, function (m, sp, c) {
+      return sp + c.toUpperCase();
+    });
   };
 
   // status/priority pill with the human label. clsOverride skips the

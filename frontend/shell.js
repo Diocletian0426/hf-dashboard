@@ -68,7 +68,7 @@
     // leave.html stays in PAGE_ACCESS but is out of the nav until the page
     // is actually built (owner decision — leave UI deferred)
     { href: "tests.html",      label: "Tests",      icon: "tests"      },
-    { href: "bore-logs.html",  label: "Bore logs",  icon: "borelogs"   },
+    { href: "bore-logs.html",  label: "Bore Logs",  icon: "borelogs"   },
     // only appears for logins holding users.view (the allowed() filter below)
     { href: "users.html",      label: "Users",      icon: "users"      }
   ];

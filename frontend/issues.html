@@ -19,7 +19,7 @@
          change goes through issue_updates; a trigger propagates it and
          stamps resolved_date from the update's own date — which is why the
          "when was it actually fixed" field exists on the resolve form. -->
-    <h1>Site issues</h1>
+    <h1>Site Issues</h1>
     <p id="issues-sub" class="page-caption"></p>
 
     <div id="error"></div>
@@ -40,7 +40,7 @@
           <thead>
             <tr>
               <th class="num">#</th><th>Project</th><th>Title</th><th>Category</th>
-              <th>Priority</th><th>PIC</th><th>Latest action</th><th class="num">Days</th>
+              <th>Priority</th><th>PIC</th><th>Latest Action</th><th class="num">Days</th>
             </tr>
           </thead>
           <tbody id="rows"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
@@ -143,7 +143,7 @@
         (IS.canAct
           ? '<button type="button" class="istat istat-add" data-action="raise-form">' +
               '<span class="istat-ic">' + UI.icon("plus") + "</span>" +
-              '<span class="istat-body"><span class="istat-top"><i>Raise issue</i></span>' +
+              '<span class="istat-body"><span class="istat-top"><i>Raise Issue</i></span>' +
               '<span class="istat-sub">Log a new one</span></span></button>'
           : "");
     }
@@ -223,7 +223,7 @@
           return '<option value="' + m.machine_id + '">' + escHtml(m.machine_code) + "</option>";
         })).join("");
       return '<div class="claim-form">' +
-        "<strong>Raise issue</strong>" +
+        "<strong>Raise Issue</strong>" +
         '<label>Project <select id="ri-project">' + projOpts + "</select></label>" +
         '<label>Title <input type="text" id="ri-title" size="28"></label>' +
         '<label>Description <input type="text" id="ri-desc" size="30"></label>' +
@@ -350,7 +350,7 @@
                ? '<div class="dt-sec"><h3>Description</h3><p class="dt-desc">' +
                  escHtml(i.description) + "</p></div>" : "") +
              '<div class="dt-meta">' + meta.join(" · ") + "</div>" +
-             '<div class="dt-sec"><h3>Update trail</h3>' + trailHtml(i.issue_id) + "</div>" +
+             '<div class="dt-sec"><h3>Update Trail</h3>' + trailHtml(i.issue_id) + "</div>" +
              actionBox(i);
     }
 
@@ -392,7 +392,7 @@
                 : '<span class="iq-nopic">No PIC</span>', "wrap") +
               // restored (owner decision 2026-08-03): the at-a-glance "what
               // happened last" — the full trail stays in the detail panel
-              UI.td("Latest action", i.latest_action
+              UI.td("Latest Action", i.latest_action
                 ? '<span class="clamp2" title="' + esc(i.latest_action) + '">' +
                   escHtml(i.latest_action) + "</span>"
                 : '<span class="muted">—</span>', "wrap") +

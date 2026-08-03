@@ -30,7 +30,7 @@
     <div class="map-layout">
       <section class="map-panel" id="map-panel">
         <div class="map-head">
-          <span class="map-title">Where our sites are</span>
+          <span class="map-title">Where Our Sites Are</span>
           <span class="muted" id="map-count"></span>
           <span class="map-tools">
             <select id="map-state" class="ctx-switch" aria-label="Zoom to a state">
@@ -65,7 +65,7 @@
            shipped as an .mp3: no binary in the repo, no external fetch. -->
       <aside class="feed-panel" id="feed-panel">
         <div class="feed-head">
-          <span class="map-title">Live issues</span>
+          <span class="map-title">Live Issues</span>
           <button type="button" id="feed-sound" class="feed-sound" aria-pressed="true"
                   title="Mute the new-issue chime"></button>
         </div>
@@ -75,7 +75,7 @@
       </aside>
     </div>
 
-    <h2 class="section-title">Needs attention</h2>
+    <h2 class="section-title">Needs Attention</h2>
     <div id="attention" class="cards"></div>
 
     <!-- ================= SITE BOARD =================================
@@ -253,7 +253,7 @@
     }
 
     function health(lastDate) {
-      if (!lastDate) return { cls: "bad", dot: "status-bad", text: "Never reported" };
+      if (!lastDate) return { cls: "bad", dot: "status-bad", text: "Never Reported" };
       var days = UI.daysSince(lastDate);
       if (days <= 1) return { cls: "ok",   dot: "status-ok",   text: UI.dstr(lastDate) + " ✓" };
       if (days <= 3) return { cls: "warn", dot: "status-warn", text: UI.dstr(lastDate) + " (" + days + " days ago)" };
@@ -385,7 +385,7 @@
                   : m.last_status === "breakdown" ? "breakdown" : "gray";
           var status = m.last_status
             ? UI.badge(m.last_status, "badge-" + cls)
-            : '<span class="muted-line">Never reported</span>';
+            : '<span class="muted-line">Never Reported</span>';
           return "<li><span>" + UI.escHtml(m.machine_code) +
                  '<br><span class="md-sub">' + UI.escHtml(UI.label(m.machine_type)) + "</span></span>" +
                  '<span class="md-sub">' + status + "</span></li>";
@@ -404,8 +404,8 @@
           '<div class="md-stat"><b>' + fleet.length + "</b><i>machines</i></div>" +
           '<div class="md-stat"><b>' + (p.open_issues || 0) + "</b><i>issues</i></div>" +
         "</div>" +
-        listBlock("Workers on site", crew, "Nobody assigned to this site.") +
-        listBlock("Machines on site", fleet, "No machines on this site.") +
+        listBlock("Workers on Site", crew, "Nobody assigned to this site.") +
+        listBlock("Machines on Site", fleet, "No machines on this site.") +
         '<a class="md-open" href="project.html?project=' + UI.esc(p.project_id) + '">Open site hub</a>'
       );
     }
@@ -561,7 +561,7 @@
        ===================================================================== */
 
     // Work done % vs contract time used %. Same thresholds and wording as
-    // projects.html so a site never reads "Behind" on one page and "On track"
+    // projects.html so a site never reads "Behind" on one page and "On Track"
     // on the other. rank feeds the urgency score.
     function schedule(p) {
       if (Number(p.progress_pct) >= 100) return { label: "Complete", cls: "badge-approved", rank: 0 };
@@ -574,9 +574,9 @@
       var out = { timePct: timePct };
       if (rem < 0)          { out.label = "Overdue";    out.cls = "badge-critical"; out.rank = 40; }
       else if (diff >= 10)  { out.label = "Ahead";      out.cls = "badge-approved"; out.rank = 0; }
-      else if (diff >= -10) { out.label = "On track";   out.cls = "badge-gray";     out.rank = 0; }
+      else if (diff >= -10) { out.label = "On Track";   out.cls = "badge-gray";     out.rank = 0; }
       else if (diff >= -25) { out.label = "Behind";     out.cls = "badge-medium";   out.rank = 12; }
-      else                  { out.label = "Far behind"; out.cls = "badge-critical"; out.rank = 26; }
+      else                  { out.label = "Far Behind"; out.cls = "badge-critical"; out.rank = 26; }
       return out;
     }
 
@@ -597,7 +597,7 @@
       if (Number(p.progress_pct) >= 100) return "done";
       var s = schedule(p);
       if (silentDays(p) > 3 || (p.critical_open_issues || 0) > 0 || (p.tests_overdue || 0) > 0 ||
-          (s && (s.label === "Overdue" || s.label === "Far behind"))) return "urgent";
+          (s && (s.label === "Overdue" || s.label === "Far Behind"))) return "urgent";
       return "normal";
     }
 
@@ -612,7 +612,7 @@
     // beside it states the same verdict in words, so colour is never alone.
     function toneOf(s) {
       if (!s) return "neutral";
-      if (s.label === "Overdue" || s.label === "Far behind") return "bad";
+      if (s.label === "Overdue" || s.label === "Far Behind") return "bad";
       if (s.label === "Behind") return "warn";
       return "ok";
     }
@@ -624,7 +624,7 @@
       var s = schedule(p);
       var days = silentDays(p);
 
-      var when = !p.last_report_date ? "Never reported"
+      var when = !p.last_report_date ? "Never Reported"
                : days <= 1 ? "Last report: " + UI.dstr(p.last_report_date)
                : days + " days silent";
 
@@ -1029,8 +1029,8 @@
 
         // ---- the site board under the map ----
         var TIERS = [
-          ["urgent", "Needs attention"],
-          ["normal", "Running normally"],
+          ["urgent", "Needs Attention"],
+          ["normal", "Running Normally"],
           ["done",   "Complete"]
         ];
         var view = { filter: "all" };
@@ -1052,7 +1052,7 @@
           if (view.filter === "all") return true;
           if (view.filter === "behind") {
             var s = schedule(p);
-            return !!s && ["Behind", "Far behind", "Overdue"].indexOf(s.label) !== -1;
+            return !!s && ["Behind", "Far Behind", "Overdue"].indexOf(s.label) !== -1;
           }
           return tierOf(p) === view.filter;
         }
@@ -1094,7 +1094,7 @@
         }
 
         function drawControls() {
-          var f = [["all", "All"], ["urgent", "Needs attention"],
+          var f = [["all", "All"], ["urgent", "Needs Attention"],
                    ["behind", "Behind schedule"], ["done", "Complete"]];
           document.getElementById("site-controls").innerHTML =
             "<span>Show: " + f.map(function (o) {

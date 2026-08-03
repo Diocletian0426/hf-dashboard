@@ -20,7 +20,7 @@
         <button type="button" class="btn" id="p-filter-btn"
                 aria-haspopup="true" aria-expanded="false">Filter</button>
         <div class="filter-pop" id="p-filter-pop" hidden>
-          <div class="fp-title">Filter projects</div>
+          <div class="fp-title">Filter Projects</div>
           <div id="p-filter-groups"></div>
           <div class="fp-foot">
             <button type="button" class="btn-plain" id="p-filter-clear">Clear all</button>
@@ -111,9 +111,9 @@
       var label, cls;
       if (remaining < 0)      { label = "OVERDUE";    cls = "badge-critical"; }
       else if (diff >= 10)    { label = "Ahead";      cls = "badge-approved"; }
-      else if (diff >= -10)   { label = "On track";   cls = "badge-gray"; }
+      else if (diff >= -10)   { label = "On Track";   cls = "badge-gray"; }
       else if (diff >= -25)   { label = "Behind";     cls = "badge-medium"; }
-      else                    { label = "Far behind"; cls = "badge-critical"; }
+      else                    { label = "Far Behind"; cls = "badge-critical"; }
 
       return '<span class="badge ' + cls + '" title="Work ' + Math.round(workPct) +
              "% done · " + timePct + '% of contract time used">' + label + "</span>";
@@ -176,7 +176,7 @@
     function toneOf(prog) {
       if (!prog) return "neutral";
       var l = String(workVsTimeLabel(prog));
-      if (l === "OVERDUE" || l === "Far behind") return "bad";
+      if (l === "OVERDUE" || l === "Far Behind") return "bad";
       if (l === "Behind") return "warn";
       return "ok";
     }
@@ -192,9 +192,9 @@
       var diff = (Number(p.progress_pct) || 0) - timePct;
       if (rem < 0) return "OVERDUE";
       if (diff >= 10) return "Ahead";
-      if (diff >= -10) return "On track";
+      if (diff >= -10) return "On Track";
       if (diff >= -25) return "Behind";
-      return "Far behind";
+      return "Far Behind";
     }
 
     /* One card per project — same component as the Overview site cards
@@ -320,7 +320,7 @@
         : "";
     }
 
-    var HEALTH_ORDER = ["Ahead", "On track", "Behind", "Far behind", "Overdue"];
+    var HEALTH_ORDER = ["Ahead", "On Track", "Behind", "Far Behind", "Overdue"];
 
     // the full country, alphabetical — 13 states plus the two federal
     // territories our project codes use (KUL, PJY)
@@ -334,7 +334,7 @@
       document.getElementById("p-filter-groups").innerHTML =
         fpGroup("Status", distinct(function (r) { return r.status; })
           .map(function (s) { return fpOption("status", s, labelStatus(s)); })) +
-        fpGroup("Schedule health", HEALTH_ORDER.filter(function (h) { return healthSeen[h]; })
+        fpGroup("Schedule Health", HEALTH_ORDER.filter(function (h) { return healthSeen[h]; })
           .map(function (h) { return fpOption("health", h, h); })) +
         fpGroup("Client", distinct(function (r) {
             var p = DIR.progById[r.project_id];
@@ -348,9 +348,9 @@
             states.push("Other");
           return states.map(function (s) { return fpOption("state", s, s); });
         })()) +
-        fpGroup("Work type",
-          [fpOption("line", "bored", "Bored piling (HF BP)"),
-           fpOption("line", "sheet", "Sheet piling (Hai Fu)")]);
+        fpGroup("Work Type",
+          [fpOption("line", "bored", "Bored Piling (HF BP)"),
+           fpOption("line", "sheet", "Sheet Piling (Hai Fu)")]);
       syncFilterUI();
     }
 
