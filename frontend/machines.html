@@ -319,10 +319,7 @@
         return "#" + i.issue_number + " " + (i.title || "") + " (" + UI.label(i.status) + ")";
       }).join("\n");
       if (!open) {
-        return '<span class="muted-line" title="' + esc(tip) + '">0</span>' +
-               (machineIssues.length
-                 ? ' <span class="muted" title="' + esc(tip) + '">(' + machineIssues.length + " past)</span>"
-                 : "");
+        return '<span class="muted-line" title="' + esc(tip) + '">0</span>';
       }
       return '<span class="badge badge-anomaly" title="' + esc(tip) + '">' + open + "</span>";
     }
@@ -336,7 +333,9 @@
         return '<span class="badge badge-gray" title="No hour-meter reading yet — due at ' +
                m.next_service_due_hours + ' h">No Reading</span>';
       }
-      var rem = m.next_service_due_hours - m.current_hour_meter;
+      // round to one decimal — floating-point subtraction prints garbage
+      // like 337.60000000000036 otherwise (owner screenshot 2026-08-04)
+      var rem = Math.round((m.next_service_due_hours - m.current_hour_meter) * 10) / 10;
       var due = "Due at " + m.next_service_due_hours + " h · meter " + m.current_hour_meter + " h";
       if (rem <= 0) {
         return '<span class="badge badge-critical" title="' + esc(due) + '">Overdue ' +
@@ -774,12 +773,10 @@
 
       var tracking =
         "<div><h3>Service tracking</h3>" +
-        '<div class="pc-line">Hour meter: ' + numOr(m.current_hour_meter, "h") +
-        (m.service_interval_hours ? ' <span class="muted">(interval ' + m.service_interval_hours + " h)</span>" : "") + "</div>" +
+        '<div class="pc-line">Hour meter: ' + numOr(m.current_hour_meter, "h") + "</div>" +
         '<div class="pc-line">Next service due: ' + numOr(m.next_service_due_hours, "h") +
         (m.hour_service_overdue ? ' <span class="badge badge-critical">overdue</span>' : "") + "</div>" +
-        '<div class="pc-line">Last touched: ' + dstr(m.last_touched_date) +
-        ' <span class="muted">(any service or repair)</span></div>' +
+        '<div class="pc-line">Last touched: ' + dstr(m.last_touched_date) + "</div>" +
         (spend ? '<div class="pc-line">Recorded spend: <strong>RM ' + spend.toFixed(2) + "</strong></div>" : "") +
         "</div>";
 
@@ -791,8 +788,7 @@
         (util && Number(util.days_reported) > 0
           ? '<div class="pc-line">' + util.days_operating + " operating · " + util.days_standby +
             " standby · " + util.days_breakdown + " breakdown" +
-            (Number(util.days_maintenance) ? " · " + util.days_maintenance + " maintenance" : "") +
-            ' <span class="muted">(' + util.days_reported + " reported days)</span></div>" +
+            (Number(util.days_maintenance) ? " · " + util.days_maintenance + " maintenance" : "") + "</div>" +
             ((Number(util.hours_operated) || Number(util.fuel_l))
               ? '<div class="pc-line">' + util.hours_operated + " h operated · " +
                 Math.round(util.fuel_l) + " L diesel</div>"
