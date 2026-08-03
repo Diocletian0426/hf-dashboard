@@ -51,18 +51,21 @@
     var DIR = { rows: [], progById: {}, qtyById: {}, dailyBy: {}, q: "",
                 f: { status: { active: true }, health: {}, client: {}, state: {}, line: {} } };
 
-    // project-code prefix -> state, for the Location group (same convention
-    // as the Overview map: HF-SGR-001 -> Selangor)
+    // The state is a stored fact now: projects.state, exposed through
+    // v_project_directory (backfilled 2026-08-03). The prefix decoder below is
+    // only the FALLBACK for a row that somehow lacks one — after the PAH/PHG
+    // incident, no lookup table gets to overrule the database.
     var STATE_NAME = {
       PLS: "Perlis", KDH: "Kedah", PNG: "Penang", PPG: "Penang", PRK: "Perak",
       SGR: "Selangor", KUL: "Kuala Lumpur", PJY: "Putrajaya",
       NSN: "Negeri Sembilan", MLK: "Melaka", JHR: "Johor",
-      PAH: "Pahang", PHG: "Pahang",   /* PAH = the code in live use; PHG kept as alias */
+      PAH: "Pahang", PHG: "Pahang",
       TRG: "Terengganu", KLT: "Kelantan", KTN: "Kelantan",
       SBH: "Sabah", SWK: "Sarawak"
     };
-    function stateOfCode(code) {
-      var m = String(code || "").toUpperCase().match(/^HF-([A-Z]{3})/);
+    function stateOf(r) {
+      if (r.state) return r.state;
+      var m = String(r.project_code || "").toUpperCase().match(/^HF-([A-Z]{3})/);
       return (m && STATE_NAME[m[1]]) || "Other";
     }
     function labelStatus(s) {
@@ -130,7 +133,7 @@
         var c = prog && prog.client_name ? prog.client_name : null;
         if (!c || !f.client[c]) return false;
       }
-      if (skip !== "state" && !groupEmpty(f.state) && !f.state[stateOfCode(r.project_code)]) return false;
+      if (skip !== "state" && !groupEmpty(f.state) && !f.state[stateOf(r)]) return false;
       if (skip !== "line" && !groupEmpty(f.line)) {
         var ok = (f.line.bored && r.has_bored_scope) || (f.line.sheet && r.has_sheet_scope);
         if (!ok) return false;
@@ -151,7 +154,7 @@
         var p = DIR.progById[r.project_id];
         return !!p && p.client_name === v;
       }
-      if (g === "state")  return stateOfCode(r.project_code) === v;
+      if (g === "state")  return stateOf(r) === v;
       if (g === "line")   return v === "bored" ? !!r.has_bored_scope : !!r.has_sheet_scope;
       return false;
     }
@@ -341,7 +344,7 @@
           // every state, not just the ones with projects (owner request) —
           // the live counts make the empty ones self-explanatory
           var states = ALL_STATES.slice();
-          if (DIR.rows.some(function (r) { return stateOfCode(r.project_code) === "Other"; }))
+          if (DIR.rows.some(function (r) { return stateOf(r) === "Other"; }))
             states.push("Other");
           return states.map(function (s) { return fpOption("state", s, s); });
         })()) +

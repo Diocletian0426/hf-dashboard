@@ -192,14 +192,28 @@
       return spec.map(function (s) { return typeof s === "number" ? COAST[s] : s; });
     }
 
-    // Fallback pin position: the state encoded in the project code.
-    // HF-SGR-001 -> SGR -> Selangor. Sabah/Sarawak are listed so an east
-    // Malaysian site is reported as off-map rather than drawn in the sea.
+    // Pin position by STATE NAME — projects.state is a stored fact now
+    // (backfilled 2026-08-03, exposed through v_project_pulse), so the name is
+    // the primary key here. East Malaysia maps to null so those sites are
+    // reported as off-map rather than drawn in the sea.
+    var STATE_CENTROID = {
+      "Perlis": [100.20, 6.44], "Kedah": [100.62, 5.92], "Penang": [100.30, 5.38],
+      "Perak": [101.10, 4.60], "Selangor": [101.42, 3.28],
+      "Kuala Lumpur": [101.69, 3.14], "Putrajaya": [101.69, 2.93],
+      "Negeri Sembilan": [102.08, 2.72], "Melaka": [102.30, 2.24],
+      "Johor": [103.30, 1.90], "Pahang": [102.90, 3.60],
+      "Terengganu": [102.95, 5.05], "Kelantan": [102.20, 5.65],
+      "Sabah": null, "Sarawak": null, "Labuan": null
+    };
+
+    // Fallback decoder for a row with no stored state: the prefix in the
+    // project code (HF-SGR-001 -> Selangor). After the PAH/PHG incident this
+    // table never overrules the database — it only fills its silence.
     var STATE_POINT = {
       PLS: [100.20, 6.44], KDH: [100.62, 5.92], PNG: [100.30, 5.38], PPG: [100.30, 5.38],
       PRK: [101.10, 4.60], SGR: [101.42, 3.28], KUL: [101.69, 3.14], PJY: [101.69, 2.93],
       NSN: [102.08, 2.72], MLK: [102.30, 2.24], JHR: [103.30, 1.90],
-      PAH: [102.90, 3.60], PHG: [102.90, 3.60],   /* PAH = the code in live use */
+      PAH: [102.90, 3.60], PHG: [102.90, 3.60],
       TRG: [102.95, 5.05], KLT: [102.20, 5.65], KTN: [102.20, 5.65],
       SBH: null, SWK: null
     };
@@ -209,13 +223,17 @@
       return m ? m[1] : null;
     }
 
-    // Real coordinates win if the view ever grows them; otherwise the state.
+    // Real coordinates win if the view ever grows them; then the stored state;
+    // then the code prefix.
     function siteLonLat(p) {
       var lat = p.latitude !== undefined ? p.latitude : p.lat;
       var lon = p.longitude !== undefined ? p.longitude : (p.lng !== undefined ? p.lng : p.long);
       if (lat !== null && lat !== undefined && lon !== null && lon !== undefined &&
           !isNaN(Number(lat)) && !isNaN(Number(lon))) {
         return { lonlat: [Number(lon), Number(lat)], exact: true };
+      }
+      if (p.state && STATE_CENTROID[p.state]) {
+        return { lonlat: STATE_CENTROID[p.state], exact: false };
       }
       var st = stateOf(p.project_code);
       var pt = st ? STATE_POINT[st] : undefined;
