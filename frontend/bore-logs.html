@@ -35,7 +35,7 @@
          project-scoped, seeded back in 0059). -->
 
     <div class="page-eyebrow">Bore logs</div>
-    <h1 id="bl-title">Bore logs to check</h1>
+    <h1 id="bl-title">Bore Logs to Check</h1>
     <p id="bl-sub" class="page-caption"></p>
 
     <div id="error"></div>
@@ -266,7 +266,7 @@
         '<span class="zone-count">scan or photo</span></summary>' +
         '<div class="chase-body"><div class="claim-form">' +
           pickerHtml("up", null) +
-          '<label>file(s) <input type="file" id="up-file" multiple ' +
+          '<label>File(s) <input type="file" id="up-file" multiple ' +
             'accept="image/jpeg,image/png,image/webp,image/heic,application/pdf"></label>' +
           '<button type="button" data-action="bl-upload">Upload</button>' +
           '<span class="muted">The document is kept as the record. ' +
@@ -285,10 +285,10 @@
       document.getElementById("view").innerHTML =
         uploadPanelHtml() +
         '<div class="mp-controls"><span>Show: <select id="bl-status">' +
-          '<option value="open">waiting to be checked</option>' +
-          '<option value="approved">confirmed</option>' +
-          '<option value="rejected">rejected</option>' +
-          '<option value="all">everything</option>' +
+          '<option value="open">Waiting to be checked</option>' +
+          '<option value="approved">Confirmed</option>' +
+          '<option value="rejected">Rejected</option>' +
+          '<option value="all">Everything</option>' +
         "</select></span></div>" +
         '<table class="table table-stack"><thead><tr>' +
           "<th>Status</th><th>Site</th><th>Zone</th><th>Pile</th>" +
@@ -353,8 +353,8 @@
     }
 
     function zoneOptionsHtml(projectId, selectedZone) {
-      if (!projectId) return '<option value="">— pick a site first —</option>';
-      return '<option value="">— all zones —</option>' +
+      if (!projectId) return '<option value="">— Pick a Site First —</option>';
+      return '<option value="">— All Zones —</option>' +
         zonesIn(projectId).map(function (z) {
           return '<option value="' + esc(z) + '"' +
                  (z === selectedZone ? " selected" : "") + ">" +
@@ -363,9 +363,9 @@
     }
 
     function pileOptionsHtml(projectId, zone, selectedPileId) {
-      if (!projectId) return '<option value="">— pick a site first —</option>';
+      if (!projectId) return '<option value="">— Pick a Site First —</option>';
       var ps = pilesIn(projectId, zone);
-      if (!ps.length) return '<option value="">— no piles here —</option>';
+      if (!ps.length) return '<option value="">— No Piles Here —</option>';
       return '<option value="">— not matched yet —</option>' +
         ps.map(function (p) {
           return '<option value="' + esc(p.pile_id) + '"' +
@@ -393,8 +393,8 @@
       var projId = sel ? sel.project_id : "";
       var zone   = sel ? (sel.zone || "") : "";
 
-      return '<label>site <select id="' + pfx + '-proj" data-pick="' + pfx + '">' +
-               '<option value="">— choose a site —</option>' +
+      return '<label>Site <select id="' + pfx + '-proj" data-pick="' + pfx + '">' +
+               '<option value="">— Choose a Site —</option>' +
                projectsWithPiles().map(function (p) {
                  // code AND name — the office knows sites by name (house rule)
                  return '<option value="' + esc(p.id) + '"' +
@@ -402,9 +402,9 @@
                         escHtml(p.code + (p.name ? " — " + p.name : "")) + "</option>";
                }).join("") +
              "</select></label>" +
-             '<label>zone <select id="' + pfx + '-zone" data-pick="' + pfx + '">' +
+             '<label>Zone <select id="' + pfx + '-zone" data-pick="' + pfx + '">' +
                zoneOptionsHtml(projId, zone) + "</select></label>" +
-             "<label>pile" + reqMark(requirePile) +
+             "<label>Pile" + reqMark(requirePile) +
                ' <select id="' + pfx + '-pile" data-pick="' + pfx + '">' +
                pileOptionsHtml(projId, zone, selectedPileId) + "</select></label>";
     }
