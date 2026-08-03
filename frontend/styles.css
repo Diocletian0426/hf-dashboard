@@ -1254,16 +1254,20 @@ td.drift { color: var(--warn-ink); font-weight: 600; white-space: nowrap; }
    Legacy class names (.login-wrap, .login-card, .login-error) are kept so
    nothing referencing them breaks; the rest is new. Uses only :root tokens.
 --------------------------------------------------------------------------- */
+/* Restyled into the soft-gradient system (Step 6 of the Nexus UI port):
+   the page inherits the body gradient, the card is frosted glass, controls
+   are pills, the submit is the house charcoal. (The old block painted the
+   submit with --nav-bg, which the redesign turned translucent white —
+   white text on a white pill. This fixes that too.) */
 .login-wrap {
   min-height: 100vh; display: flex; align-items: center; justify-content: center;
   padding: var(--sp-4);
-  background:
-    radial-gradient(900px 420px at 50% -8%, var(--brand-soft) 0%, rgba(255,255,255,0) 62%),
-    var(--bg);
 }
 .login-card {
-  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg);
-  padding: 28px; width: 100%; max-width: 420px; box-shadow: var(--shadow-2);
+  background: rgba(255, 255, 255, 0.78); border: 1px solid var(--line);
+  -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+  border-radius: var(--r-lg);
+  padding: 32px; width: 100%; max-width: 420px; box-shadow: var(--shadow-2);
 }
 
 /* brand block */
@@ -1290,13 +1294,13 @@ td.drift { color: var(--warn-ink); font-weight: 600; white-space: nowrap; }
 /* Sign in | Create account */
 .auth-tabs {
   display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px;
-  background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-md);
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-pill);
   margin-bottom: var(--sp-4);
 }
 .auth-tab {
   appearance: none; border: 0; background: transparent; cursor: pointer;
   font: inherit; font-size: var(--fs-sm); font-weight: 600; color: var(--ink-2);
-  padding: 8px 10px; border-radius: var(--r-sm); min-height: var(--tap);
+  padding: 8px 10px; border-radius: var(--r-pill); min-height: var(--tap);
 }
 .auth-tab[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-1); }
 .auth-tab:hover:not([aria-selected="true"]) { color: var(--ink); }
@@ -1307,7 +1311,7 @@ td.drift { color: var(--warn-ink); font-weight: 600; white-space: nowrap; }
   width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px;
   min-height: var(--tap); padding: 10px 12px; font-size: var(--fs-md); font-weight: 600;
   background: var(--surface); color: var(--ink);
-  border: 1px solid var(--line-strong); border-radius: var(--r-md); cursor: pointer;
+  border: 1px solid var(--line-strong); border-radius: var(--r-pill); cursor: pointer;
 }
 .auth-social button:hover { background: var(--surface-2); }
 .auth-social button:disabled { opacity: 0.6; cursor: default; }
@@ -1325,8 +1329,8 @@ td.drift { color: var(--warn-ink); font-weight: 600; white-space: nowrap; }
 .login-card input[type="password"],
 .login-card input[type="text"] {
   width: 100%; font-size: 15px; padding: 10px 12px; min-height: var(--tap);
-  border: 1px solid var(--line-strong); border-radius: var(--r-md);
-  background: var(--surface); color: var(--ink);
+  border: 1px solid var(--line-strong); border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.85); color: var(--ink);
 }
 .login-card input:focus-visible, .auth-tab:focus-visible,
 .login-card button:focus-visible, .auth-link:focus-visible {
@@ -1358,9 +1362,9 @@ td.drift { color: var(--warn-ink); font-weight: 600; white-space: nowrap; }
 .login-card button.auth-submit {
   width: 100%; margin-top: var(--sp-4); padding: 11px; font-size: 15px; font-weight: 600;
   min-height: var(--tap);
-  background: var(--nav-bg); color: #fff; border: 0; border-radius: var(--r-md); cursor: pointer;
+  background: var(--charcoal); color: #fff; border: 0; border-radius: var(--r-pill); cursor: pointer;
 }
-.login-card button.auth-submit:hover { background: var(--nav-hover); }
+.login-card button.auth-submit:hover { background: #2c3547; }
 .login-card button.auth-submit:disabled { opacity: 0.6; cursor: default; }
 
 /* messages */

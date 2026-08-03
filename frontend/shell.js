@@ -373,7 +373,7 @@
           '<div class="rail-foot">' +
             '<div class="rail-label">General</div>' +
             '<button type="button" class="rail-link signout-btn">' +
-              icon("signout") + "<span>Sign out</span></button>" +
+              icon("signout") + "<span>Sign Out</span></button>" +
           "</div>" +
         "</aside>" +
         '<div class="topwrap">' +
@@ -396,7 +396,7 @@
               '<div class="user-pop">' +
                 '<div class="user-name">' + escText(fullName) + "</div>" +
                 '<div class="user-desig">' + escText(desig) + "</div>" +
-                '<button type="button" class="btn-plain signout-btn">Sign out</button>' +
+                '<button type="button" class="btn-plain signout-btn">Sign Out</button>' +
               "</div>" +
             "</details>" +
           "</div>" +
