@@ -23,20 +23,31 @@
     <p id="issues-sub" class="page-caption"></p>
 
     <div id="error"></div>
+    <!-- The counts used to be two cramped chips at the end of the filter row.
+         As cards they read at a glance AND still act as filters — clicking one
+         is the same as pressing the chip was. -->
+    <div class="istats" id="stat-cards"></div>
     <div class="mp-controls" id="controls"></div>
     <div id="raise-host"></div>
 
-    <div class="table-wrap table-stack">
-      <table>
-        <thead>
-          <tr>
-            <th class="num">#</th><th>Project</th><th>Title</th><th>Category</th>
-            <th>Priority</th><th>Status</th><th>PIC</th>
-            <th class="num">Days open</th><th>Latest action</th><th>Machine</th>
-          </tr>
-        </thead>
-        <tbody id="rows"><tr><td colspan="10" class="empty">Loading…</td></tr></tbody>
-      </table>
+    <!-- Master-detail: the list stays a table for scanning, and the issue you
+         pick opens in the panel beside it instead of pushing the rows apart.
+         Status / Machine / Latest action left the table — the panel shows all
+         three, and at half width the ten columns were crushing the title. -->
+    <div class="iss-layout">
+      <div class="table-wrap table-stack tbl-issues">
+        <table>
+          <thead>
+            <tr>
+              <th class="num">#</th><th>Project</th><th>Title</th><th>Category</th>
+              <th>Priority</th><th>PIC</th><th>Latest action</th><th class="num">Days</th>
+            </tr>
+          </thead>
+          <tbody id="rows"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
+        </table>
+      </div>
+
+      <aside class="iss-detail" id="detail"></aside>
     </div>
   </main>
 
@@ -59,8 +70,8 @@
 
     var IS = {
       rows: [], trail: {}, projects: [], staff: [], machines: [], pilesByProject: {},
-      canAct: false, open: {}, showRaise: false,
-      status: "open", project: "all", stale: false, nopic: false,
+      canAct: false, selected: null, showRaise: false,
+      status: "open", project: "all", stale: false, nopic: false, month: false,
       pic: "all", priority: "all", category: "all", minDays: null,
       err: "", ok: ""
     };
@@ -82,6 +93,8 @@
         if (IS.project !== "all" && i.project_code !== IS.project) return false;
         if (IS.stale && !isStale(i)) return false;
         if (IS.nopic && i.assigned_to_name_resolved) return false;
+        // keeps the "Resolved / this month" card's number equal to its list
+        if (IS.month && !resolvedThisMonth(i)) return false;
         if (IS.pic !== "all") {
           if (IS.pic === "__none" ? !!i.assigned_to_name_resolved
                                   : i.assigned_to_name_resolved !== IS.pic) return false;
@@ -93,12 +106,50 @@
       });
     }
 
-    // ---- controls (status chips + project filter + work-queue chips) ----
-    function renderControls() {
-      var openRows = IS.rows.filter(isOpenStatus);
-      var staleN = openRows.filter(isStale).length;
-      var nopicN = openRows.filter(function (i) { return !i.assigned_to_name_resolved; }).length;
+    function resolvedThisMonth(i) {
+      if (!i.resolved_date) return false;
+      return String(i.resolved_date).slice(0, 7) === Dash.todayKL().slice(0, 7);
+    }
 
+    // ---- the stat cards: counts that are also the filters ----
+    function renderStatCards() {
+      var openRows = IS.rows.filter(isOpenStatus);
+      var cards = [
+        { key: "open",  n: openRows.length, label: "Open", sub: "Require attention",
+          icon: "alert",  tone: "bad",
+          on: IS.status === "open" && !IS.stale && !IS.nopic && !IS.month },
+        { key: "stale", n: openRows.filter(isStale).length,
+          label: "Stale (" + STALE_DAYS + "d+)", sub: "Need follow up",
+          icon: "clock",  tone: "warn", on: IS.stale },
+        { key: "nopic", n: openRows.filter(function (i) { return !i.assigned_to_name_resolved; }).length,
+          label: "No PIC", sub: "Unassigned",
+          icon: "person", tone: "info", on: IS.nopic },
+        { key: "month", n: IS.rows.filter(resolvedThisMonth).length,
+          label: "Resolved", sub: "This month",
+          icon: "check",  tone: "ok",   on: IS.month }
+      ];
+
+      document.getElementById("stat-cards").innerHTML =
+        cards.map(function (c) {
+          return '<button type="button" class="istat tone-' + c.tone + (c.on ? " on" : "") +
+                   '" data-card="' + c.key + '" aria-pressed="' + (c.on ? "true" : "false") + '">' +
+                   '<span class="istat-ic">' + UI.icon(c.icon) + "</span>" +
+                   '<span class="istat-body">' +
+                     '<span class="istat-top"><b>' + c.n + "</b><i>" + escHtml(c.label) + "</i></span>" +
+                     '<span class="istat-sub">' + escHtml(c.sub) + "</span>" +
+                   "</span>" +
+                 "</button>";
+        }).join("") +
+        (IS.canAct
+          ? '<button type="button" class="istat istat-add" data-action="raise-form">' +
+              '<span class="istat-ic">' + UI.icon("plus") + "</span>" +
+              '<span class="istat-body"><span class="istat-top"><i>Raise issue</i></span>' +
+              '<span class="istat-sub">Log a new one</span></span></button>'
+          : "");
+    }
+
+    // ---- controls (status chips + project filter) ----
+    function renderControls() {
       var statusBtns = [["open", "Open + in progress"], ["resolved", "Resolved"],
                         ["closed", "Closed"], ["all", "All"]]
         .map(function (f) {
@@ -139,20 +190,12 @@
         '<select id="is-priority">' + priOpts + "</select>" +
         '<select id="is-category">' + catOpts + "</select>" +
         '<label class="mc-check">open ≥ <input type="number" id="is-mindays" min="0" ' +
-          'style="width:56px" value="' + (IS.minDays === null ? "" : IS.minDays) + '"> days</label></span>' +
-        "<span>" +
-        '<button type="button" data-chip="stale"' + (IS.stale ? ' class="active"' : "") +
-          ' title="open issues with no update for ' + STALE_DAYS + '+ days">' + staleN + " stale</button>" +
-        '<button type="button" data-chip="nopic"' + (IS.nopic ? ' class="active"' : "") +
-          ' title="open issues nobody owns">' + nopicN + " no PIC</button>" +
-        "</span>" +
-        (IS.canAct
-          ? '<span><button type="button" data-action="raise-form">+ Raise issue</button></span>'
-          : "");
+          'style="width:56px" value="' + (IS.minDays === null ? "" : IS.minDays) + '"> days</label></span>';
+        // the stale / no-PIC chips and "+ Raise issue" moved up into the cards
 
-      document.getElementById("issues-sub").innerHTML =
-        openRows.length + " open · " + staleN + " stale " + STALE_DAYS + "d+ · " + nopicN + " without PIC" +
-        (IS.canAct ? "" : ' <span class="muted">(view only — actions are office/management)</span>');
+      // the cards above carry the counts now — this line only says what they cannot
+      document.getElementById("issues-sub").innerHTML = IS.canAct ? ""
+        : '<span class="muted">View only — raising and updating issues is office/management.</span>';
     }
 
     // ---- raise-issue form ----
@@ -171,7 +214,7 @@
       var priOpts = PRIORITIES.map(function (p) {
         return '<option value="' + p + '"' + (p === "medium" ? " selected" : "") + ">" + UI.label(p) + "</option>";
       }).join("");
-      var picOpts = ['<option value="">— no PIC yet —</option>'].concat(
+      var picOpts = ['<option value="">— No PIC yet —</option>'].concat(
         IS.staff.map(function (s) {
           return '<option value="' + s.staff_id + '">' + escHtml(s.full_name) + "</option>";
         })).join("");
@@ -181,12 +224,12 @@
         })).join("");
       return '<div class="claim-form">' +
         "<strong>Raise issue</strong>" +
-        '<label>project <select id="ri-project">' + projOpts + "</select></label>" +
-        '<label>title <input type="text" id="ri-title" size="28"></label>' +
-        '<label>description <input type="text" id="ri-desc" size="30"></label>' +
-        '<label>category <select id="ri-category">' + catOpts + "</select></label>" +
-        '<label>priority <select id="ri-priority">' + priOpts + "</select></label>" +
-        '<label>machine <select id="ri-machine">' + machOpts + "</select></label>" +
+        '<label>Project <select id="ri-project">' + projOpts + "</select></label>" +
+        '<label>Title <input type="text" id="ri-title" size="28"></label>' +
+        '<label>Description <input type="text" id="ri-desc" size="30"></label>' +
+        '<label>Category <select id="ri-category">' + catOpts + "</select></label>" +
+        '<label>Priority <select id="ri-priority">' + priOpts + "</select></label>" +
+        '<label>Machine <select id="ri-machine">' + machOpts + "</select></label>" +
         '<label>PIC <select id="ri-pic">' + picOpts + "</select></label>" +
         '<button type="button" data-action="raise-save">Raise</button>' +
         '<button type="button" data-action="raise-cancel">Cancel</button>' +
@@ -226,54 +269,93 @@
           return '<option value="' + m.machine_id + '">' + escHtml(m.machine_code) + "</option>";
         })).join("");
       var piles = IS.pilesByProject[i.project_code] || [];
-      var pileOpts = ['<option value="">— keep' + (i.affected_pile_mark ? " (" + escHtml(i.affected_pile_mark) + ")" : "") + " —</option>",
-                      '<option value="__clear">— clear pile link —</option>']
+      var pileOpts = ['<option value="">— Keep' + (i.affected_pile_mark ? " (" + escHtml(i.affected_pile_mark) + ")" : "") + " —</option>",
+                      '<option value="__clear">— Clear pile link —</option>']
         .concat(piles.map(function (p) {
           return '<option value="' + p.pile_id + '">' + escHtml(p.pile_mark_no) + "</option>";
         })).join("");
+      // cf-wide = spans both grid columns in the detail panel (see styles.css)
       return '<div class="claim-form">' +
         "<strong>Add update</strong>" +
-        '<label>note <input type="text" id="iu-comment" size="34" placeholder="what happened / what was done"></label>' +
-        '<label>status <select id="iu-status">' +
-          '<option value="">no change</option>' +
+        '<label class="cf-wide">Note <input type="text" id="iu-comment" size="34" placeholder="What happened / what was done"></label>' +
+        '<label>Status <select id="iu-status">' +
+          '<option value="">No change</option>' +
           '<option value="in_progress">In progress</option>' +
           '<option value="resolved">Resolved</option>' +
           '<option value="closed">Closed</option>' +
           '<option value="open">Reopen</option></select></label>' +
-        '<label>when it was actually done <input type="date" id="iu-date" value="' + Dash.todayKL() +
-          '" title="stamps the real resolved date — backdate if it was fixed earlier"></label>' +
+        '<label>When it was actually done <input type="date" id="iu-date" value="' + Dash.todayKL() +
+          '" title="Stamps the real resolved date — backdate if it was fixed earlier"></label>' +
         '<button type="button" data-action="update-save" data-issue="' + i.issue_id + '">Save update</button>' +
         "</div>" +
         '<div class="claim-form">' +
         "<strong>Triage</strong>" +
-        '<label>priority <select id="im-priority">' + priOpts + "</select></label>" +
-        '<label>category <select id="im-category">' + catOpts + "</select></label>" +
-        '<label>PIC <select id="im-pic">' + picOpts + "</select></label>" +
-        '<label>machine <select id="im-machine">' + machOpts + "</select></label>" +
-        '<label>pile <select id="im-pile"' + (piles.length ? "" : " disabled title=\"no piles registered for this project\"") + ">" +
+        '<label>Priority <select id="im-priority">' + priOpts + "</select></label>" +
+        '<label>Category <select id="im-category">' + catOpts + "</select></label>" +
+        '<label class="cf-wide">PIC <select id="im-pic">' + picOpts + "</select></label>" +
+        '<label>Machine <select id="im-machine">' + machOpts + "</select></label>" +
+        '<label>Pile <select id="im-pile"' + (piles.length ? "" : " disabled title=\"No piles registered for this project\"") + ">" +
           pileOpts + "</select></label>" +
         '<button type="button" data-action="meta-save" data-issue="' + i.issue_id + '">Apply</button>' +
         "</div>";
     }
 
-    function detailRow(i) {
-      var isOpen = !!IS.open[i.issue_id];
-      if (!isOpen) return '<tr class="claim-lines-row" style="display:none"><td colspan="10"></td></tr>';
+    // Project NAME, not the code — nobody remembers "HF-KDH-002A". The code
+    // stays in the tooltip and in the detail panel, where there is room.
+    function projName(code) {
+      var p = IS.projects.filter(function (x) { return x.project_code === code; })[0];
+      return (p && p.project_name) || code || "—";
+    }
+
+    function detailPanel() {
+      var i = IS.rows.filter(function (r) { return r.issue_id === IS.selected; })[0];
+      if (!i) {
+        return '<div class="iss-empty">' +
+                 UI.icon("issue") +
+                 "<p>Pick an issue on the left to see its description, trail and actions.</p>" +
+               "</div>";
+      }
       var meta = [];
       if (i.raised_by_name_resolved) meta.push("raised by " + escHtml(i.raised_by_name_resolved));
       meta.push("raised " + dstr(i.raised_date));
       if (i.resolved_date) meta.push("resolved " + dstr(i.resolved_date));
       if (i.affected_pile_mark) meta.push("pile " + escHtml(i.affected_pile_mark));
-      return '<tr class="claim-lines-row"><td colspan="10">' +
-        '<div style="padding:8px 12px">' +
-        (i.description ? '<div class="pc-line wrap">' + escHtml(i.description) + "</div>" : "") +
-        '<div class="pc-meta">' + meta.join(" · ") + "</div>" +
-        "<h3>Update trail</h3>" + trailHtml(i.issue_id) +
-        actionBox(i) +
-        "</div></td></tr>";
+
+      var facts = [["Project", escHtml(projName(i.project_code)) +
+                      '<span class="dt-sub">' + escHtml(i.project_code || "") + "</span>"],
+                   ["Category", escHtml(UI.label(i.category))],
+                   ["PIC", i.assigned_to_name_resolved
+                      ? escHtml(i.assigned_to_name_resolved)
+                      : '<span class="dt-none">nobody assigned</span>'],
+                   ["Days open", (i.days_open === null || i.days_open === undefined)
+                      ? "—" : String(i.days_open)]];
+      if (i.machine_code) facts.push(["Machine", escHtml(i.machine_code)]);
+
+      return '<div class="dt-head">' +
+               '<div class="dt-badges">' +
+                 (i.priority ? UI.badge(i.priority) : "") +
+                 (i.status ? UI.badge(i.status) : "") +
+                 '<span class="dt-num">Issue #' + (i.issue_number || "") + "</span>" +
+                 '<button type="button" class="dt-close" data-action="detail-close" ' +
+                        'aria-label="Close">&times;</button>' +
+               "</div>" +
+               "<h2>" + escHtml(i.title || "(No title)") + "</h2>" +
+             "</div>" +
+             '<div class="dt-facts">' +
+               facts.map(function (f) {
+                 return '<div class="dt-fact"><i>' + f[0] + "</i><span>" + f[1] + "</span></div>";
+               }).join("") +
+             "</div>" +
+             (i.description
+               ? '<div class="dt-sec"><h3>Description</h3><p class="dt-desc">' +
+                 escHtml(i.description) + "</p></div>" : "") +
+             '<div class="dt-meta">' + meta.join(" · ") + "</div>" +
+             '<div class="dt-sec"><h3>Update trail</h3>' + trailHtml(i.issue_id) + "</div>" +
+             actionBox(i);
     }
 
     function render() {
+      renderStatCards();
       renderControls();
       document.getElementById("raise-host").innerHTML = raiseForm();
       document.getElementById("error").innerHTML =
@@ -282,30 +364,51 @@
 
       var rows = visibleRows();
       var tbody = document.getElementById("rows");
-      if (!rows.length) {
-        tbody.innerHTML = '<tr><td colspan="10" class="empty">No issues for this filter.</td></tr>';
-        return;
-      }
-      tbody.innerHTML = rows.map(function (i) {
-        var stale = isStale(i);
-        var staleD = stale ? daysSince(lastActivityDate(i)) : null;
-        return '<tr class="claim-row" data-issue="' + i.issue_id + '" title="Click to open the trail">' +
-          '<td class="num" data-label="#"><span class="claim-caret">' + (IS.open[i.issue_id] ? "&#9662;" : "&#9656;") +
-            "</span> <strong>" + (i.issue_number || "") + "</strong></td>" +
-          UI.td("Project", escHtml(i.project_code || "")) +
-          UI.td("Title", escHtml(i.title || ""), "wrap") +
-          UI.td("Category", escHtml(UI.label(i.category))) +
-          UI.td("Priority", i.priority ? UI.badge(i.priority) : "") +
-          UI.td("Status", i.status ? UI.badge(i.status) : "") +
-          UI.td("PIC", escHtml(i.assigned_to_name_resolved || "—")) +
-          UI.td("Days open",
-            (i.days_open === null || i.days_open === undefined ? "" : String(i.days_open)),
-            "num" + (i.days_open > 14 ? " neg" : "")) +
-          UI.td("Latest action", escHtml(i.latest_action || "—") +
-            (stale ? ' <span class="badge badge-anomaly">no update ' + staleD + "d</span>" : ""), "wrap") +
-          UI.td("Machine", escHtml(i.machine_code || "")) +
-        "</tr>" + detailRow(i);
-      }).join("");
+
+      // a selection that the current filter hides would leave a panel with no
+      // matching row highlighted — drop it
+      if (IS.selected && !rows.some(function (r) { return r.issue_id === IS.selected; }))
+        IS.selected = null;
+
+      tbody.innerHTML = rows.length
+        ? rows.map(function (i) {
+            var stale = isStale(i);
+            var staleD = stale ? daysSince(lastActivityDate(i)) : null;
+            return '<tr class="claim-row' + (IS.selected === i.issue_id ? " sel" : "") +
+                     '" data-issue="' + esc(i.issue_id) + '" title="Click to open it on the right">' +
+              // just the number — the stale badge used to live here and kept
+              // shoving the code and the project name out of a 58px column
+              '<td data-label="#"><strong>' + (i.issue_number || "") + "</strong></td>" +
+              UI.td("Project", '<span class="clamp2" title="' + esc(i.project_code || "") + '">' +
+                escHtml(projName(i.project_code)) + "</span>", "wrap") +
+              UI.td("Title", '<span class="clamp2" title="' + esc(i.title || "") + '">' +
+                escHtml(i.title || "") + "</span>", "wrap") +
+              UI.td("Category", escHtml(UI.label(i.category))) +
+              UI.td("Priority", i.priority ? UI.badge(i.priority) : "") +
+              // long names like "Firdaus Singchumporn" overflowed a nowrap
+              // cell and pushed the day count onto its own line
+              UI.td("PIC", i.assigned_to_name_resolved
+                ? escHtml(i.assigned_to_name_resolved)
+                : '<span class="iq-nopic">No PIC</span>', "wrap") +
+              // restored (owner decision 2026-08-03): the at-a-glance "what
+              // happened last" — the full trail stays in the detail panel
+              UI.td("Latest action", i.latest_action
+                ? '<span class="clamp2" title="' + esc(i.latest_action) + '">' +
+                  escHtml(i.latest_action) + "</span>"
+                : '<span class="muted">—</span>', "wrap") +
+              UI.td("Days",
+                '<span class="d-n' + (i.days_open > 14 ? " neg" : "") + '"' +
+                  (stale ? ' title="No update for ' + staleD + ' days"' : "") + ">" +
+                  (i.days_open === null || i.days_open === undefined ? "—" : String(i.days_open)) +
+                "</span>", "d-cell") +
+            "</tr>";
+          }).join("")
+        : '<tr><td colspan="8" class="empty">No issues for this filter.</td></tr>';
+
+      var detail = document.getElementById("detail");
+      detail.innerHTML = detailPanel();
+      // drives the drawer on narrower screens — hidden until a row is picked
+      detail.classList.toggle("has-sel", !!IS.selected);
     }
 
     async function refresh() {
@@ -326,7 +429,6 @@
           IS.status = urlStatus;
         }
 
-        var profile = await Dash.getMyProfile();
         IS.canAct = Dash.can("issues.edit");
 
         var res = await Promise.all([
@@ -353,12 +455,30 @@
         document.getElementById("controls").addEventListener("click", function (ev) {
           var b = ev.target.closest("button");
           if (!b) return;
-          if (b.getAttribute("data-status")) { IS.status = b.getAttribute("data-status"); render(); }
-          else if (b.getAttribute("data-chip") === "stale") { IS.stale = !IS.stale; render(); }
-          else if (b.getAttribute("data-chip") === "nopic") { IS.nopic = !IS.nopic; render(); }
-          else if (b.getAttribute("data-action") === "raise-form") {
-            IS.showRaise = true; IS.ok = ""; render();
+          if (b.getAttribute("data-status")) {
+            IS.status = b.getAttribute("data-status");
+            IS.month = false;              // the month filter belongs to its card
+            render();
           }
+        });
+
+        // the stat cards ARE the stale / no-PIC / resolved filters
+        document.getElementById("stat-cards").addEventListener("click", function (ev) {
+          var b = ev.target.closest("button");
+          if (!b) return;
+          if (b.getAttribute("data-action") === "raise-form") {
+            IS.showRaise = true; IS.ok = ""; render(); return;
+          }
+          var card = b.getAttribute("data-card");
+          if (!card) return;
+          // each card is one view — turning one on turns the others off, so the
+          // number on the card always matches what the list shows
+          if (card === "open")       { IS.status = "open"; IS.stale = false; IS.nopic = false; IS.month = false; }
+          else if (card === "stale") { IS.status = "open"; IS.nopic = false; IS.month = false; IS.stale = !IS.stale; }
+          else if (card === "nopic") { IS.status = "open"; IS.stale = false; IS.month = false; IS.nopic = !IS.nopic; }
+          else if (card === "month") { IS.stale = false; IS.nopic = false;
+                                       IS.month = !IS.month; IS.status = IS.month ? "all" : "open"; }
+          render();
         });
         document.getElementById("controls").addEventListener("change", function (ev) {
           if (ev.target.id === "is-project")       { IS.project = ev.target.value; render(); }
@@ -394,10 +514,15 @@
           await refresh();
         });
 
-        document.getElementById("rows").addEventListener("click", async function (ev) {
+        // The action buttons moved with the forms — they are in the DETAIL
+        // panel now, not inside the table, so the listener has to follow them.
+        document.getElementById("detail").addEventListener("click", async function (ev) {
           var btn = ev.target.closest("button[data-action]");
           if (btn) {
             var issueId = btn.getAttribute("data-issue");
+            if (btn.getAttribute("data-action") === "detail-close") {
+              IS.selected = null; render(); return;
+            }
             if (btn.getAttribute("data-action") === "update-save") {
               var comment = document.getElementById("iu-comment").value.trim();
               var newStatus = document.getElementById("iu-status").value || null;
@@ -437,10 +562,13 @@
             }
             return;
           }
+        });
+
+        // clicking a row just selects it; the panel beside the table draws it
+        document.getElementById("rows").addEventListener("click", function (ev) {
           var row = ev.target.closest("tr.claim-row");
           if (!row) return;
-          var id = row.getAttribute("data-issue");
-          IS.open[id] = !IS.open[id];
+          IS.selected = row.getAttribute("data-issue");
           render();
         });
       } catch (e) {
