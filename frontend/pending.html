@@ -18,8 +18,8 @@
 
       <div class="auth-brand">
         <svg class="auth-mark" viewBox="0 0 38 38" role="img" aria-label="HF Bored Piles logo">
-          <rect width="38" height="38" rx="9" fill="#0f172a"></rect>
-          <path d="M10 9v20M19 9v20M28 9v20" stroke="#2563eb" stroke-width="3" stroke-linecap="round"></path>
+          <rect width="38" height="38" rx="9" fill="#1f2532"></rect>
+          <path d="M10 9v20M19 9v20M28 9v20" stroke="#2f6fdc" stroke-width="3" stroke-linecap="round"></path>
           <path d="M6 13.5h26" stroke="#e2e8f0" stroke-width="1.5" stroke-linecap="round" opacity=".55"></path>
         </svg>
         <div class="auth-name">
@@ -28,7 +28,7 @@
         </div>
       </div>
 
-      <h1 id="p-title">Your account is waiting for approval</h1>
+      <h1 id="p-title">Your Account Is Waiting for Approval</h1>
       <p class="sub" id="p-sub">
         Thanks — your details have been sent to the office. Someone will check them
         and switch your account on. You will be able to sign in normally after that.
@@ -40,7 +40,7 @@
       </div>
 
       <p class="sub" style="margin-bottom:var(--sp-3);">
-        <strong>What happens next</strong>
+        <strong>What Happens Next</strong>
       </p>
       <ol style="margin:0 0 var(--sp-4) 18px;padding:0;color:var(--ink-2);font-size:var(--fs-sm);line-height:1.7;">
         <li>The office checks who you are and which sites you work on.</li>
@@ -53,11 +53,11 @@
         and mention the email address shown above.
       </p>
 
-      <button class="auth-submit" id="p-refresh" type="button">Check again</button>
+      <button class="auth-submit" id="p-refresh" type="button">Check Again</button>
       <div id="p-msg" class="auth-msg" role="status" aria-live="polite"></div>
 
       <div class="auth-row" style="justify-content:center;">
-        <button type="button" class="auth-link" id="p-out">Sign out</button>
+        <button type="button" class="auth-link" id="p-out">Sign Out</button>
       </div>
 
       <p class="auth-note">
@@ -84,7 +84,7 @@
 
     // arrived straight after signing up, before confirming the email
     if (/[?&]confirm=1/.test(window.location.search)) {
-      $("p-title").textContent = "Confirm your email address";
+      $("p-title").textContent = "Confirm Your Email Address";
       $("p-sub").textContent =
         "We have sent you a confirmation link. Open it, then come back here — " +
         "the office still needs to approve the account afterwards.";
@@ -110,7 +110,7 @@
         $("p-msg").className = "auth-msg bad";
         $("p-msg").textContent = "Could not reach the server. Try again in a moment.";
       }
-      b.disabled = false; b.textContent = "Check again";
+      b.disabled = false; b.textContent = "Check Again";
     });
 
     $("p-out").addEventListener("click", function () { Dash.signOut(); });
