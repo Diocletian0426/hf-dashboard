@@ -433,6 +433,7 @@ h1 {
 }
 .fp-opt:hover { color: var(--ink); }
 .fp-opt input { width: 15px; height: 15px; min-height: 0; accent-color: var(--brand); }
+.fp-opt .fp-n { color: var(--ink-3); font-size: var(--fs-xs); }
 .fp-foot {
   display: flex; justify-content: space-between; align-items: center; gap: var(--sp-2);
   margin-top: var(--sp-3); padding-top: var(--sp-3); border-top: 1px solid var(--rule);

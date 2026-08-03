@@ -117,16 +117,20 @@
 
     function groupEmpty(g) { for (var k in g) if (g[k]) return false; return true; }
 
-    function matches(r) {
+    // The one filter predicate. `skip` names a group to IGNORE — that is how
+    // the per-option counts stay honest: an option's number answers "how many
+    // projects would this tick show, GIVEN the other groups", so its own
+    // group's selection must not count against it (within a group it's OR).
+    function passes(r, skip) {
       var f = DIR.f, prog = DIR.progById[r.project_id];
-      if (!groupEmpty(f.status) && !f.status[r.status]) return false;
-      if (!groupEmpty(f.health) && !f.health[healthOf(r)]) return false;
-      if (!groupEmpty(f.client)) {
+      if (skip !== "status" && !groupEmpty(f.status) && !f.status[r.status]) return false;
+      if (skip !== "health" && !groupEmpty(f.health) && !f.health[healthOf(r)]) return false;
+      if (skip !== "client" && !groupEmpty(f.client)) {
         var c = prog && prog.client_name ? prog.client_name : null;
         if (!c || !f.client[c]) return false;
       }
-      if (!groupEmpty(f.state) && !f.state[stateOfCode(r.project_code)]) return false;
-      if (!groupEmpty(f.line)) {
+      if (skip !== "state" && !groupEmpty(f.state) && !f.state[stateOfCode(r.project_code)]) return false;
+      if (skip !== "line" && !groupEmpty(f.line)) {
         var ok = (f.line.bored && r.has_bored_scope) || (f.line.sheet && r.has_sheet_scope);
         if (!ok) return false;
       }
@@ -136,6 +140,23 @@
         if (hay.indexOf(DIR.q) === -1) return false;
       }
       return true;
+    }
+
+    // does row r carry value v in group g? (the counting side of the filter)
+    function optionHas(g, v, r) {
+      if (g === "status") return r.status === v;
+      if (g === "health") return healthOf(r) === v;
+      if (g === "client") {
+        var p = DIR.progById[r.project_id];
+        return !!p && p.client_name === v;
+      }
+      if (g === "state")  return stateOfCode(r.project_code) === v;
+      if (g === "line")   return v === "bored" ? !!r.has_bored_scope : !!r.has_sheet_scope;
+      return false;
+    }
+
+    function matches(r) {
+      return passes(r, null);
     }
 
     function scopeChips(r) {
@@ -285,7 +306,8 @@
     function fpOption(group, value, label) {
       return '<label class="fp-opt"><input type="checkbox" data-group="' + group +
              '" data-value="' + UI.esc(value) + '"' +
-             (DIR.f[group][value] ? " checked" : "") + "> " + UI.escHtml(label) + "</label>";
+             (DIR.f[group][value] ? " checked" : "") + "> " + UI.escHtml(label) +
+             ' <span class="fp-n"></span></label>';
     }
 
     function fpGroup(title, opts) {
@@ -295,6 +317,12 @@
     }
 
     var HEALTH_ORDER = ["Ahead", "On track", "Behind", "Far behind", "Overdue"];
+
+    // the full country, alphabetical — 13 states plus the two federal
+    // territories our project codes use (KUL, PJY)
+    var ALL_STATES = ["Johor", "Kedah", "Kelantan", "Kuala Lumpur", "Melaka",
+                      "Negeri Sembilan", "Pahang", "Penang", "Perak", "Perlis",
+                      "Putrajaya", "Sabah", "Sarawak", "Selangor", "Terengganu"];
 
     function buildFilterPop() {
       var healthSeen = {};
@@ -308,8 +336,14 @@
             var p = DIR.progById[r.project_id];
             return p && p.client_name ? p.client_name : null;
           }).map(function (c) { return fpOption("client", c, c); })) +
-        fpGroup("Location", distinct(function (r) { return stateOfCode(r.project_code); })
-          .map(function (s) { return fpOption("state", s, s); })) +
+        fpGroup("Location", (function () {
+          // every state, not just the ones with projects (owner request) —
+          // the live counts make the empty ones self-explanatory
+          var states = ALL_STATES.slice();
+          if (DIR.rows.some(function (r) { return stateOfCode(r.project_code) === "Other"; }))
+            states.push("Other");
+          return states.map(function (s) { return fpOption("state", s, s); });
+        })()) +
         fpGroup("Work type",
           [fpOption("line", "bored", "Bored piling (HF BP)"),
            fpOption("line", "sheet", "Sheet piling (Hai Fu)")]);
@@ -331,6 +365,20 @@
       var n = DIR.rows.filter(matches).length;
       document.getElementById("p-filter-apply").textContent =
         "Show " + n + (n === 1 ? " project" : " projects");
+
+      // per-option counts, contextual: each number = how many projects that
+      // tick would show given the OTHER groups' selections and the search
+      var boxes = document.querySelectorAll("#p-filter-groups input[data-group]");
+      for (var i = 0; i < boxes.length; i++) {
+        var g = boxes[i].getAttribute("data-group");
+        var v = boxes[i].getAttribute("data-value");
+        var c = 0;
+        for (var j = 0; j < DIR.rows.length; j++) {
+          if (passes(DIR.rows[j], g) && optionHas(g, v, DIR.rows[j])) c++;
+        }
+        var span = boxes[i].parentNode.querySelector(".fp-n");
+        if (span) span.textContent = "(" + c + ")";
+      }
     }
 
     function render() {
