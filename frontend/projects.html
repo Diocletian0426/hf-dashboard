@@ -157,6 +157,7 @@
     }
 
     function workVsTimeLabel(p) {
+      if (!p) return "";                 // SP-only sites have no pulse row
       var el = p.days_elapsed, rem = p.days_remaining;
       if (p.project_status === "completed" || Number(p.progress_pct) >= 100) return "Complete";
       if (el === null || el === undefined || rem === null || rem === undefined) return "";
