@@ -92,8 +92,17 @@
         <input id="mt-q" type="search" autocomplete="off" placeholder="Search machines…"
                aria-label="Search machines by code, type, brand or model">
       </label>
-      <select id="mt-status" aria-label="Filter by state"></select>
-      <select id="mt-site" aria-label="Filter by site"></select>
+      <span class="p-filter">
+        <button type="button" id="mf-btn" aria-haspopup="true" aria-expanded="false">Filter</button>
+        <div class="filter-pop" id="mf-pop" hidden>
+          <div class="fp-title">Filter Machines</div>
+          <div id="mf-groups"></div>
+          <div class="fp-foot">
+            <button type="button" class="btn-plain" id="mf-clear">Clear all</button>
+            <button type="button" class="btn btn-primary" id="mf-apply">Show all</button>
+          </div>
+        </div>
+      </span>
       <span class="mt-gap"></span>
       <button type="button" onclick="setAllZones(true)">Expand all</button>
       <button type="button" onclick="setAllZones(false)">Collapse all</button>
@@ -170,7 +179,7 @@
       ];
 
       return '<div class="istats">' + cards.map(function (c) {
-        var on = FLT.state === c.key;
+        var on = c.key === "all" ? fGroupEmpty(FLT.f.state) : stateOnly(c.key);
         return '<button type="button" class="istat tone-' + c.tone + (on ? " on" : "") +
                  '" data-fleet="' + esc(c.key) + '" aria-pressed="' + (on ? "true" : "false") + '">' +
                  '<span class="istat-ic">' + UI.icon(c.icon) + "</span>" +
@@ -440,17 +449,59 @@
     var MOVE = { can: false, projects: [] };
     // toolbar + fleet-card filters. state is shared: pressing a card and
     // choosing from the Status dropdown drive the same value.
-    var FLT = { state: "all", q: "", site: "all" };
+    // Filter panel state (owner request 2026-08-04 — the Projects pattern
+    // with machine parameters). One object per group; keys are the ticked
+    // values. Empty group = no constraint; OR within, AND across.
+    var FLT = { q: "",
+                f: { state: {}, site: {}, type: {}, service: {}, issues: {} } };
 
-    function machineMatches(m) {
-      if (FLT.state !== "all" && fleetStateOf(m) !== FLT.state) return false;
-      if (FLT.site !== "all" && (m.current_site || "Unassigned") !== FLT.site) return false;
+    function fGroupEmpty(g) { for (var k in g) if (g[k]) return false; return true; }
+
+    // service condition, same thresholds as the Service column
+    function serviceStateOf(m) {
+      if (!m.service_interval_hours || m.next_service_due_hours === null ||
+          m.next_service_due_hours === undefined) return "no_data";
+      if (m.current_hour_meter === null || m.current_hour_meter === undefined) return "no_data";
+      var rem = m.next_service_due_hours - m.current_hour_meter;
+      if (rem <= 0) return "overdue";
+      if (rem < 100) return "due_soon";
+      return "ok";
+    }
+
+    // `skip` ignores one group so its own options can count honestly
+    function passes(m, skip) {
+      var f = FLT.f;
+      if (skip !== "state" && !fGroupEmpty(f.state) && !f.state[fleetStateOf(m)]) return false;
+      if (skip !== "site" && !fGroupEmpty(f.site) && !f.site[m.current_site || "Unassigned"]) return false;
+      if (skip !== "type" && !fGroupEmpty(f.type) && !f.type[m.machine_type || "other"]) return false;
+      if (skip !== "service" && !fGroupEmpty(f.service) && !f.service[serviceStateOf(m)]) return false;
+      if (skip !== "issues" && !fGroupEmpty(f.issues) &&
+          !f.issues[(m.open_issues || 0) > 0 ? "open" : "none"]) return false;
       if (FLT.q) {
         var hay = [m.machine_code, m.machine_type, m.brand, m.model, m.registration_no]
           .join(" ").toLowerCase();
         if (hay.indexOf(FLT.q) === -1) return false;
       }
       return true;
+    }
+
+    function optionHas(g, v, m) {
+      if (g === "state")   return fleetStateOf(m) === v;
+      if (g === "site")    return (m.current_site || "Unassigned") === v;
+      if (g === "type")    return (m.machine_type || "other") === v;
+      if (g === "service") return serviceStateOf(m) === v;
+      if (g === "issues")  return ((m.open_issues || 0) > 0 ? "open" : "none") === v;
+      return false;
+    }
+
+    function machineMatches(m) { return passes(m, null); }
+
+    // the fleet cards stay an EXCLUSIVE state shortcut: "on" means the
+    // state group holds exactly that one tick
+    function stateOnly(key) {
+      var f = FLT.f.state, seen = null;
+      for (var k in f) if (f[k]) { if (seen) return false; seen = k; }
+      return seen === key;
     }
     // 0044 operations data: 30d utilization + tagged productivity per machine,
     // machine move history (transfer_log), machines by id for the edit form
@@ -1298,22 +1349,80 @@
           }
         });
 
-        // ---- toolbar: options built once from the loaded data ----
-        var statusSel = document.getElementById("mt-status");
-        statusSel.innerHTML = ['<option value="all">Status: All</option>']
-          .concat(FLEET_STATES.map(function (s) {
-            return '<option value="' + esc(s[0]) + '">' + escHtml(s[0]) + "</option>";
-          })).join("");
+        // ---- the Filter panel (Projects pattern, machine parameters) ----
+        function distinctVals(fn) {
+          var seen = {}, out = [];
+          machines.forEach(function (m) {
+            var v = fn(m);
+            if (v && !seen[v]) { seen[v] = true; out.push(v); }
+          });
+          return out.sort();
+        }
 
-        var siteKeys = {};
-        machines.forEach(function (m) { siteKeys[m.current_site || "Unassigned"] = true; });
-        document.getElementById("mt-site").innerHTML =
-          ['<option value="all">All sites / projects</option>']
-            .concat(Object.keys(siteKeys).sort().map(function (k) {
-              var name = DIR_BY_CODE[k] && DIR_BY_CODE[k].project_name;
-              return '<option value="' + esc(k) + '">' +
-                     escHtml(k + (name ? " — " + name : "")) + "</option>";
-            })).join("");
+        function fpOption(group, value, label) {
+          return '<label class="fp-opt"><input type="checkbox" data-group="' + group +
+                 '" data-value="' + esc(value) + '"' +
+                 (FLT.f[group][value] ? " checked" : "") + "> " + escHtml(label) +
+                 ' <span class="fp-n"></span></label>';
+        }
+
+        function fpGroup(title, opts) {
+          return opts.length
+            ? '<div class="fp-group"><div class="fp-label">' + title + "</div>" + opts.join("") + "</div>"
+            : "";
+        }
+
+        var SERVICE_OPTS = [["overdue", "Overdue"], ["due_soon", "Due Soon"],
+                            ["ok", "OK"], ["no_data", "No Data"]];
+
+        function buildFilterPop() {
+          document.getElementById("mf-groups").innerHTML =
+            fpGroup("State", FLEET_STATES.map(function (s) {
+              return fpOption("state", s[0], s[0]);
+            })) +
+            fpGroup("Site", distinctVals(function (m) { return m.current_site || "Unassigned"; })
+              .map(function (k) {
+                var name = DIR_BY_CODE[k] && DIR_BY_CODE[k].project_name;
+                return fpOption("site", k, k + (name ? " — " + name : ""));
+              })) +
+            fpGroup("Type", distinctVals(function (m) { return m.machine_type || "other"; })
+              .map(function (k) { return fpOption("type", k, UI.label(k)); })) +
+            fpGroup("Service", SERVICE_OPTS.map(function (s) {
+              return fpOption("service", s[0], s[1]);
+            })) +
+            fpGroup("Open Issues",
+              [fpOption("issues", "open", "Has Open Issues"),
+               fpOption("issues", "none", "No Open Issues")]);
+          syncFilterUI();
+        }
+
+        function activeTickCount() {
+          var n = 0, f = FLT.f;
+          for (var g in f) for (var k in f[g]) if (f[g][k]) n++;
+          return n;
+        }
+
+        // the two live read-outs, plus contextual per-option counts: each
+        // number answers "how many machines would this tick show, given the
+        // OTHER groups and the search"
+        function syncFilterUI() {
+          var ticks = activeTickCount();
+          document.getElementById("mf-btn").textContent = ticks ? "Filter (" + ticks + ")" : "Filter";
+          var n = machines.filter(machineMatches).length;
+          document.getElementById("mf-apply").textContent =
+            "Show " + n + (n === 1 ? " machine" : " machines");
+          var boxes = document.querySelectorAll("#mf-groups input[data-group]");
+          for (var i = 0; i < boxes.length; i++) {
+            var g = boxes[i].getAttribute("data-group");
+            var v = boxes[i].getAttribute("data-value");
+            var c = 0;
+            for (var j = 0; j < machines.length; j++) {
+              if (passes(machines[j], g) && optionHas(g, v, machines[j])) c++;
+            }
+            var span = boxes[i].parentNode.querySelector(".fp-n");
+            if (span) span.textContent = "(" + c + ")";
+          }
+        }
 
         var shownNow = machines;    // what Export writes out
 
@@ -1325,7 +1434,7 @@
           document.getElementById("upcoming").innerHTML = upcomingMovesZone();
           document.getElementById("sites").innerHTML =
             siteTables(shownNow, allIssuesByMachine, serviceByMachine, activityByMachine);
-          statusSel.value = FLT.state;          // keep the dropdown and cards in step
+          buildFilterPop();                     // keep the pop and the cards in step
         }
         paint();
         document.getElementById("mach-tools").hidden = false;
@@ -1335,7 +1444,8 @@
           var b = ev.target.closest("button[data-fleet]");
           if (!b) return;
           var key = b.getAttribute("data-fleet");
-          FLT.state = (FLT.state === key || key === "all") ? "all" : key;
+          if (key === "all" || stateOnly(key)) FLT.f.state = {};
+          else { FLT.f.state = {}; FLT.f.state[key] = true; }
           paint();
         });
 
@@ -1353,9 +1463,35 @@
         tools.addEventListener("input", function (ev) {
           if (ev.target.id === "mt-q") { FLT.q = ev.target.value.trim().toLowerCase(); paint(); }
         });
-        tools.addEventListener("change", function (ev) {
-          if (ev.target.id === "mt-status")    { FLT.state = ev.target.value; paint(); }
-          else if (ev.target.id === "mt-site") { FLT.site = ev.target.value; paint(); }
+        // filter pop wiring: ticks update the counts live, Show applies
+        var mfBtn = document.getElementById("mf-btn");
+        var mfPop = document.getElementById("mf-pop");
+        function closeMf() { mfPop.hidden = true; mfBtn.setAttribute("aria-expanded", "false"); }
+        mfBtn.addEventListener("click", function () {
+          mfPop.hidden = !mfPop.hidden;
+          mfBtn.setAttribute("aria-expanded", mfPop.hidden ? "false" : "true");
+        });
+        document.getElementById("mf-groups").addEventListener("change", function (ev) {
+          var cb = ev.target;
+          if (!cb.matches("input[type=checkbox][data-group]")) return;
+          FLT.f[cb.getAttribute("data-group")][cb.getAttribute("data-value")] = cb.checked;
+          syncFilterUI();
+        });
+        document.getElementById("mf-apply").addEventListener("click", function () {
+          paint();
+          closeMf();
+        });
+        document.getElementById("mf-clear").addEventListener("click", function () {
+          FLT.f = { state: {}, site: {}, type: {}, service: {}, issues: {} };
+          paint();
+        });
+        document.addEventListener("click", function (ev) {
+          if (mfPop.hidden) return;
+          if (ev.target.closest && ev.target.closest(".p-filter")) return;
+          closeMf();
+        });
+        document.addEventListener("keydown", function (ev) {
+          if (ev.key === "Escape") closeMf();
         });
 
         // CSV of exactly what is on screen — built here, no library, no upload

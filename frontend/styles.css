@@ -645,6 +645,16 @@ td.wrap { white-space: normal; max-width: 340px; }
   font-family: var(--font); font-size: 12.5px; color: var(--ink-2); cursor: pointer;
 }
 .mach-tools button:hover { background: var(--surface-solid); color: var(--ink); }
+/* the generic toolbar-button rule above must not flatten the filter pop's
+   own buttons (it outranks .btn-primary/.btn-plain on specificity) */
+.mach-tools .filter-pop button.btn-primary {
+  background: var(--charcoal); color: #fff; border: 0;
+}
+.mach-tools .filter-pop button.btn-primary:hover { background: #2c3547; color: #fff; }
+.mach-tools .filter-pop button.btn-plain {
+  background: none; border: 0; color: var(--brand); padding: 4px 6px;
+}
+.mach-tools .filter-pop button.btn-plain:hover { background: none; text-decoration: underline; }
 .mach-tools button.btn-primary {
   background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 600;
 }
