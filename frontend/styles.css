@@ -909,14 +909,17 @@ details.zone > .table-wrap { margin-top: 6px; }
    left a hole between Brand / model and Last report. min-width makes a narrow
    window scroll (.table-wrap) rather than crush the dates; below 760px
    .table-stack turns the rows into cards, so both are undone there. */
-.mach-table { table-layout: fixed; min-width: 1000px; }
-.mach-table th:nth-child(1) { width: 11%; }   /* Machine       */
-.mach-table th:nth-child(2) { width: 13%; }   /* Type          */
-.mach-table th:nth-child(3) { width: 22%; }   /* Brand / model */
-.mach-table th:nth-child(4) { width: 19%; }   /* Last report   */
-.mach-table th:nth-child(5) { width: 10%; }   /* Diesel 7d     */
-.mach-table th:nth-child(6) { width: 13%; }   /* Mobilised     */
-.mach-table th:nth-child(7) { width: 12%; }   /* Problems      */
+/* 8 columns since the designer-review Phase A (Service + On Site in,
+   Mobilised out, Problems -> Open Issues) */
+.mach-table { table-layout: fixed; min-width: 1080px; }
+.mach-table th:nth-child(1) { width: 10%; }   /* Machine       */
+.mach-table th:nth-child(2) { width: 12%; }   /* Type          */
+.mach-table th:nth-child(3) { width: 18%; }   /* Brand / Model */
+.mach-table th:nth-child(4) { width: 17%; }   /* Last Report   */
+.mach-table th:nth-child(5) { width:  8%; }   /* Diesel 7d     */
+.mach-table th:nth-child(6) { width: 14%; }   /* Service       */
+.mach-table th:nth-child(7) { width: 10%; }   /* On Site       */
+.mach-table th:nth-child(8) { width: 11%; }   /* Open Issues   */
 .zone-tools { display: flex; gap: 14px; margin: var(--sp-4) 0 0; }
 .zone-tools button {
   background: none; border: none; padding: 0;

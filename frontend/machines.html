@@ -297,24 +297,64 @@
       var cls = m.last_status === "operating" ? "approved"
               : m.last_status === "breakdown" ? "breakdown" : "gray";
       var d = daysSince(m.last_status_date);
+      // relative reads faster than a raw date (designer review, Phase A);
+      // the actual date stays one hover away
+      var rel = d === null ? "" : d <= 0 ? "Today" : d === 1 ? "Yesterday" : d + " days ago";
       var dateHtml = m.last_status_date
-        ? ' <span class="' + (d !== null && d >= 3 ? "stale-warn" : "muted") + '">' + m.last_status_date + "</span>"
+        ? ' <span class="' + (d !== null && d >= 3 ? "stale-warn" : "muted") +
+          '" title="' + esc(m.last_status_date) + '">' + rel + "</span>"
         : "";
       return UI.badge(m.last_status, "badge-" + cls) + dateHtml;
     }
 
-    // same meaning as the pile page Comment column: the machine's problem
-    // track record — every issue ever linked to it
+    // Open-issues COUNT (designer review, Phase A): "Problems: Yes" for an
+    // issue resolved weeks ago read as a live fault. The number counts only
+    // open/in-progress; the hover still tells the full track record.
     function commentCell(machineIssues) {
-      if (!machineIssues || !machineIssues.length) return '<span class="muted-line">No</span>';
-      var open = machineIssues.some(function (i) {
+      if (!machineIssues || !machineIssues.length) return '<span class="muted-line">0</span>';
+      var open = machineIssues.filter(function (i) {
         return i.status === "open" || i.status === "in_progress";
-      });
+      }).length;
       var tip = machineIssues.map(function (i) {
-        return "#" + i.issue_number + " " + (i.title || "") + " (" + i.status + ")";
+        return "#" + i.issue_number + " " + (i.title || "") + " (" + UI.label(i.status) + ")";
       }).join("\n");
-      return '<span class="badge ' + (open ? "badge-anomaly" : "badge-gray") + '" title="' + esc(tip) + '">Yes' +
-             (machineIssues.length > 1 ? " (" + machineIssues.length + ")" : "") + "</span>";
+      if (!open) {
+        return '<span class="muted-line" title="' + esc(tip) + '">0</span>' +
+               (machineIssues.length
+                 ? ' <span class="muted" title="' + esc(tip) + '">(' + machineIssues.length + " past)</span>"
+                 : "");
+      }
+      return '<span class="badge badge-anomaly" title="' + esc(tip) + '">' + open + "</span>";
+    }
+
+    // Service condition at a glance (designer review, Phase A): the remaining
+    // hours are the decision number; the raw due meter is hover detail.
+    function serviceCell(m) {
+      if (!m.service_interval_hours || m.next_service_due_hours === null ||
+          m.next_service_due_hours === undefined) return '<span class="muted-line">—</span>';
+      if (m.current_hour_meter === null || m.current_hour_meter === undefined) {
+        return '<span class="badge badge-gray" title="No hour-meter reading yet — due at ' +
+               m.next_service_due_hours + ' h">No Reading</span>';
+      }
+      var rem = m.next_service_due_hours - m.current_hour_meter;
+      var due = "Due at " + m.next_service_due_hours + " h · meter " + m.current_hour_meter + " h";
+      if (rem <= 0) {
+        return '<span class="badge badge-critical" title="' + esc(due) + '">Overdue ' +
+               Math.abs(rem) + " h</span>";
+      }
+      if (rem < 100) {
+        return '<span class="badge badge-medium" title="' + esc(due) + '">Due Soon · ' + rem + " h</span>";
+      }
+      return '<span title="' + esc(due) + '">' + rem + " h left</span>";
+    }
+
+    // days at the current site; the mobilised date stays on hover
+    function onSiteCell(m) {
+      if (!m.mobilised_date) return '<span class="muted-line">—</span>';
+      var d = daysSince(m.mobilised_date);
+      return '<span title="Mobilised ' + esc(m.mobilised_date) + '">' +
+             (d === null ? escHtml(m.mobilised_date) : d <= 0 ? "Today" : d === 1 ? "1 day" : d + " days") +
+             "</span>";
     }
 
     // ================= RECORD CARD (element 4) =================
@@ -777,7 +817,7 @@
           '</div><div class="mc-form" id="mcf-' + m.machine_id + '"></div>'
         : "";
 
-      return '<tr class="pile-card-row" hidden><td colspan="7"><div class="pile-card">' +
+      return '<tr class="pile-card-row" hidden><td colspan="8"><div class="pile-card">' +
              head + ops +
              '<div class="pc-grid"><div><h3>Servicing history</h3>' + serviceListHtml(services) + "</div>" +
              '<div class="pc-side">' + where + tracking + usage + "</div></div>" +
@@ -790,10 +830,11 @@
     var THEAD =
       "<thead><tr>" +
       "<th>Machine</th><th>Type</th><th>Brand / Model</th>" +
-      '<th title="Latest daily report: state and date (amber date = 3+ days old)">Last Report</th>' +
+      '<th title="Latest daily report: state, and how long ago (real date on hover)">Last Report</th>' +
       '<th class="num" title="Diesel consumed, last 7 days (L)">Diesel 7d</th>' +
-      '<th title="On this site since (from the transfer group)">Mobilised</th>' +
-      '<th title="Has any problem been recorded against this machine? Hover a Yes for the list.">Problems</th>' +
+      '<th title="Hours left until the next routine service (due meter on hover)">Service</th>' +
+      '<th title="Days at this site (mobilised date on hover)">On Site</th>' +
+      '<th class="num" title="Issues currently OPEN against this machine — hover for the full track record, resolved included">Open Issues</th>' +
       "</tr></thead>";
 
     function siteTables(machines, allIssuesByMachine, serviceByMachine, activityByMachine) {
@@ -828,8 +869,9 @@
             UI.td("Brand / model", escHtml([m.brand, m.model].filter(Boolean).join(" ")), "wrap") +
             UI.td("Last report", lastReportCell(m)) +
             UI.td("Diesel 7d", (m.last_status ? String(Math.round(m.diesel_last_7_days || 0)) : "—"), "num") +
-            UI.td("Mobilised", m.mobilised_date || "—") +
-            UI.td("Problems", commentCell(allIssuesByMachine[m.machine_code])) +
+            UI.td("Service", serviceCell(m)) +
+            UI.td("On Site", onSiteCell(m)) +
+            UI.td("Open Issues", commentCell(allIssuesByMachine[m.machine_code]), "num") +
           "</tr>" +
           machineCard(m, serviceByMachine[m.machine_code], activityByMachine[m.machine_code],
                       allIssuesByMachine[m.machine_code]);
