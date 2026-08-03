@@ -25,7 +25,7 @@
          JUNIOR than yourself; you may only hand out profiles BELOW your own
          rank (the reference call marks each profile assignable for you). -->
     <div class="page-eyebrow">Administration</div>
-    <h1>User accounts</h1>
+    <h1>User Accounts</h1>
     <p class="page-caption">Who can sign in to this dashboard, and what each
       person is allowed to see and do.
       <a href="roles.html" class="section-link">What each access profile allows &rarr;</a></p>
@@ -35,7 +35,7 @@
     <div class="mp-controls" id="ua-tabs">
       <span>Show:
         <button type="button" data-tab="all" class="active">All</button>
-        <button type="button" data-tab="setup">To set up</button>
+        <button type="button" data-tab="setup">To Set Up</button>
         <button type="button" data-tab="suspended">Suspended</button>
       </span>
       <span id="ua-profile-filter"></span>
@@ -141,7 +141,7 @@
     }
 
     function departmentOptions(selectedId) {
-      return '<option value="">— none —</option>' +
+      return '<option value="">— None —</option>' +
         ((UA.ref && UA.ref.departments) || []).map(function (d) {
           return '<option value="' + d.department_id + '"' +
                  (d.department_id === selectedId ? " selected" : "") + ">" +
@@ -156,7 +156,7 @@
         var g = d.group_name || "Other";
         (groups[g] = groups[g] || []).push(d);
       });
-      var html = '<option value="">— none —</option>';
+      var html = '<option value="">— None —</option>';
       Object.keys(groups).forEach(function (g) {
         html += '<optgroup label="' + esc(g) + '">' +
           groups[g].map(function (d) {
@@ -180,7 +180,7 @@
     function staffOptions(selectedId) {
       var linked = {};
       UA.rows.forEach(function (r) { if (r.staff_id) linked[r.staff_id] = r.user_id; });
-      var html = '<option value="">— not linked —</option>';
+      var html = '<option value="">— Not Linked —</option>';
       UA.staffPool
         .filter(function (s) { return !linked[s.staff_id] || s.staff_id === selectedId; })
         .forEach(function (s) {
@@ -208,15 +208,15 @@
     // "Set up a login": console-created login -> active account in one step
     function setupForm(login) {
       return '<div class="claim-form" data-form="1">' +
-        "<strong>Set up " + escHtml(login.email) + "</strong>" +
-        '<label>full name <input type="text" id="su-name" size="24"></label>' +
-        '<label>company <select id="su-company">' + companyOptions(null) + "</select></label>" +
-        '<label>access profile <select id="su-profile"><option value="">choose…</option>' +
+        "<strong>Set Up " + escHtml(login.email) + "</strong>" +
+        '<label>Full Name <input type="text" id="su-name" size="24"></label>' +
+        '<label>Company <select id="su-company">' + companyOptions(null) + "</select></label>" +
+        '<label>Access Profile <select id="su-profile"><option value="">choose…</option>' +
           profileOptions(null) + "</select></label>" +
-        '<label>department <select id="su-dept">' + departmentOptions(null) + "</select></label>" +
-        '<label>job title <select id="su-desig">' + designationOptions(null) + "</select></label>" +
-        '<label>staff record <select id="su-staff">' + staffOptions(null) + "</select></label>" +
-        '<button type="button" data-action="setup-save" data-login="' + login.user_id + '">Set up login</button>' +
+        '<label>Department <select id="su-dept">' + departmentOptions(null) + "</select></label>" +
+        '<label>Job Title <select id="su-desig">' + designationOptions(null) + "</select></label>" +
+        '<label>Staff Record <select id="su-staff">' + staffOptions(null) + "</select></label>" +
+        '<button type="button" data-action="setup-save" data-login="' + login.user_id + '">Set Up Login</button>' +
         '<button type="button" data-action="form-cancel">Cancel</button>' +
         '<span class="muted-line">the account switches on immediately — they can sign in once this is saved</span>' +
         "</div>";
@@ -226,13 +226,13 @@
     // select + permission editor, each behind its own stricter permission)
     function editForm(r) {
       return '<div class="claim-form" data-form="1">' +
-        "<strong>Edit details — " + escHtml(r.full_name) + "</strong>" +
-        '<label>full name <input type="text" id="ed-name" size="24" value="' + esc(r.full_name) + '"></label>' +
-        '<label>company <select id="ed-company">' + companyOptions(r.company_id) + "</select></label>" +
-        '<label>department <select id="ed-dept">' + departmentOptions(r.department_id) + "</select></label>" +
-        '<label>job title <select id="ed-desig">' + designationOptions(r.designation_id) + "</select></label>" +
-        '<label>staff record <select id="ed-staff">' + staffOptions(r.staff_id) + "</select></label>" +
-        '<button type="button" data-action="edit-save" data-user="' + r.user_id + '">Save changes</button>' +
+        "<strong>Edit Details — " + escHtml(r.full_name) + "</strong>" +
+        '<label>Full Name <input type="text" id="ed-name" size="24" value="' + esc(r.full_name) + '"></label>' +
+        '<label>Company <select id="ed-company">' + companyOptions(r.company_id) + "</select></label>" +
+        '<label>Department <select id="ed-dept">' + departmentOptions(r.department_id) + "</select></label>" +
+        '<label>Job Title <select id="ed-desig">' + designationOptions(r.designation_id) + "</select></label>" +
+        '<label>Staff Record <select id="ed-staff">' + staffOptions(r.staff_id) + "</select></label>" +
+        '<button type="button" data-action="edit-save" data-user="' + r.user_id + '">Save Changes</button>' +
         '<button type="button" data-action="form-cancel">Cancel</button>' +
         "</div>";
     }
@@ -246,7 +246,7 @@
         : "for people who have left — the login stops working until reactivated";
       return '<div class="claim-form" data-form="1">' +
         "<strong>" + word + " — " + escHtml(r.full_name) + "</strong>" +
-        '<label>reason <input type="text" id="st-reason" size="30" placeholder="required"></label>' +
+        '<label>Reason <input type="text" id="st-reason" size="30" placeholder="Required"></label>' +
         '<button type="button" data-action="status-save" data-user="' + r.user_id +
           '" data-status="' + (kind === "suspend" ? "suspended" : "disabled") + '">' + word + "</button>" +
         '<button type="button" data-action="form-cancel">Cancel</button>' +
@@ -331,14 +331,14 @@
 
     function siteAddForm(r) {
       return '<div class="claim-form" data-form="1">' +
-        "<strong>Assign a site — " + escHtml(r.full_name) + "</strong>" +
-        '<label>site <select id="sa-site"><option value="">choose…</option>' + siteOptions() + "</select></label>" +
-        '<label>role <select id="sa-role">' +
+        "<strong>Assign a Site — " + escHtml(r.full_name) + "</strong>" +
+        '<label>Site <select id="sa-site"><option value="">choose…</option>' + siteOptions() + "</select></label>" +
+        '<label>Role <select id="sa-role">' +
           '<option value="member">Member</option>' +
           '<option value="supervisor">Supervisor</option>' +
-          '<option value="project_manager">Project manager</option>' +
+          '<option value="project_manager">Project Manager</option>' +
         "</select></label>" +
-        '<label>until <input type="date" id="sa-until" title="optional end date"></label>' +
+        '<label>Until <input type="date" id="sa-until" title="optional end date"></label>' +
         '<button type="button" data-action="site-save" data-user="' + r.user_id + '">Assign</button>' +
         '<button type="button" data-action="form-cancel">Cancel</button>' +
         "</div>";
@@ -374,7 +374,7 @@
 
       // identity edits: allowed on yourself (name/department are not power)
       if (UA.canEdit && (self || touchable))
-        btns.push('<button type="button" data-action="edit-open" data-user="' + r.user_id + '">Edit details…</button>');
+        btns.push('<button type="button" data-action="edit-open" data-user="' + r.user_id + '">Edit Details…</button>');
 
       if (UA.canEdit && touchable) {
         if (r.status === "active") {
@@ -569,8 +569,8 @@
       if (!rows.length) return UI.empty("No accounts match.");
 
       var html = '<div class="table-wrap"><table class="table-stack table-sticky-first">' +
-        "<thead><tr><th>Name</th><th>Email</th><th>Job title</th><th>Access profile</th>" +
-        "<th>Sites</th><th>Status</th><th>Last seen</th></tr></thead><tbody>";
+        "<thead><tr><th>Name</th><th>Email</th><th>Job Title</th><th>Access Profile</th>" +
+        "<th>Sites</th><th>Status</th><th>Last Seen</th></tr></thead><tbody>";
 
       rows.forEach(function (r) {
         var profCell = escHtml(r.access_profile_name || "—");
