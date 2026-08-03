@@ -1,23 +1,26 @@
 /* =============================================================================
-   HF Dashboard — SHARED SHELL (top bar + login guard + page access tiers)
+   HF Dashboard — SHARED SHELL (left rail + login guard + page access gates)
    =============================================================================
    Every page (except login.html) includes this AFTER the engine and has:
-     <header id="nav"></header>   <- the bar is injected here
+     <header id="nav"></header>   <- the rail + top bar are injected here
      <main id="main"> ... </main> <- replaced with a notice if access is denied
 
    What gets injected:
-     .topbar  — brand, the primary links (burger menu on phones), user menu
+     .rail    — fixed left column: brand, the primary links, sign out
+     .topbar  — to the rail's right: burger (phones), global site search,
+                account menu
      .ctxbar  — ONLY on project-scoped pages (project/piles/claims):
                 "Projects › [project switcher]  Hub | Piles | Claims"
 
-   PAGE ACCESS TIERS (by staff.designation, via Dash.getMyProfile()):
-     - Pages NOT listed in PAGE_ACCESS are visible to every signed-in account.
-     - Pages listed are visible ONLY to the named designations.
-     - An account not linked to a staff record gets the unlisted pages only,
-       plus a visible "not linked" notice.
+   PAGE ACCESS (permissions, via Dash.getMyAccess() / Dash.can()):
+     - PAGE_ACCESS maps every page to the permission that opens it.
+     - DEFAULT-CLOSED: a page not listed is refused for everyone.
+     - Before migration 0062 (legacy mode) the old designation rule is
+       reproduced exactly, so shipping this frontend ahead of the database
+       work changes nothing anyone can see.
    NOTE: for view-only pages this is a convenience layer — the real lock is in
    the database (grants + RLS). Write actions get their own database-side
-   designation checks.
+   permission checks.
 
    This file deliberately does NOT use window.UI — attendance.html (owned by
    the attendance collaborator, never edited here) loads shell without ui.js.
@@ -25,19 +28,49 @@
 (function () {
   "use strict";
 
+  // Rail icons: hand-drawn 24x24 strokes. shell.js must stay dependency-free
+  // (attendance.html loads it WITHOUT ui.js), so they live here, not in UI.
+  var ICONS = {
+    overview:   '<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/>' +
+                '<rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>',
+    projects:   '<path d="M3.5 6.5A1.5 1.5 0 0 1 5 5h4l2 2.4h8a1.5 1.5 0 0 1 1.5 1.5v9A1.5 1.5 0 0 1 19 19.5H5A1.5 1.5 0 0 1 3.5 18z"/>',
+    issues:     '<path d="M12 4.6 20.6 19.5H3.4z"/><path d="M12 10v4.2"/><path d="M12 17.2v.4"/>',
+    machines:   '<rect x="2.6" y="12.6" width="10" height="6" rx="1.5"/><path d="M12.6 15.2h3.6l3-5.6"/>' +
+                '<path d="M19.2 9.6h2.2"/><circle cx="6" cy="20.4" r="1.4"/><circle cx="15.6" cy="20.4" r="1.4"/>',
+    manpower:   '<circle cx="9" cy="7.4" r="3"/><path d="M3.5 20c0-3 2.5-5.5 5.5-5.5s5.5 2.5 5.5 5.5"/>' +
+                '<circle cx="17.2" cy="9" r="2.2"/><path d="M17.2 13.4c2.3 0 4.2 1.9 4.2 4.2"/>',
+    attendance: '<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 9.5h17"/>' +
+                '<path d="M8 3.5v3M16 3.5v3"/><path d="M8.8 14.6l2 2 3.6-3.8"/>',
+    tests:      '<path d="M9.5 3.5v6.2L4.7 18a1.6 1.6 0 0 0 1.4 2.5h11.8a1.6 1.6 0 0 0 1.4-2.5l-4.8-8.3V3.5"/>' +
+                '<path d="M8.6 3.5h6.8"/><path d="M7.6 14.5h8.8"/>',
+    // a core sample with its strata lines — the bore log itself
+    borelogs:   '<rect x="7" y="3.5" width="10" height="17" rx="2"/>' +
+                '<path d="M7 8.5h10M7 12.5h10M7 16.5h10"/>',
+    // an ID card — accounts and what each one may do
+    users:      '<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10.5" r="2.2"/>' +
+                '<path d="M5.8 16.5c0-1.8 1.4-3.2 3.2-3.2s3.2 1.4 3.2 3.2"/><path d="M14.5 9.5h4M14.5 13h4"/>',
+    signout:    '<path d="M14.5 8V5.5A1.5 1.5 0 0 0 13 4H5.5A1.5 1.5 0 0 0 4 5.5v13A1.5 1.5 0 0 0 5.5 20H13a1.5 1.5 0 0 0 1.5-1.5V16"/>' +
+                '<path d="M9.5 12h11"/><path d="M17.5 8.8 20.7 12l-3.2 3.2"/>',
+    search:     '<circle cx="11" cy="11" r="6.5"/><path d="M15.8 15.8 20.5 20.5"/>'
+  };
+  function icon(name) {
+    return '<svg class="ric" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" ' +
+           'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + ICONS[name] + "</svg>";
+  }
+
   var NAV_LINKS = [
-    { href: "index.html",      label: "Overview"   },
-    { href: "projects.html",   label: "Projects"   },
-    { href: "issues.html",     label: "Issues"     },
-    { href: "machines.html",   label: "Machines"   },
-    { href: "manpower.html",   label: "Manpower"   },
-    { href: "attendance.html", label: "Attendance" },
+    { href: "index.html",      label: "Overview",   icon: "overview"   },
+    { href: "projects.html",   label: "Projects",   icon: "projects"   },
+    { href: "issues.html",     label: "Issues",     icon: "issues"     },
+    { href: "machines.html",   label: "Machines",   icon: "machines"   },
+    { href: "manpower.html",   label: "Manpower",   icon: "manpower"   },
+    { href: "attendance.html", label: "Attendance", icon: "attendance" },
     // leave.html stays in PAGE_ACCESS but is out of the nav until the page
     // is actually built (owner decision — leave UI deferred)
-    { href: "tests.html",      label: "Tests"      },
-    { href: "bore-logs.html",  label: "Bore logs"  },
+    { href: "tests.html",      label: "Tests",      icon: "tests"      },
+    { href: "bore-logs.html",  label: "Bore Logs",  icon: "borelogs"   },
     // only appears for logins holding users.view (the allowed() filter below)
-    { href: "users.html",      label: "Users"      }
+    { href: "users.html",      label: "Users",      icon: "users"      }
   ];
 
   // page -> the permission needed to open it.
@@ -195,6 +228,73 @@
     }).catch(function () { /* keep the plain breadcrumb */ });
   }
 
+  /* ---- global search ----
+     Scope is deliberately SITES: it reuses the project directory the context
+     switcher already fetches, so it costs one cached call and works on every
+     page. Searching issues/machines/workers would mean new engine calls on
+     every page load, so those stay on their own pages for now. */
+
+  var _dir = null;                                  // cached directory rows
+
+  function hideSearch() {
+    var pop = document.getElementById("gsearch-pop");
+    if (pop) { pop.hidden = true; pop.innerHTML = ""; }
+  }
+
+  function searchRows(q) {
+    q = q.trim().toLowerCase();
+    if (!q || !_dir) return [];
+    return _dir.filter(function (r) {
+      return (String(r.project_code || "") + " " + String(r.project_name || "") + " " +
+              String(r.client_name || "")).toLowerCase().indexOf(q) !== -1;
+    }).slice(0, 8);
+  }
+
+  function initSearch() {
+    var input = document.getElementById("gsearch-input");
+    var pop = document.getElementById("gsearch-pop");
+    if (!input || !pop || typeof Dash.getProjectDirectory !== "function") return;
+
+    function paint() {
+      var rows = searchRows(input.value);
+      if (!input.value.trim()) { hideSearch(); return; }
+      pop.hidden = false;
+      pop.innerHTML = rows.length
+        ? rows.map(function (r, i) {
+            var sub = (r.project_name || "") + (r.status && r.status !== "active"
+              ? " · " + String(r.status).replace(/_/g, " ") : "");
+            return '<a class="gs-row' + (i === 0 ? " gs-first" : "") +
+                   '" href="project.html?project=' + encodeURIComponent(r.project_id) + '">' +
+                   '<b>' + escText(r.project_code || "?") + "</b>" +
+                   "<span>" + escText(sub) + "</span></a>";
+          }).join("")
+        : '<div class="gs-none">No site matches that.</div>';
+    }
+
+    // load the directory once, on first use — not on every page load
+    function ensureDir(then) {
+      if (_dir) { then(); return; }
+      Dash.getProjectDirectory().then(function (rows) {
+        _dir = rows || [];
+        then();
+      }).catch(function () {
+        _dir = [];
+        pop.hidden = false;
+        pop.innerHTML = '<div class="gs-none">Could not load the site list.</div>';
+      });
+    }
+
+    input.addEventListener("input", function () { ensureDir(paint); });
+    input.addEventListener("focus", function () { ensureDir(paint); });
+    input.addEventListener("keydown", function (ev) {
+      if (ev.key === "Escape") { input.blur(); hideSearch(); return; }
+      if (ev.key === "Enter") {
+        var first = pop.querySelector(".gs-first");
+        if (first) { ev.preventDefault(); window.location.href = first.getAttribute("href"); }
+      }
+    });
+  }
+
   /* ---- boot ---- */
 
   async function boot() {
@@ -243,7 +343,8 @@
         .filter(function (l) { return allowed(l.href, acc); })
         .map(function (l) {
           var active = (l.href === page || PROJECT_PAGES[page] !== undefined && l.href === "projects.html");
-          return '<a href="' + l.href + '"' + (active ? ' class="active"' : "") + ">" + l.label + "</a>";
+          return '<a href="' + l.href + '"' + (active ? ' class="active"' : "") + ">" +
+                 icon(l.icon) + "<span>" + l.label + "</span></a>";
         })
         .join("");
 
@@ -257,58 +358,87 @@
         : "";
       if (profileName && profileName !== desig) desig = desig ? desig + " · " + profileName : profileName;
 
+      // The rail is a fixed left column; the top bar sits to its right and
+      // carries search + account. body.has-rail turns on the grid in
+      // styles.css — login.html has no #nav, so it keeps the plain layout.
+      document.body.classList.add("has-rail");
+
       nav.innerHTML =
-        '<div class="topbar">' +
-          '<button class="nav-burger" type="button" aria-label="Menu" aria-expanded="false">' +
-            "<span></span><span></span><span></span>" +
-          "</button>" +
-          '<a class="brand" href="index.html">HF Dashboard</a>' +
-          '<nav class="nav-links">' + links +
-            '<div class="nav-user-mobile">' +
-              '<div class="nav-who">' + escText(fullName) +
-                '<span class="nav-desig">' + escText(desig) + "</span></div>" +
-              '<button type="button" class="btn-plain signout-btn">Sign out</button>' +
+        '<aside class="rail">' +
+          '<a class="rail-brand" href="index.html">' +
+            '<span class="rail-logo">HF</span><span class="rail-word">Nexus</span>' +
+          "</a>" +
+          '<div class="rail-label">Menu</div>' +
+          '<nav class="rail-links">' + links + "</nav>" +
+          '<div class="rail-foot">' +
+            '<div class="rail-label">General</div>' +
+            '<button type="button" class="rail-link signout-btn">' +
+              icon("signout") + "<span>Sign Out</span></button>" +
+          "</div>" +
+        "</aside>" +
+        '<div class="topwrap">' +
+          '<div class="topbar">' +
+            '<button class="nav-burger" type="button" aria-label="Menu" aria-expanded="false">' +
+              "<span></span><span></span><span></span>" +
+            "</button>" +
+            '<div class="gsearch">' +
+              icon("search") +
+              '<input id="gsearch-input" type="search" autocomplete="off" ' +
+                     'placeholder="Search sites by code, name or client…" aria-label="Search sites">' +
+              '<div class="gsearch-pop" id="gsearch-pop" hidden></div>' +
             "</div>" +
-          "</nav>" +
-          '<details class="user-menu">' +
-            '<summary title="' + escText(fullName) + '" aria-label="Account menu">' +
-              escText(initialsOf(profile, user)) + "</summary>" +
-            '<div class="user-pop">' +
-              '<div class="user-name">' + escText(fullName) + "</div>" +
-              '<div class="user-desig">' + escText(desig) + "</div>" +
-              '<button type="button" class="btn-plain signout-btn">Sign out</button>' +
-            "</div>" +
-          "</details>" +
+            '<details class="user-menu">' +
+              '<summary title="' + escText(fullName) + '" aria-label="Account menu">' +
+                '<span class="avatar">' + escText(initialsOf(profile, user)) + "</span>" +
+                '<span class="who"><b>' + escText(fullName) + "</b>" +
+                  "<i>" + escText(desig) + "</i></span>" +
+              "</summary>" +
+              '<div class="user-pop">' +
+                '<div class="user-name">' + escText(fullName) + "</div>" +
+                '<div class="user-desig">' + escText(desig) + "</div>" +
+                '<button type="button" class="btn-plain signout-btn">Sign Out</button>' +
+              "</div>" +
+            "</details>" +
+          "</div>" +
+          (PROJECT_PAGES[page] !== undefined ? buildCtxBar(page, acc) : "") +
         "</div>" +
-        (PROJECT_PAGES[page] !== undefined ? buildCtxBar(page, acc) : "") +
         // Only ever shown when the server actually said "no account for you" —
         // never because a request failed. See the error branch above.
         (profile ? "" :
-          '<div class="banner banner-amber">This login is not set up yet — ' +
+          '<div class="banner banner-amber rail-banner">This login is not set up yet — ' +
           "ask the office to finish setting up your account. You will not see " +
           "any company information until they do.</div>");
 
-      // sign out (one button in the phone menu, one in the user menu)
+      // sign out (one in the rail, one in the account menu)
       var outs = nav.querySelectorAll(".signout-btn");
       for (var i = 0; i < outs.length; i++) {
         outs[i].addEventListener("click", function () { Dash.signOut(); });
       }
 
-      // burger toggles the phone menu
+      // burger slides the rail in on phones
       var burger = nav.querySelector(".nav-burger");
       if (burger) {
         burger.addEventListener("click", function () {
-          var open = nav.classList.toggle("nav-open");
+          var open = document.body.classList.toggle("rail-open");
           burger.setAttribute("aria-expanded", open ? "true" : "false");
         });
       }
 
-      // click elsewhere closes the user menu
+      // click elsewhere closes the account menu, the search results and the
+      // phone rail
       document.addEventListener("click", function (ev) {
         var menu = nav.querySelector("details.user-menu[open]");
         if (menu && !menu.contains(ev.target)) menu.removeAttribute("open");
+        var box = nav.querySelector(".gsearch");
+        if (box && !box.contains(ev.target)) hideSearch();
+        var rail = nav.querySelector(".rail");
+        if (document.body.classList.contains("rail-open") &&
+            rail && !rail.contains(ev.target) && !ev.target.closest(".nav-burger")) {
+          document.body.classList.remove("rail-open");
+        }
       });
 
+      initSearch();
       if (PROJECT_PAGES[page] !== undefined) fillCtxSwitcher(page);
     }
 

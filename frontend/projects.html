@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>HF Dashboard — Projects</title>
+  <title>Nexus — Projects</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -12,17 +12,23 @@
 
   <main id="main">
     <h1>Projects</h1>
-    <p class="page-caption">
-      Every project, any status — search by name or click a card to open its hub.
-      <strong>Work vs time</strong> compares % of piles done against % of contract
-      time used; "behind" means time is running out faster than piles are going in.
-    </p>
 
     <div class="filter-wrap">
       <input id="p-search" class="filter-box" type="search"
              placeholder="Search code, name or client…" autocomplete="off" />
+      <span class="p-filter">
+        <button type="button" class="btn" id="p-filter-btn"
+                aria-haspopup="true" aria-expanded="false">Filter</button>
+        <div class="filter-pop" id="p-filter-pop" hidden>
+          <div class="fp-title">Filter Projects</div>
+          <div id="p-filter-groups"></div>
+          <div class="fp-foot">
+            <button type="button" class="btn-plain" id="p-filter-clear">Clear all</button>
+            <button type="button" class="btn btn-primary" id="p-filter-apply">Show all</button>
+          </div>
+        </div>
+      </span>
     </div>
-    <div class="mp-controls" id="p-chips"></div>
 
     <div id="cards" class="pcards"></div>
     <div id="empty"></div>
@@ -39,7 +45,39 @@
     // Project DIRECTORY: the master list is v_project_directory (every project,
     // both business lines); BP progress metrics (v_project_pulse) join on top
     // where they exist. Cards open the project hub.
-    var DIR = { rows: [], progById: {}, qtyById: {}, status: "active", q: "" };
+    // f = the filter panel's state. One object per group; keys are the checked
+    // values. An EMPTY group means "no constraint". Within a group options
+    // combine with OR, across groups with AND (the standard filter contract).
+    var DIR = { rows: [], progById: {}, qtyById: {}, dailyBy: {}, q: "",
+                f: { status: { active: true }, health: {}, client: {}, state: {}, line: {} } };
+
+    // The state is a stored fact now: projects.state, exposed through
+    // v_project_directory (backfilled 2026-08-03). The prefix decoder below is
+    // only the FALLBACK for a row that somehow lacks one — after the PAH/PHG
+    // incident, no lookup table gets to overrule the database.
+    var STATE_NAME = {
+      PLS: "Perlis", KDH: "Kedah", PNG: "Penang", PPG: "Penang", PRK: "Perak",
+      SGR: "Selangor", KUL: "Kuala Lumpur", PJY: "Putrajaya",
+      NSN: "Negeri Sembilan", MLK: "Melaka", JHR: "Johor",
+      PAH: "Pahang", PHG: "Pahang",
+      TRG: "Terengganu", KLT: "Kelantan", KTN: "Kelantan",
+      SBH: "Sabah", SWK: "Sarawak"
+    };
+    function stateOf(r) {
+      if (r.state) return r.state;
+      var m = String(r.project_code || "").toUpperCase().match(/^HF-([A-Z]{3})/);
+      return (m && STATE_NAME[m[1]]) || "Other";
+    }
+    function labelStatus(s) {
+      s = String(s || "");
+      return s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, " ");
+    }
+    // the card's schedule verdict, normalised for filtering ("" -> null)
+    function healthOf(r) {
+      var l = workVsTimeLabel(DIR.progById[r.project_id]);
+      if (!l) return null;
+      return l === "OVERDUE" ? "Overdue" : l;
+    }
 
     // quantities line numbers (0053 rollup): null -> 0 (nothing cast yet)
     function fmtQ(v, dp) {
@@ -73,25 +111,56 @@
       var label, cls;
       if (remaining < 0)      { label = "OVERDUE";    cls = "badge-critical"; }
       else if (diff >= 10)    { label = "Ahead";      cls = "badge-approved"; }
-      else if (diff >= -10)   { label = "On track";   cls = "badge-gray"; }
+      else if (diff >= -10)   { label = "On Track";   cls = "badge-gray"; }
       else if (diff >= -25)   { label = "Behind";     cls = "badge-medium"; }
-      else                    { label = "Far behind"; cls = "badge-critical"; }
+      else                    { label = "Far Behind"; cls = "badge-critical"; }
 
-      return '<span class="badge ' + cls + '" title="work ' + Math.round(workPct) +
+      return '<span class="badge ' + cls + '" title="Work ' + Math.round(workPct) +
              "% done · " + timePct + '% of contract time used">' + label + "</span>";
     }
 
-    function matches(r) {
-      if (DIR.status === "active" && r.status !== "active") return false;
-      if (DIR.status === "completed" && r.status !== "completed") return false;
-      if (DIR.status === "others" && (r.status === "active" || r.status === "completed")) return false;
+    function groupEmpty(g) { for (var k in g) if (g[k]) return false; return true; }
+
+    // The one filter predicate. `skip` names a group to IGNORE — that is how
+    // the per-option counts stay honest: an option's number answers "how many
+    // projects would this tick show, GIVEN the other groups", so its own
+    // group's selection must not count against it (within a group it's OR).
+    function passes(r, skip) {
+      var f = DIR.f, prog = DIR.progById[r.project_id];
+      if (skip !== "status" && !groupEmpty(f.status) && !f.status[r.status]) return false;
+      if (skip !== "health" && !groupEmpty(f.health) && !f.health[healthOf(r)]) return false;
+      if (skip !== "client" && !groupEmpty(f.client)) {
+        var c = prog && prog.client_name ? prog.client_name : null;
+        if (!c || !f.client[c]) return false;
+      }
+      if (skip !== "state" && !groupEmpty(f.state) && !f.state[stateOf(r)]) return false;
+      if (skip !== "line" && !groupEmpty(f.line)) {
+        var ok = (f.line.bored && r.has_bored_scope) || (f.line.sheet && r.has_sheet_scope);
+        if (!ok) return false;
+      }
       if (DIR.q) {
-        var prog = DIR.progById[r.project_id];
         var hay = ((r.project_code || "") + " " + (r.project_name || "") + " " +
                    (prog && prog.client_name ? prog.client_name : "")).toLowerCase();
         if (hay.indexOf(DIR.q) === -1) return false;
       }
       return true;
+    }
+
+    // does row r carry value v in group g? (the counting side of the filter)
+    function optionHas(g, v, r) {
+      if (g === "status") return r.status === v;
+      if (g === "health") return healthOf(r) === v;
+      if (g === "client") {
+        var p = DIR.progById[r.project_id];
+        return !!p && p.client_name === v;
+      }
+      if (g === "state")  return stateOf(r) === v;
+      if (g === "line")   return v === "bored" ? !!r.has_bored_scope : !!r.has_sheet_scope;
+      return false;
+    }
+
+    function matches(r) {
+      return passes(r, null);
     }
 
     function scopeChips(r) {
@@ -101,102 +170,237 @@
       return out.join(" ");
     }
 
-    function cardHtml(r) {
-      var prog = DIR.progById[r.project_id];
-      var head = '<div class="pcard-head"><strong>' + UI.escHtml(r.project_code || "?") +
-                 "</strong> — " + UI.escHtml(r.project_name || "") + "</div>";
-      var statusLine = '<div class="pcard-line">' + statusBadge(r.status) + " " + scopeChips(r) +
-                       (prog ? " " + workVsTime(prog) : "") + "</div>";
-      var client = prog && prog.client_name
-        ? '<div class="pcard-line muted-line">' + UI.escHtml(prog.client_name) + "</div>" : "";
-
-      var body = "";
-      var chips = [];
-      if (prog) {
-        var pct = Math.max(0, Math.min(100, Number(prog.progress_pct) || 0));
-        var total = prog.total_piles_planned || prog.total_piles_registered || 0;
-        body = '<div class="pcard-line"><span class="bar" style="flex:1"><span style="width:' +
-               pct + '%"></span></span><span>' + pct + "%</span></div>" +
-               '<div class="pcard-line muted-line">' + (prog.piles_completed || 0) + " of " +
-               total + " piles cast</div>";
-
-        // design-vs-consumed quantities (0053) — "in the ground / design total"
-        var qty = DIR.qtyById[r.project_id];
-        if (qty && (qty.design_concrete_m3 !== null || qty.design_steel_t !== null)) {
-          var qbits = [];
-          if (qty.design_concrete_m3 !== null)
-            qbits.push("concrete " + fmtQ(qty.committed_concrete_m3, 0) + " / " +
-                       fmtQ(qty.design_concrete_m3, 0) + " m³");
-          if (qty.design_steel_t !== null)
-            qbits.push("steel " + fmtQ(qty.committed_steel_t, 1) + " / " +
-                       fmtQ(qty.design_steel_t, 1) + " t");
-          if (qty.piles_with_steel < qty.piles_registered)
-            qbits.push('<span class="stale-warn">steel spec partial</span>');
-          body += '<div class="pcard-line muted-line" title="in the ground (cast piles at ' +
-                  'design quantities) / design total — full breakdown on the project hub">' +
-                  qbits.join(" · ") + "</div>";
-        }
-
-        if (prog.total_tests_required > 0)
-          chips.push('<span class="chip">Tests ' + (prog.tests_completed || 0) + "/" +
-                     prog.total_tests_required + "</span>");
-        var dl = prog.days_remaining;
-        if (dl !== null && dl !== undefined && r.status === "active") {
-          chips.push(dl < 0
-            ? '<span class="chip chip-bad">' + Math.abs(dl) + " days OVER target</span>"
-            : '<span class="chip">' + dl + " days left</span>");
-        }
-        if (prog.start_date)
-          chips.push('<span class="chip">' + UI.dstr(prog.start_date) + " → " +
-                     UI.dstr(prog.target_end_date) + "</span>");
-      } else {
-        body = '<div class="pcard-line muted-line">Hai Fu sheet piling — tracked outside the ' +
-               "bored-piling dashboard.</div>";
-      }
-
-      var inner = head + statusLine + client + body +
-                  (chips.length ? '<div class="pcard-chips">' + chips.join(" ") + "</div>" : "");
-
-      // only BP projects have a hub page to open
-      if (prog) {
-        return '<a class="pcard" href="project.html?project=' + r.project_id + '">' + inner + "</a>";
-      }
-      return '<div class="pcard" style="cursor:default">' + inner + "</div>";
+    // Card accent: green when the schedule verdict is fine, amber/red when it
+    // slips. The verdict is also written on the badge, so nothing rests on
+    // colour alone.
+    function toneOf(prog) {
+      if (!prog) return "neutral";
+      var l = String(workVsTimeLabel(prog));
+      if (l === "OVERDUE" || l === "Far Behind") return "bad";
+      if (l === "Behind") return "warn";
+      return "ok";
     }
 
-    function chipBtn(key, label, count) {
-      return '<button type="button" data-status="' + key + '"' +
-             (DIR.status === key ? ' class="active"' : "") + ">" +
-             label + " (" + count + ")</button>";
+    function workVsTimeLabel(p) {
+      if (!p) return "";                 // SP-only sites have no pulse row
+      var el = p.days_elapsed, rem = p.days_remaining;
+      if (p.project_status === "completed" || Number(p.progress_pct) >= 100) return "Complete";
+      if (el === null || el === undefined || rem === null || rem === undefined) return "";
+      var total = el + Math.max(rem, 0);
+      if (total <= 0) return "";
+      var timePct = rem < 0 ? 100 : Math.min(100, Math.round(el / total * 100));
+      var diff = (Number(p.progress_pct) || 0) - timePct;
+      if (rem < 0) return "OVERDUE";
+      if (diff >= 10) return "Ahead";
+      if (diff >= -10) return "On Track";
+      if (diff >= -25) return "Behind";
+      return "Far Behind";
+    }
+
+    /* One card per project — same component as the Overview site cards
+       (.site-card in styles.css), fed with project-directory facts:
+       status + business-line chips, pile progress, 14-day cast trend, then
+       tests / concrete / steel as footer chips.
+       The mockup showed concrete+steel twice (a text line AND chips); kept
+       only the chips, since repeating the same numbers earns nothing. */
+    function cardHtml(r) {
+      var prog = DIR.progById[r.project_id];
+      var qty = DIR.qtyById[r.project_id];
+      var tone = toneOf(prog);
+
+      var head =
+        '<div class="sc-top">' +
+          '<span class="sc-icon">' + UI.icon("site") + "</span>" +
+          '<span class="sc-title">' +
+            '<span class="sc-code">' + UI.escHtml(r.project_code || "?") + "</span>" +
+            '<span class="sc-name">' + UI.escHtml(r.project_name || "") + "</span>" +
+          "</span>" +
+          (prog ? '<span class="sc-go" aria-hidden="true">&rsaquo;</span>' : "") +
+        "</div>" +
+        '<div class="sc-rule"></div>';
+
+      var status =
+        '<div class="sc-status">' + statusBadge(r.status) + scopeChips(r) +
+          (prog ? workVsTime(prog) : "") +
+          (prog && prog.client_name
+            ? '<span class="sc-client">' + UI.escHtml(prog.client_name) + "</span>" : "") +
+        "</div>";
+
+      if (!prog) {
+        // sheet-piling projects have no BP metrics and no hub page to open
+        return '<div class="pcard site-card tone-neutral tier-normal">' + head + status +
+                 '<div class="sc-activity">Hai Fu sheet piling — tracked outside the ' +
+                 "bored-piling dashboard.</div>" +
+               "</div>";
+      }
+
+      var pct = Math.max(0, Math.min(100, Math.round(Number(prog.progress_pct) || 0)));
+      var total = prog.total_piles_planned || prog.total_piles_registered || 0;
+
+      var mid =
+        '<div class="sc-mid">' + UI.donut(pct) +
+          '<div class="sc-mid-body">' +
+            '<div class="sc-barline">' +
+              '<span class="sc-bar"><span style="width:' + pct + '%"></span></span>' +
+              '<span class="sc-num"><b>' + pct + "%</b></span>" +
+            "</div>" +
+            '<div class="sc-fact">' + UI.icon("pile") +
+              (prog.piles_completed || 0) + " of " + total + " piles cast</div>" +
+          "</div>" +
+        "</div>";
+
+      var chips = [];
+      if (prog.total_tests_required > 0)
+        chips.push('<span class="sc-chip">' + UI.icon("tests") + "Tests " +
+                   (prog.tests_completed || 0) + "/" + prog.total_tests_required + "</span>");
+      // VERIFIED vs design — owner decision 2026-08-03. The numerator is only
+      // what confirmed bore logs measured (actual concrete, as-built cage
+      // weight); no design-based "committed" estimate dressed up as usage.
+      // Progress stays the bot's casting counts; materials stay measurements.
+      var verNote = qty ? "Verified from confirmed bore logs (" +
+                    (qty.bore_logs_confirmed || 0) + " of " + (qty.piles_cast || 0) +
+                    " cast piles) / design total" : "";
+      if (qty && qty.design_concrete_m3 !== null && qty.design_concrete_m3 !== undefined)
+        chips.push('<span class="sc-chip" title="' + verNote + '">' +
+                   UI.icon("concrete") + "Concrete " +
+                   fmtQ(qty.actual_concrete_m3, 0) + "/" + fmtQ(qty.design_concrete_m3, 0) + " m³</span>");
+      if (qty && qty.design_steel_t !== null && qty.design_steel_t !== undefined)
+        chips.push('<span class="sc-chip' +
+                   (qty.piles_with_steel < qty.piles_registered ? " tone-warn" : "") +
+                   '" title="' + (qty.piles_with_steel < qty.piles_registered
+                     ? "Steel spec is only captured on some piles" : verNote) + '">' +
+                   UI.icon("steel") + "Steel " + fmtQ(qty.asbuilt_steel_t, 1) + "/" +
+                   fmtQ(qty.design_steel_t, 1) + " t</span>");
+      var dl = prog.days_remaining;
+      if (dl !== null && dl !== undefined && r.status === "active")
+        chips.push('<span class="sc-chip' + (dl < 0 ? " tone-bad" : "") + '">' +
+                   (dl < 0 ? Math.abs(dl) + " days over" : dl + " days left") + "</span>");
+      // The contract window. The redesign dropped this chip; restored on the
+      // owner's decision — "days left" tells you the countdown, this tells
+      // you the actual dates it counts against.
+      if (prog.start_date)
+        chips.push('<span class="sc-chip" title="Contract start → target completion">' +
+                   UI.icon("clock") + UI.dstr(prog.start_date) +
+                   (prog.target_end_date ? " → " + UI.dstr(prog.target_end_date) : "") + "</span>");
+
+      return '<a class="pcard site-card tone-' + tone + ' tier-normal" ' +
+                'href="project.html?project=' + UI.esc(r.project_id) + '">' +
+               head + status + mid +
+               UI.sparkline(DIR.dailyBy[r.project_id], "piles_cast",
+                            "No daily reports in the last 14 days") +
+               (chips.length ? '<div class="sc-chips">' + chips.join("") + "</div>" : "") +
+             "</a>";
+    }
+
+    /* ---- the filter panel (owner design 2026-08-03) ----------------------
+       One Filter button opening a popover of checkbox groups — Status,
+       Schedule health, Client, Location, Work type — combined AND across
+       groups, OR within. The apply button always says how many projects the
+       current ticks would show, so nobody applies blind. */
+
+    function distinct(fn) {
+      var seen = {}, out = [];
+      DIR.rows.forEach(function (r) {
+        var v = fn(r);
+        if (v && !seen[v]) { seen[v] = true; out.push(v); }
+      });
+      return out.sort();
+    }
+
+    function fpOption(group, value, label) {
+      return '<label class="fp-opt"><input type="checkbox" data-group="' + group +
+             '" data-value="' + UI.esc(value) + '"' +
+             (DIR.f[group][value] ? " checked" : "") + "> " + UI.escHtml(label) +
+             ' <span class="fp-n"></span></label>';
+    }
+
+    function fpGroup(title, opts) {
+      return opts.length
+        ? '<div class="fp-group"><div class="fp-label">' + title + "</div>" + opts.join("") + "</div>"
+        : "";
+    }
+
+    var HEALTH_ORDER = ["Ahead", "On Track", "Behind", "Far Behind", "Overdue"];
+
+    // the full country, alphabetical — 13 states plus the two federal
+    // territories our project codes use (KUL, PJY)
+    var ALL_STATES = ["Johor", "Kedah", "Kelantan", "Kuala Lumpur", "Melaka",
+                      "Negeri Sembilan", "Pahang", "Penang", "Perak", "Perlis",
+                      "Putrajaya", "Sabah", "Sarawak", "Selangor", "Terengganu"];
+
+    function buildFilterPop() {
+      var healthSeen = {};
+      DIR.rows.forEach(function (r) { var h = healthOf(r); if (h) healthSeen[h] = true; });
+      document.getElementById("p-filter-groups").innerHTML =
+        fpGroup("Status", distinct(function (r) { return r.status; })
+          .map(function (s) { return fpOption("status", s, labelStatus(s)); })) +
+        fpGroup("Schedule Health", HEALTH_ORDER.filter(function (h) { return healthSeen[h]; })
+          .map(function (h) { return fpOption("health", h, h); })) +
+        fpGroup("Client", distinct(function (r) {
+            var p = DIR.progById[r.project_id];
+            return p && p.client_name ? p.client_name : null;
+          }).map(function (c) { return fpOption("client", c, c); })) +
+        fpGroup("Location", (function () {
+          // every state, not just the ones with projects (owner request) —
+          // the live counts make the empty ones self-explanatory
+          var states = ALL_STATES.slice();
+          if (DIR.rows.some(function (r) { return stateOf(r) === "Other"; }))
+            states.push("Other");
+          return states.map(function (s) { return fpOption("state", s, s); });
+        })()) +
+        fpGroup("Work Type",
+          [fpOption("line", "bored", "Bored Piling (HF BP)"),
+           fpOption("line", "sheet", "Sheet Piling (Hai Fu)")]);
+      syncFilterUI();
+    }
+
+    function activeTickCount() {
+      var n = 0, f = DIR.f;
+      for (var g in f) for (var k in f[g]) if (f[g][k]) n++;
+      return n;
+    }
+
+    // the two live read-outs: "Filter (n)" on the button, "Show N projects"
+    // on the apply button
+    function syncFilterUI() {
+      var ticks = activeTickCount();
+      document.getElementById("p-filter-btn").textContent =
+        ticks ? "Filter (" + ticks + ")" : "Filter";
+      var n = DIR.rows.filter(matches).length;
+      document.getElementById("p-filter-apply").textContent =
+        "Show " + n + (n === 1 ? " project" : " projects");
+
+      // per-option counts, contextual: each number = how many projects that
+      // tick would show given the OTHER groups' selections and the search
+      var boxes = document.querySelectorAll("#p-filter-groups input[data-group]");
+      for (var i = 0; i < boxes.length; i++) {
+        var g = boxes[i].getAttribute("data-group");
+        var v = boxes[i].getAttribute("data-value");
+        var c = 0;
+        for (var j = 0; j < DIR.rows.length; j++) {
+          if (passes(DIR.rows[j], g) && optionHas(g, v, DIR.rows[j])) c++;
+        }
+        var span = boxes[i].parentNode.querySelector(".fp-n");
+        if (span) span.textContent = "(" + c + ")";
+      }
     }
 
     function render() {
-      var counts = { all: DIR.rows.length, active: 0, completed: 0, others: 0 };
-      DIR.rows.forEach(function (r) {
-        if (r.status === "active") counts.active++;
-        else if (r.status === "completed") counts.completed++;
-        else counts.others++;
-      });
-      document.getElementById("p-chips").innerHTML =
-        "<span>Show:</span>" +
-        chipBtn("active", "Active", counts.active) +
-        chipBtn("completed", "Completed", counts.completed) +
-        chipBtn("others", "Others", counts.others) +
-        chipBtn("all", "All", counts.all);
-
       var list = DIR.rows.filter(matches);
       document.getElementById("cards").innerHTML = list.map(cardHtml).join("");
       document.getElementById("empty").innerHTML = list.length ? "" :
-        UI.empty("No projects match.",
-                 DIR.q ? "Try a shorter search, or switch the status filter." :
-                         "Switch the status filter above.");
+        UI.empty("No projects match.", "Adjust the filter or shorten the search.");
+      syncFilterUI();
     }
 
     window.onShellReady = async function () {
       document.getElementById("cards").innerHTML = UI.empty("Loading…");
       try {
-        var res = await Promise.all([Dash.getProjectDirectory(), Dash.getProjects(),
-                                     Dash.getProjectQuantities()]);
+        var res = await Promise.all([
+          Dash.getProjectDirectory(), Dash.getProjects(), Dash.getProjectQuantities(),
+          // feeds each card's 14-day trend; losing it costs sparklines, not the page
+          Dash.getProjectDailyOutput().catch(function () { return []; })
+        ]);
         DIR.rows = res[0].slice().sort(function (a, b) {
           var aa = a.status === "active" ? 0 : 1, bb = b.status === "active" ? 0 : 1;
           if (aa !== bb) return aa - bb;
@@ -204,14 +408,52 @@
         });
         res[1].forEach(function (p) { DIR.progById[p.project_id] = p; });
         res[2].forEach(function (q) { DIR.qtyById[q.project_id] = q; });
-        if (!DIR.rows.some(function (r) { return r.status === "active"; })) DIR.status = "all";
+
+        // last 14 days per project, oldest first (the view returns newest first)
+        (res[3] || []).forEach(function (d) {
+          (DIR.dailyBy[d.project_id] = DIR.dailyBy[d.project_id] || []).push(d);
+        });
+        Object.keys(DIR.dailyBy).forEach(function (k) {
+          DIR.dailyBy[k] = DIR.dailyBy[k]
+            .sort(function (a, b) { return a.log_date < b.log_date ? -1 : 1; })
+            .slice(-14);
+        });
+        // default tick = Active; if nothing is active, start unfiltered
+        if (!DIR.rows.some(function (r) { return r.status === "active"; })) DIR.f.status = {};
+        buildFilterPop();
         render();
 
-        document.getElementById("p-chips").addEventListener("click", function (ev) {
-          var b = ev.target.closest("button[data-status]");
-          if (!b) return;
-          DIR.status = b.getAttribute("data-status");
+        // ---- filter popover wiring ----
+        var fpBtn = document.getElementById("p-filter-btn");
+        var fpPop = document.getElementById("p-filter-pop");
+        function closeFp() { fpPop.hidden = true; fpBtn.setAttribute("aria-expanded", "false"); }
+        fpBtn.addEventListener("click", function () {
+          fpPop.hidden = !fpPop.hidden;
+          fpBtn.setAttribute("aria-expanded", fpPop.hidden ? "false" : "true");
+        });
+        // ticking updates the counts live; the cards repaint on Show
+        document.getElementById("p-filter-groups").addEventListener("change", function (ev) {
+          var cb = ev.target;
+          if (!cb.matches("input[type=checkbox][data-group]")) return;
+          DIR.f[cb.getAttribute("data-group")][cb.getAttribute("data-value")] = cb.checked;
+          syncFilterUI();
+        });
+        document.getElementById("p-filter-apply").addEventListener("click", function () {
           render();
+          closeFp();
+        });
+        document.getElementById("p-filter-clear").addEventListener("click", function () {
+          DIR.f = { status: {}, health: {}, client: {}, state: {}, line: {} };
+          buildFilterPop();
+          render();
+        });
+        document.addEventListener("click", function (ev) {
+          if (fpPop.hidden) return;
+          if (ev.target.closest && ev.target.closest(".p-filter")) return;
+          closeFp();
+        });
+        document.addEventListener("keydown", function (ev) {
+          if (ev.key === "Escape") closeFp();
         });
         document.getElementById("p-search").addEventListener("input", function () {
           DIR.q = this.value.trim().toLowerCase();

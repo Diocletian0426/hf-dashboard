@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>HF Dashboard — Access profiles</title>
+  <title>Nexus — Access Profiles</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -20,7 +20,7 @@
          buttons. Assigning a profile to a PERSON is done on the Users page.
          Gated users.view like users.html (database-enforced on every read). -->
     <div class="page-eyebrow">Administration</div>
-    <h1>Access profiles</h1>
+    <h1>Access Profiles</h1>
     <p class="page-caption">What each profile allows. Profiles are assigned to
       people on the <a href="users.html" class="section-link">Users page</a>;
       the profiles themselves are changed by the system owner, not from here.</p>
@@ -84,9 +84,9 @@
     function profileCard(p) {
       var meta = [];
       meta.push(p.permission_count + " permission" + (p.permission_count === 1 ? "" : "s"));
-      meta.push(p.people_count === 0 ? "nobody uses it yet"
+      meta.push(p.people_count === 0 ? "Nobody uses it yet"
         : p.people_count + (p.people_count === 1 ? " person" : " people"));
-      meta.push(p.scope_all_projects ? "sees every site" : "sees ASSIGNED sites only");
+      meta.push(p.scope_all_projects ? "Sees every site" : "Sees ASSIGNED sites only");
 
       return '<details data-profile="' + p.access_profile_id + '" class="card" style="margin-bottom:10px">' +
         "<summary><strong>" + escHtml(p.name) + "</strong>" +

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Sign in — HF Bored Piles</title>
+  <title>Sign In — Nexus</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -14,14 +14,14 @@
       <!-- ====== brand ====== -->
       <div class="auth-brand">
         <svg class="auth-mark" viewBox="0 0 38 38" role="img" aria-label="HF Bored Piles logo">
-          <rect width="38" height="38" rx="9" fill="#0f172a"></rect>
+          <rect width="38" height="38" rx="9" fill="#1f2532"></rect>
           <!-- two bored piles + a ground line: the work, not a generic glyph -->
-          <path d="M10 9v20M19 9v20M28 9v20" stroke="#2563eb" stroke-width="3" stroke-linecap="round"></path>
+          <path d="M10 9v20M19 9v20M28 9v20" stroke="#2f6fdc" stroke-width="3" stroke-linecap="round"></path>
           <path d="M6 13.5h26" stroke="#e2e8f0" stroke-width="1.5" stroke-linecap="round" opacity=".55"></path>
         </svg>
         <div class="auth-name">
-          HF Bored Piles
-          <span>Malaysia Sdn Bhd</span>
+          Nexus
+          <span>HF Bored Piles Malaysia</span>
         </div>
       </div>
 
@@ -32,18 +32,18 @@
              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M10 3 5 8l5 5"/>
         </svg>
-        Back to sign in
+        Back to Sign In
       </button>
 
-      <h1 id="auth-title">Sign in</h1>
+      <h1 id="auth-title">Sign In</h1>
       <p class="sub" id="auth-sub">
         Site progress, pile records, plant and project reporting — in one place.
       </p>
 
       <!-- ====== mode switch ====== -->
       <div class="auth-tabs" id="auth-tabs" role="tablist" aria-label="Sign in or create an account">
-        <button class="auth-tab" id="tab-in" role="tab" aria-selected="true"  type="button">Sign in</button>
-        <button class="auth-tab" id="tab-up" role="tab" aria-selected="false" type="button">Create account</button>
+        <button class="auth-tab" id="tab-in" role="tab" aria-selected="true"  type="button">Sign In</button>
+        <button class="auth-tab" id="tab-up" role="tab" aria-selected="false" type="button">Create Account</button>
       </div>
 
       <!-- ====== social sign-in (only providers actually configured) ====== -->
@@ -52,7 +52,7 @@
 
       <!-- ====== email + password ====== -->
       <form id="login-form" novalidate>
-        <label for="email">Work email</label>
+        <label for="email">Work Email</label>
         <input id="email" type="email" autocomplete="username" inputmode="email"
                autocapitalize="off" spellcheck="false" required
                aria-describedby="auth-msg" />
@@ -73,10 +73,10 @@
             <input type="checkbox" id="remember" />
             Remember my email on this device
           </label>
-          <button type="button" class="auth-link" id="forgot">Forgot password?</button>
+          <button type="button" class="auth-link" id="forgot">Forgot Password?</button>
         </div>
 
-        <button class="auth-submit" id="login-btn" type="submit">Sign in</button>
+        <button class="auth-submit" id="login-btn" type="submit">Sign In</button>
 
         <!-- one live region for every outcome: validation, failure, success -->
         <div id="auth-msg" class="auth-msg" role="status" aria-live="polite"></div>
@@ -233,11 +233,11 @@
 
     // ---- mode switching ------------------------------------------------------
     var COPY = {
-      in:    { title: "Sign in",        btn: "Sign in",
+      in:    { title: "Sign In",        btn: "Sign In",
                sub: "Site progress, pile records, plant and project reporting — in one place." },
-      up:    { title: "Create account", btn: "Create account",
+      up:    { title: "Create Account", btn: "Create Account",
                sub: "Request access. An administrator checks your details before the account is switched on." },
-      reset: { title: "Reset password", btn: "Send reset link",
+      reset: { title: "Reset Password", btn: "Send Reset Link",
                sub: "We will email you a link to set a new password." }
     };
 

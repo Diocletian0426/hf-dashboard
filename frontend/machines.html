@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>HF Dashboard — Machines</title>
+  <title>Nexus — Machines</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -19,8 +19,8 @@
          machines.status (which is 'active' for all 33 and carries no
          information):
            Operating (green) | Standby (blue, incl. legacy 'idle' wording) |
-           Breakdown (red)   | Never reported (grey)
-         Breakdown stays in the legend even at 0 — "no breakdowns" is the
+           Breakdown (red)   | Never Reported (grey)
+         Breakdown stays in the legend even at 0 — "No breakdowns" is the
          morning answer the office looks for. Colours CVD-validated.
          A muted staleness note under the legend says how fresh the picture
          is (machines silent 3+ days / never reported).
@@ -52,15 +52,19 @@
                                 read); machines with no history are skipped.
          Chips will jump to the machine's row once the by-site tables
          (element 3) exist — until then clicking is a harmless no-op. -->
-    <div id="attention"></div>
+    <!-- the two panels sit side by side: what is wrong now, and what is
+         planned next. On narrow screens they stack. -->
+    <div class="mach-panels">
+      <div id="attention"></div>
 
-    <!-- ================= UPCOMING MOVES (0048) =================
-         Every PLANNED machine move by date (movement_plans). Plans NEVER
-         apply themselves — the office presses Execute when the move really
-         happened; a plan whose date passed unexecuted shows amber here and
-         in needs-attention. Plans are created from each machine's record
-         card ("Plan move…"). Execute/Cancel = management/office only. -->
-    <div id="upcoming"></div>
+      <!-- ================= UPCOMING MOVES (0048) =================
+           Every PLANNED machine move by date (movement_plans). Plans NEVER
+           apply themselves — the office presses Execute when the move really
+           happened; a plan whose date passed unexecuted shows amber here and
+           in needs-attention. Plans are created from each machine's record
+           card ("Plan move…"). Execute/Cancel = management/office only. -->
+      <div id="upcoming"></div>
+    </div>
 
     <!-- ================= MACHINES BY SITE (element 3) =================
          One collapsible block per site (same details/summary pattern as the
@@ -77,10 +81,33 @@
          summary + full service history (0031 view), recent activity
          (last 14 days of daily reports), and the issue track record.
          Click the row again to close. -->
-    <div class="zone-tools" id="zone-tools" hidden>
+    <!-- Toolbar above the machine list. Rendered once in static HTML so the
+         listeners survive every repaint — only the control VALUES are synced
+         when a fleet card changes the state filter. -->
+    <div class="mach-tools" id="mach-tools" hidden>
+      <label class="mt-search">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+             stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.4"/>
+             <path d="M15.7 15.7 20.4 20.4"/></svg>
+        <input id="mt-q" type="search" autocomplete="off" placeholder="Search machines…"
+               aria-label="Search machines by code, type, brand or model">
+      </label>
+      <span class="p-filter">
+        <button type="button" id="mf-btn" aria-haspopup="true" aria-expanded="false">Filter</button>
+        <div class="filter-pop" id="mf-pop" hidden>
+          <div class="fp-title">Filter Machines</div>
+          <div id="mf-groups"></div>
+          <div class="fp-foot">
+            <button type="button" class="btn-plain" id="mf-clear">Clear all</button>
+            <button type="button" class="btn btn-primary" id="mf-apply">Show all</button>
+          </div>
+        </div>
+      </span>
+      <span class="mt-gap"></span>
       <button type="button" onclick="setAllZones(true)">Expand all</button>
       <button type="button" onclick="setAllZones(false)">Collapse all</button>
-      <button type="button" id="add-machine-btn" hidden>+ Add machine</button>
+      <button type="button" id="mt-export">Export</button>
+      <button type="button" id="add-machine-btn" class="btn-primary" hidden>+ Add Machine</button>
     </div>
     <div id="add-machine"></div>
     <div id="sites"></div>
@@ -96,20 +123,17 @@
   <script src="shell.js"></script>
 
   <script>
-    // last-known state per machine -> one strip category each
-    var FLEET_STATES = [
-      ["Operating",      "#0ca30c"],
-      ["Standby",        "#2a78d6"],
-      ["Breakdown",      "#d03b3b"],
-      ["Never reported", "#e5e7eb"]
-    ];
+    // last-known state per machine -> one stat card each.
+    // Colour lives on the cards' tone classes in styles.css now; the hex
+    // values that used to sit here belonged to the old segmented bar.
+    var FLEET_STATES = [["Operating"], ["Standby"], ["Breakdown"], ["Never Reported"]];
 
     function fleetStateOf(m) {
       var t = m.last_status || "";
       if (t === "operating") return "Operating";
       if (t === "standby" || t === "idle") return "Standby";
       if (t === "breakdown") return "Breakdown";
-      return "Never reported";
+      return "Never Reported";
     }
 
     // how fresh is the picture? days between the last report and today (KL)
@@ -129,6 +153,9 @@
       return '<div class="pipe-note">' + bits.join(" · ") + "</div>";
     }
 
+    /* Fleet state as stat cards — same component as the Issues page (.istat),
+       and like there each card is also the filter for that state, so the
+       number on a card always equals the machines listed underneath. */
     function fleetStrip(machines) {
       var counts = {};
       FLEET_STATES.forEach(function (s) { counts[s[0]] = 0; });
@@ -136,24 +163,32 @@
       var total = machines.length;
       if (!total) return "";
 
-      var segs = FLEET_STATES.map(function (s) {
-        var name = s[0], c = counts[name];
-        if (!c) return "";
-        var pct = Math.round(c * 100 / total);
-        return '<span class="pipe-seg" style="flex-grow:' + c + ";background:" + s[1] +
-               '" title="' + name + " — " + c + " machine" + (c === 1 ? "" : "s") + " (" + pct + '%)"></span>';
-      }).join("");
+      function pct(c) { return total ? (Math.round(c * 1000 / total) / 10) + "%" : "—"; }
 
-      var keys = FLEET_STATES.map(function (s) {
-        var name = s[0], c = counts[name];
-        return '<span class="pipe-key' + (c ? "" : " zero") + '">' +
-               '<i style="background:' + s[1] + '"></i>' +
-               name + " <b>" + c + "</b></span>";
-      }).join("");
+      var cards = [
+        { key: "all", n: total, label: "Total Machines", sub: "All sites",
+          icon: "machine", tone: "info" },
+        { key: "Operating", n: counts["Operating"], label: "Operating", sub: pct(counts["Operating"]),
+          icon: "play", tone: "ok" },
+        { key: "Standby", n: counts["Standby"], label: "Standby", sub: pct(counts["Standby"]),
+          icon: "clock", tone: "brand" },
+        { key: "Breakdown", n: counts["Breakdown"], label: "Breakdown", sub: pct(counts["Breakdown"]),
+          icon: "issue", tone: "bad" },
+        { key: "Never Reported", n: counts["Never Reported"], label: "Never Reported",
+          sub: pct(counts["Never Reported"]), icon: "question", tone: "grey" }
+      ];
 
-      return '<div class="pipe-card"><div class="pipe-bar">' + segs + "</div>" +
-             '<div class="pipe-legend"><span class="pipe-total">' + total + " machines</span>" +
-             keys + "</div>" + staleNote(machines) + "</div>";
+      return '<div class="istats">' + cards.map(function (c) {
+        var on = c.key === "all" ? fGroupEmpty(FLT.f.state) : stateOnly(c.key);
+        return '<button type="button" class="istat tone-' + c.tone + (on ? " on" : "") +
+                 '" data-fleet="' + esc(c.key) + '" aria-pressed="' + (on ? "true" : "false") + '">' +
+                 '<span class="istat-ic">' + UI.icon(c.icon) + "</span>" +
+                 '<span class="istat-body">' +
+                   '<span class="istat-top"><b>' + c.n + "</b><i>" + escHtml(c.label) + "</i></span>" +
+                   '<span class="istat-sub">' + escHtml(c.sub) + "</span>" +
+                 "</span>" +
+               "</button>";
+      }).join("") + "</div>" + staleNote(machines);
     }
 
     // ================= NEEDS ATTENTION (element 2) =================
@@ -249,10 +284,13 @@
       var body = total === 0
         ? '<div class="muted-line">&#10003; Nothing needs attention.</div>'
         : sections.join("");
-      return '<details class="zone chase-panel" open>' +
-             '<summary><span class="zone-name">Needs attention</span>' +
+      return '<details class="zone chase-panel panel-eq" open>' +
+             '<summary><span class="panel-ic tone-bad">' + UI.icon("alert") + "</span>" +
+             '<span class="zone-name">Needs Attention</span>' +
              '<span class="zone-count">' + total + " item" + (total === 1 ? "" : "s") + "</span></summary>" +
-             '<div class="chase-body">' + body + "</div></details>";
+             '<div class="chase-body">' + body + "</div>" +
+             '<div class="panel-foot"><a href="issues.html">View all issues &rarr;</a></div>' +
+             "</details>";
     }
 
     // ================= MACHINES BY SITE (element 3) =================
@@ -268,24 +306,63 @@
       var cls = m.last_status === "operating" ? "approved"
               : m.last_status === "breakdown" ? "breakdown" : "gray";
       var d = daysSince(m.last_status_date);
+      // relative reads faster than a raw date (designer review, Phase A);
+      // the actual date stays one hover away
+      var rel = d === null ? "" : d <= 0 ? "Today" : d === 1 ? "Yesterday" : d + " days ago";
       var dateHtml = m.last_status_date
-        ? ' <span class="' + (d !== null && d >= 3 ? "stale-warn" : "muted") + '">' + m.last_status_date + "</span>"
+        ? ' <span class="' + (d !== null && d >= 3 ? "stale-warn" : "muted") +
+          '" title="' + esc(m.last_status_date) + '">' + rel + "</span>"
         : "";
       return UI.badge(m.last_status, "badge-" + cls) + dateHtml;
     }
 
-    // same meaning as the pile page Comment column: the machine's problem
-    // track record — every issue ever linked to it
+    // Open-issues COUNT (designer review, Phase A): "Problems: Yes" for an
+    // issue resolved weeks ago read as a live fault. The number counts only
+    // open/in-progress; the hover still tells the full track record.
     function commentCell(machineIssues) {
-      if (!machineIssues || !machineIssues.length) return '<span class="muted-line">No</span>';
-      var open = machineIssues.some(function (i) {
+      if (!machineIssues || !machineIssues.length) return '<span class="muted-line">0</span>';
+      var open = machineIssues.filter(function (i) {
         return i.status === "open" || i.status === "in_progress";
-      });
+      }).length;
       var tip = machineIssues.map(function (i) {
-        return "#" + i.issue_number + " " + (i.title || "") + " (" + i.status + ")";
+        return "#" + i.issue_number + " " + (i.title || "") + " (" + UI.label(i.status) + ")";
       }).join("\n");
-      return '<span class="badge ' + (open ? "badge-anomaly" : "badge-gray") + '" title="' + esc(tip) + '">Yes' +
-             (machineIssues.length > 1 ? " (" + machineIssues.length + ")" : "") + "</span>";
+      if (!open) {
+        return '<span class="muted-line" title="' + esc(tip) + '">0</span>';
+      }
+      return '<span class="badge badge-anomaly" title="' + esc(tip) + '">' + open + "</span>";
+    }
+
+    // Service condition at a glance (designer review, Phase A): the remaining
+    // hours are the decision number; the raw due meter is hover detail.
+    function serviceCell(m) {
+      if (!m.service_interval_hours || m.next_service_due_hours === null ||
+          m.next_service_due_hours === undefined) return '<span class="muted-line">—</span>';
+      if (m.current_hour_meter === null || m.current_hour_meter === undefined) {
+        return '<span class="badge badge-gray" title="No hour-meter reading yet — due at ' +
+               m.next_service_due_hours + ' h">No Reading</span>';
+      }
+      // round to one decimal — floating-point subtraction prints garbage
+      // like 337.60000000000036 otherwise (owner screenshot 2026-08-04)
+      var rem = Math.round((m.next_service_due_hours - m.current_hour_meter) * 10) / 10;
+      var due = "Due at " + m.next_service_due_hours + " h · meter " + m.current_hour_meter + " h";
+      if (rem <= 0) {
+        return '<span class="badge badge-critical" title="' + esc(due) + '">Overdue ' +
+               Math.abs(rem) + " h</span>";
+      }
+      if (rem < 100) {
+        return '<span class="badge badge-medium" title="' + esc(due) + '">Due Soon · ' + rem + " h</span>";
+      }
+      return '<span title="' + esc(due) + '">' + rem + " h left</span>";
+    }
+
+    // days at the current site; the mobilised date stays on hover
+    function onSiteCell(m) {
+      if (!m.mobilised_date) return '<span class="muted-line">—</span>';
+      var d = daysSince(m.mobilised_date);
+      return '<span title="Mobilised ' + esc(m.mobilised_date) + '">' +
+             (d === null ? escHtml(m.mobilised_date) : d <= 0 ? "Today" : d === 1 ? "1 day" : d + " days") +
+             "</span>";
     }
 
     // ================= RECORD CARD (element 4) =================
@@ -370,6 +447,62 @@
     // The database re-checks the caller and logs the move (0039) — this
     // control is convenience, never the guard.
     var MOVE = { can: false, projects: [] };
+    // toolbar + fleet-card filters. state is shared: pressing a card and
+    // choosing from the Status dropdown drive the same value.
+    // Filter panel state (owner request 2026-08-04 — the Projects pattern
+    // with machine parameters). One object per group; keys are the ticked
+    // values. Empty group = no constraint; OR within, AND across.
+    var FLT = { q: "",
+                f: { state: {}, site: {}, type: {}, service: {}, issues: {} } };
+
+    function fGroupEmpty(g) { for (var k in g) if (g[k]) return false; return true; }
+
+    // service condition, same thresholds as the Service column
+    function serviceStateOf(m) {
+      if (!m.service_interval_hours || m.next_service_due_hours === null ||
+          m.next_service_due_hours === undefined) return "no_data";
+      if (m.current_hour_meter === null || m.current_hour_meter === undefined) return "no_data";
+      var rem = m.next_service_due_hours - m.current_hour_meter;
+      if (rem <= 0) return "overdue";
+      if (rem < 100) return "due_soon";
+      return "ok";
+    }
+
+    // `skip` ignores one group so its own options can count honestly
+    function passes(m, skip) {
+      var f = FLT.f;
+      if (skip !== "state" && !fGroupEmpty(f.state) && !f.state[fleetStateOf(m)]) return false;
+      if (skip !== "site" && !fGroupEmpty(f.site) && !f.site[m.current_site || "Unassigned"]) return false;
+      if (skip !== "type" && !fGroupEmpty(f.type) && !f.type[m.machine_type || "other"]) return false;
+      if (skip !== "service" && !fGroupEmpty(f.service) && !f.service[serviceStateOf(m)]) return false;
+      if (skip !== "issues" && !fGroupEmpty(f.issues) &&
+          !f.issues[(m.open_issues || 0) > 0 ? "open" : "none"]) return false;
+      if (FLT.q) {
+        var hay = [m.machine_code, m.machine_type, m.brand, m.model, m.registration_no]
+          .join(" ").toLowerCase();
+        if (hay.indexOf(FLT.q) === -1) return false;
+      }
+      return true;
+    }
+
+    function optionHas(g, v, m) {
+      if (g === "state")   return fleetStateOf(m) === v;
+      if (g === "site")    return (m.current_site || "Unassigned") === v;
+      if (g === "type")    return (m.machine_type || "other") === v;
+      if (g === "service") return serviceStateOf(m) === v;
+      if (g === "issues")  return ((m.open_issues || 0) > 0 ? "open" : "none") === v;
+      return false;
+    }
+
+    function machineMatches(m) { return passes(m, null); }
+
+    // the fleet cards stay an EXCLUSIVE state shortcut: "on" means the
+    // state group holds exactly that one tick
+    function stateOnly(key) {
+      var f = FLT.f.state, seen = null;
+      for (var k in f) if (f[k]) { if (seen) return false; seen = k; }
+      return seen === key;
+    }
     // 0044 operations data: 30d utilization + tagged productivity per machine,
     // machine move history (transfer_log), machines by id for the edit form
     var UTIL = {}, PROD = {}, MOVELOG = {}, MACHINES_BY_ID = {}, DIR_BY_CODE = {};
@@ -381,9 +514,9 @@
     // to remember, nothing to mis-parse; blank-name rows are simply skipped
     function partRowHtml() {
       return '<span class="part-row">' +
-             '<input type="text" class="part-name" size="16" placeholder="part name">' +
-             '<input type="number" class="part-qty" min="1" step="1" value="1" title="quantity">' +
-             '<button type="button" data-action="mc-part-del" title="remove this part">&times;</button>' +
+             '<input type="text" class="part-name" size="16" placeholder="Part name">' +
+             '<input type="number" class="part-qty" min="1" step="1" value="1" title="Quantity">' +
+             '<button type="button" data-action="mc-part-del" title="Remove this part">&times;</button>' +
              "</span>";
     }
     function collectParts(host) {
@@ -406,16 +539,16 @@
       }).join("");
       return '<div class="claim-form">' +
         "<strong>Edit " + escHtml(m.machine_code) + "</strong>" +
-        '<label>type <select id="me-type">' + typeOpts + "</select></label>" +
-        '<label>brand <input id="me-brand" size="10" value="' + esc(m.brand || "") + '"></label>' +
-        '<label>model <input id="me-model" size="10" value="' + esc(m.model || "") + '"></label>' +
-        '<label>reg no <input id="me-reg" size="10" value="' + esc(m.registration_no || "") + '"></label>' +
-        '<label>serial <input id="me-serial" size="12" value="' + esc(m.serial_number || "") + '"></label>' +
-        '<label>year <input id="me-year" type="number" min="1980" max="2100" value="' + (m.year_manufactured || "") + '"></label>' +
-        '<label>service interval (h) <input id="me-interval" type="number" min="0" step="50" value="' + (m.service_interval_hours || "") + '"></label>' +
-        '<label>status <select id="me-status">' + stOpts + "</select></label>" +
-        '<label>mobilised <input id="me-mobilised" type="date" value="' + esc(m.mobilised_date || "") +
-          '" title="correction only — Move stamps this itself (backdatable there too)"></label>' +
+        '<label>Type <select id="me-type">' + typeOpts + "</select></label>" +
+        '<label>Brand <input id="me-brand" size="10" value="' + esc(m.brand || "") + '"></label>' +
+        '<label>Model <input id="me-model" size="10" value="' + esc(m.model || "") + '"></label>' +
+        '<label>Reg No <input id="me-reg" size="10" value="' + esc(m.registration_no || "") + '"></label>' +
+        '<label>Serial <input id="me-serial" size="12" value="' + esc(m.serial_number || "") + '"></label>' +
+        '<label>Year <input id="me-year" type="number" min="1980" max="2100" value="' + (m.year_manufactured || "") + '"></label>' +
+        '<label>Service Interval (h) <input id="me-interval" type="number" min="0" step="50" value="' + (m.service_interval_hours || "") + '"></label>' +
+        '<label>Status <select id="me-status">' + stOpts + "</select></label>" +
+        '<label>Mobilised <input id="me-mobilised" type="date" value="' + esc(m.mobilised_date || "") +
+          '" title="Correction only — Move stamps this itself (backdatable there too)"></label>' +
         '<label class="mc-check"><input type="checkbox" id="me-clearmobilised"> clear mobilised</label>' +
         '<button type="button" data-action="mc-edit-save" data-machine-id="' + m.machine_id + '">Save</button>' +
         '<button type="button" data-action="mc-cancel" data-machine-id="' + m.machine_id + '">Cancel</button>' +
@@ -424,18 +557,18 @@
 
     function mcServiceForm(m) {
       return '<div class="claim-form">' +
-        "<strong>Log service — " + escHtml(m.machine_code) + "</strong>" +
-        '<label>date <input id="ms-date" type="date" value="' + Dash.todayKL() + '"></label>' +
-        '<label>type <select id="ms-type">' +
+        "<strong>Log Service — " + escHtml(m.machine_code) + "</strong>" +
+        '<label>Date <input id="ms-date" type="date" value="' + Dash.todayKL() + '"></label>' +
+        '<label>Type <select id="ms-type">' +
           '<option value="routine">routine</option><option value="repair">repair</option>' +
           '<option value="inspection">inspection</option><option value="other">other</option></select></label>' +
         '<label>description <input id="ms-desc" size="26"></label>' +
-        '<label>hour meter <input id="ms-hm" type="number" min="0" placeholder="optional"></label>' +
-        '<label>parts used <span id="ms-parts-rows">' + partRowHtml() + "</span>" +
+        '<label>Hour Meter <input id="ms-hm" type="number" min="0" placeholder="Optional"></label>' +
+        '<label>Parts Used <span id="ms-parts-rows">' + partRowHtml() + "</span>" +
         '<button type="button" data-action="mc-part-add" data-machine-id="' + m.machine_id + '">+ part</button></label>' +
-        '<label>cost RM <input id="ms-cost" type="number" min="0" step="0.01" placeholder="optional"></label>' +
-        '<label>vendor <input id="ms-vendor" size="12" placeholder="optional"></label>' +
-        '<label>remarks <input id="ms-remarks" size="16"></label>' +
+        '<label>Cost RM <input id="ms-cost" type="number" min="0" step="0.01" placeholder="Optional"></label>' +
+        '<label>Vendor <input id="ms-vendor" size="12" placeholder="Optional"></label>' +
+        '<label>Remarks <input id="ms-remarks" size="16"></label>' +
         '<button type="button" data-action="mc-service-save" data-machine-id="' + m.machine_id + '">Save service</button>' +
         '<button type="button" data-action="mc-cancel" data-machine-id="' + m.machine_id + '">Cancel</button>' +
         "</div>";
@@ -443,10 +576,10 @@
 
     function mcHoursForm(m) {
       return '<div class="claim-form">' +
-        "<strong>Hour meter — " + escHtml(m.machine_code) + "</strong>" +
-        '<label>reading (h) <input id="mh-hours" type="number" min="0" value="' +
+        "<strong>Hour Meter — " + escHtml(m.machine_code) + "</strong>" +
+        '<label>Reading (h) <input id="mh-hours" type="number" min="0" value="' +
           (m.current_hour_meter === null || m.current_hour_meter === undefined ? "" : m.current_hour_meter) + '"></label>' +
-        '<label>date <input id="mh-date" type="date" value="' + Dash.todayKL() + '"></label>' +
+        '<label>Date <input id="mh-date" type="date" value="' + Dash.todayKL() + '"></label>' +
         '<button type="button" data-action="mc-hours-save" data-machine-id="' + m.machine_id + '">Save reading</button>' +
         '<button type="button" data-action="mc-cancel" data-machine-id="' + m.machine_id + '">Cancel</button>' +
         '<span class="muted-line">lights the service-due tracking (interval is already set)</span>' +
@@ -468,8 +601,8 @@
       return '<div class="pc-line"><span class="move-ctl">' +
              '<select data-machine-id="' + m.machine_id + '">' + opts + "</select>" +
              '<input type="date" id="mv-date-' + m.machine_id + '" value="' + Dash.todayKL() +
-             '" title="when the move really happened — backdate for corrections (mobilised date gets THIS date)">' +
-             '<input type="text" id="mv-remarks-' + m.machine_id + '" size="10" placeholder="remarks">' +
+             '" title="When the move really happened — backdate for corrections (mobilised date gets THIS date)">' +
+             '<input type="text" id="mv-remarks-' + m.machine_id + '" size="10" placeholder="Remarks">' +
              '<button type="button" data-action="move-machine" data-machine-id="' + m.machine_id + '">Move</button>' +
              "</span></div>";
     }
@@ -481,8 +614,10 @@
     function planButtons(p) {
       if (!MOVE.can) return "";
       var label = (p.machine_code || p.full_name || "") + " → " + (p.to_project_code || "unassigned");
-      return ' <span class="move-ctl">' +
-             '<button type="button" data-action="mp-execute" data-plan-id="' + p.plan_id +
+      // Execute is the primary action (blue); Cancel stays neutral so the
+      // destructive one is never the easy one to hit by reflex
+      return '<span class="move-ctl mv-actions">' +
+             '<button type="button" class="btn-primary" data-action="mp-execute" data-plan-id="' + p.plan_id +
              '" data-label="' + esc(label) + '">Execute now</button>' +
              '<button type="button" data-action="mp-cancel" data-plan-id="' + p.plan_id +
              '" data-label="' + esc(label) + '">Cancel</button></span>';
@@ -511,7 +646,7 @@
         : "";
       if (!lines && !control) return "";
       return (lines
-        ? '<div class="pc-line" style="margin-top:4px"><strong>Planned moves</strong></div>' + lines
+        ? '<div class="pc-line" style="margin-top:4px"><strong>Planned Moves</strong></div>' + lines
         : "") + control;
     }
 
@@ -528,10 +663,10 @@
         }),
         ['<option value="unassign">— mob out / unassigned —</option>']).join("");
       return '<div class="claim-form">' +
-        "<strong>Plan move — " + escHtml(m.machine_code) + "</strong>" +
-        '<label>when <input id="mp-date-' + m.machine_id + '" type="date" value="' + Dash.todayKL() + '"></label>' +
-        '<label>to <select id="mp-dest-' + m.machine_id + '">' + opts + "</select></label>" +
-        '<label>remarks <input id="mp-remarks-' + m.machine_id + '" size="16" placeholder="optional"></label>' +
+        "<strong>Plan Move — " + escHtml(m.machine_code) + "</strong>" +
+        '<label>When <input id="mp-date-' + m.machine_id + '" type="date" value="' + Dash.todayKL() + '"></label>' +
+        '<label>To <select id="mp-dest-' + m.machine_id + '">' + opts + "</select></label>" +
+        '<label>Remarks <input id="mp-remarks-' + m.machine_id + '" size="16" placeholder="Optional"></label>' +
         '<button type="button" data-action="mp-save" data-machine-id="' + m.machine_id + '">Save plan</button>' +
         '<button type="button" data-action="mp-form-cancel" data-machine-id="' + m.machine_id + '">Cancel</button>' +
         "</div>";
@@ -577,8 +712,8 @@
     function thEditForm(machineId, transferId, date, remarks) {
       return '<div class="claim-form">' +
         "<strong>Fix history row</strong>" +
-        '<label>happened on <input id="th-date-' + machineId + '" type="date" value="' + esc(date) + '"></label>' +
-        '<label>remarks <input id="th-remarks-' + machineId + '" size="16" value="' + esc(remarks) + '"></label>' +
+        '<label>Happened On <input id="th-date-' + machineId + '" type="date" value="' + esc(date) + '"></label>' +
+        '<label>Remarks <input id="th-remarks-' + machineId + '" size="16" value="' + esc(remarks) + '"></label>' +
         '<button type="button" data-action="th-edit-save" data-transfer-id="' + transferId +
         '" data-machine-id="' + machineId + '">Save</button>' +
         '<button type="button" data-action="th-form-cancel" data-machine-id="' + machineId + '">Cancel</button>' +
@@ -596,12 +731,12 @@
       }).join("");
       return '<div class="claim-form">' +
         "<strong>Add past move — " + escHtml(m.machine_code) + "</strong>" +
-        '<label>from <select id="tha-from-' + m.machine_id + '"><option value="">— unassigned —</option>' +
+        '<label>From <select id="tha-from-' + m.machine_id + '"><option value="">— unassigned —</option>' +
           opts + "</select></label>" +
-        '<label>to <select id="tha-to-' + m.machine_id + '"><option value="">— unassigned —</option>' +
+        '<label>To <select id="tha-to-' + m.machine_id + '"><option value="">— unassigned —</option>' +
           opts + "</select></label>" +
-        '<label>happened on <input id="tha-date-' + m.machine_id + '" type="date"></label>' +
-        '<label>remarks <input id="tha-remarks-' + m.machine_id + '" size="14" placeholder="optional"></label>' +
+        '<label>Happened On <input id="tha-date-' + m.machine_id + '" type="date"></label>' +
+        '<label>Remarks <input id="tha-remarks-' + m.machine_id + '" size="14" placeholder="Optional"></label>' +
         '<button type="button" data-action="th-add-save" data-machine-id="' + m.machine_id + '">Add to history</button>' +
         '<button type="button" data-action="th-form-cancel" data-machine-id="' + m.machine_id + '">Cancel</button>' +
         '<span class="muted-line">history only — the current site is NOT changed (use Move for that)</span>' +
@@ -610,29 +745,57 @@
 
     // ================= UPCOMING MOVES (0048) =================
     // every planned machine move, earliest first; overdue rows amber
+    // the panel shows the next few; the footer link opens the rest in place
+    var MOVES_CAP = 3, MOVES_ALL = false;
+
     function upcomingMovesZone() {
       if (!MACHINE_PLANS.length) return "";
       var overdue = 0;
-      var rows = MACHINE_PLANS.map(function (p) {
+      var shown = MOVES_ALL ? MACHINE_PLANS : MACHINE_PLANS.slice(0, MOVES_CAP);
+      // count overdue across ALL plans, not just the visible slice
+      MACHINE_PLANS.forEach(function (p) {
+        var d = daysSince(p.planned_date);
+        if (d !== null && d > 0) overdue++;
+      });
+      var rows = shown.map(function (p) {
         var days = daysSince(p.planned_date);
         var late = days !== null && days > 0;
-        if (late) overdue++;
         var dest = p.to_project_code
           ? escHtml(p.to_project_code + (p.to_project_name ? " — " + p.to_project_name : ""))
           : "unassigned (mob out)";
-        return '<div class="pc-line"><strong>' + escHtml(p.machine_code || "") + "</strong>" +
-               " &rarr; " + dest +
-               ' · <span class="' + (late ? "stale-warn" : "muted") + '">planned ' + dstr(p.planned_date) +
-               (late ? " — " + days + " day" + (days === 1 ? "" : "s") + " ago" : "") + "</span>" +
-               (p.remarks ? ' <span class="muted">(' + escHtml(p.remarks) + ")</span>" : "") +
-               (p.created_by_name ? ' <span class="muted">by ' + escHtml(p.created_by_name) + "</span>" : "") +
-               planButtons(p) + "</div>";
+        // two columns: what is moving where on the left, the actions hard
+        // right — inline buttons used to break the sentence mid-line
+        return '<div class="mv-row">' +
+                 '<div class="mv-text">' +
+                   '<div class="mv-head"><strong>' + escHtml(p.machine_code || "") + "</strong>" +
+                     ' <span class="mv-arrow">&rarr;</span> ' + dest + "</div>" +
+                   '<div class="mv-sub' + (late ? " stale-warn" : "") + '">Planned ' +
+                     dstr(p.planned_date) +
+                     (late ? " — " + days + " day" + (days === 1 ? "" : "s") + " ago" : "") +
+                     (p.created_by_name ? " by " + escHtml(p.created_by_name) : "") +
+                     (p.remarks ? " · " + escHtml(p.remarks) : "") +
+                   "</div>" +
+                 "</div>" +
+                 planButtons(p) +
+               "</div>";
       }).join("");
-      return '<details class="zone" open>' +
-             '<summary><span class="zone-name">Upcoming moves</span>' +
+      // chase-panel gives it the same card as Needs Attention — without it the
+      // moves list sat as bare text beside a boxed panel
+      return '<details class="zone chase-panel panel-eq" open>' +
+             '<summary><span class="panel-ic tone-brand">' + UI.icon("machine") + "</span>" +
+             '<span class="zone-name">Upcoming Moves</span>' +
              '<span class="zone-count">' + MACHINE_PLANS.length + " planned" +
              (overdue ? " · " + overdue + " overdue" : "") + "</span></summary>" +
-             '<div class="chase-body">' + rows + "</div></details>";
+             '<div class="chase-body">' + rows + "</div>" +
+             // there is no separate moves page to link to, so the link does
+             // the only real thing available: opens the rest of the list here
+             '<div class="panel-foot">' +
+               (MACHINE_PLANS.length > MOVES_CAP
+                 ? '<a href="#" data-action="moves-toggle">' +
+                   (MOVES_ALL ? "Show fewer &larr;" : "View all " + MACHINE_PLANS.length + " moves &rarr;") +
+                   "</a>"
+                 : '<span class="muted">All planned moves shown</span>') +
+             "</div></details>";
     }
 
     function machineCard(m, services, activity, issues) {
@@ -662,11 +825,10 @@
       var tracking =
         "<div><h3>Service tracking</h3>" +
         '<div class="pc-line">Hour meter: ' + numOr(m.current_hour_meter, "h") +
-        (m.service_interval_hours ? ' <span class="muted">(interval ' + m.service_interval_hours + " h)</span>" : "") + "</div>" +
+        (m.hour_meter_date ? ' <span class="muted">· read ' + dstr(m.hour_meter_date) + "</span>" : "") + "</div>" +
         '<div class="pc-line">Next service due: ' + numOr(m.next_service_due_hours, "h") +
         (m.hour_service_overdue ? ' <span class="badge badge-critical">overdue</span>' : "") + "</div>" +
-        '<div class="pc-line">Last touched: ' + dstr(m.last_touched_date) +
-        ' <span class="muted">(any service or repair)</span></div>' +
+        '<div class="pc-line">Last touched: ' + dstr(m.last_touched_date) + "</div>" +
         (spend ? '<div class="pc-line">Recorded spend: <strong>RM ' + spend.toFixed(2) + "</strong></div>" : "") +
         "</div>";
 
@@ -678,8 +840,7 @@
         (util && Number(util.days_reported) > 0
           ? '<div class="pc-line">' + util.days_operating + " operating · " + util.days_standby +
             " standby · " + util.days_breakdown + " breakdown" +
-            (Number(util.days_maintenance) ? " · " + util.days_maintenance + " maintenance" : "") +
-            ' <span class="muted">(' + util.days_reported + " reported days)</span></div>" +
+            (Number(util.days_maintenance) ? " · " + util.days_maintenance + " maintenance" : "") + "</div>" +
             ((Number(util.hours_operated) || Number(util.fuel_l))
               ? '<div class="pc-line">' + util.hours_operated + " h operated · " +
                 Math.round(util.fuel_l) + " L diesel</div>"
@@ -704,7 +865,7 @@
           '</div><div class="mc-form" id="mcf-' + m.machine_id + '"></div>'
         : "";
 
-      return '<tr class="pile-card-row" hidden><td colspan="7"><div class="pile-card">' +
+      return '<tr class="pile-card-row" hidden><td colspan="8"><div class="pile-card">' +
              head + ops +
              '<div class="pc-grid"><div><h3>Servicing history</h3>' + serviceListHtml(services) + "</div>" +
              '<div class="pc-side">' + where + tracking + usage + "</div></div>" +
@@ -716,11 +877,12 @@
 
     var THEAD =
       "<thead><tr>" +
-      "<th>Machine</th><th>Type</th><th>Brand / model</th>" +
-      '<th title="Latest daily report: state and date (amber date = 3+ days old)">Last report</th>' +
+      "<th>Machine</th><th>Type</th><th>Brand / Model</th>" +
+      '<th title="Latest daily report: state, and how long ago (real date on hover)">Last Report</th>' +
       '<th class="num" title="Diesel consumed, last 7 days (L)">Diesel 7d</th>' +
-      '<th title="On this site since (from the transfer group)">Mobilised</th>' +
-      '<th title="Has any problem been recorded against this machine? Hover a Yes for the list.">Problems</th>' +
+      '<th title="Hours left until the next routine service (due meter on hover)">Service</th>' +
+      '<th title="Days at this site (mobilised date on hover)">On Site</th>' +
+      '<th class="num" title="Issues currently OPEN against this machine — hover for the full track record, resolved included">Open Issues</th>' +
       "</tr></thead>";
 
     function siteTables(machines, allIssuesByMachine, serviceByMachine, activityByMachine) {
@@ -755,8 +917,9 @@
             UI.td("Brand / model", escHtml([m.brand, m.model].filter(Boolean).join(" ")), "wrap") +
             UI.td("Last report", lastReportCell(m)) +
             UI.td("Diesel 7d", (m.last_status ? String(Math.round(m.diesel_last_7_days || 0)) : "—"), "num") +
-            UI.td("Mobilised", m.mobilised_date || "—") +
-            UI.td("Problems", commentCell(allIssuesByMachine[m.machine_code])) +
+            UI.td("Service", serviceCell(m)) +
+            UI.td("On Site", onSiteCell(m)) +
+            UI.td("Open Issues", commentCell(allIssuesByMachine[m.machine_code]), "num") +
           "</tr>" +
           machineCard(m, serviceByMachine[m.machine_code], activityByMachine[m.machine_code],
                       allIssuesByMachine[m.machine_code]);
@@ -771,7 +934,11 @@
         return '<details class="zone" open data-group="' + esc(k) + '">' +
                '<summary><span class="zone-name">' + title + "</span>" +
                '<span class="group-head">' + chips.join(" ") + "</span></summary>" +
-               '<div class="table-wrap zone-table table-stack"><table>' + THEAD +
+               // mach-table = one shared column ruler for every site block:
+               // each site renders its own <table>, so without it each one
+               // sized its columns from its own rows and the headings landed
+               // on a different x in every block.
+               '<div class="table-wrap zone-table table-stack"><table class="mach-table">' + THEAD +
                "<tbody>" + rows + "</tbody></table></div>" +
                "</details>";
       }).join("");
@@ -826,7 +993,7 @@
         var typeOpts = MACHINE_TYPES.map(function (t) {
           return '<option value="' + t + '">' + UI.label(t) + "</option>";
         }).join("");
-        var siteOpts = '<option value="">— unassigned —</option>' +
+        var siteOpts = '<option value="">— Unassigned —</option>' +
           MOVE.projects.filter(function (p) {
             return (p.status === "active" || p.status === "completed") &&
                    p.project_code.indexOf("TEST") !== 0;
@@ -837,13 +1004,13 @@
           }).join("");
         host.innerHTML = '<div class="claim-form">' +
           "<strong>New machine</strong>" +
-          '<label>code <input type="text" id="am-code" size="10" placeholder="e.g. BR10"></label>' +
-          '<label>type <select id="am-type">' + typeOpts + "</select></label>" +
-          '<label>brand <input type="text" id="am-brand" size="10"></label>' +
-          '<label>model <input type="text" id="am-model" size="10"></label>' +
-          '<label>registration no <input type="text" id="am-reg" size="10"></label>' +
-          '<label>site <select id="am-site">' + siteOpts + "</select></label>" +
-          '<label>service interval (h) <input type="number" id="am-interval" min="0" step="50" placeholder="optional"></label>' +
+          '<label>Code <input type="text" id="am-code" size="10" placeholder="e.g. BR10"></label>' +
+          '<label>Type <select id="am-type">' + typeOpts + "</select></label>" +
+          '<label>Brand <input type="text" id="am-brand" size="10"></label>' +
+          '<label>Model <input type="text" id="am-model" size="10"></label>' +
+          '<label>Registration No <input type="text" id="am-reg" size="10"></label>' +
+          '<label>Site <select id="am-site">' + siteOpts + "</select></label>" +
+          '<label>Service Interval (h) <input type="number" id="am-interval" min="0" step="50" placeholder="Optional"></label>' +
           '<button type="button" id="am-save">Add machine</button>' +
           '<button type="button" id="am-cancel">Cancel</button>' +
           "</div>";
@@ -994,7 +1161,7 @@
       });
     }
 
-    // movement-plan buttons live in the record cards AND the Upcoming moves
+    // movement-plan buttons live in the record cards AND the Upcoming Moves
     // panel — one delegated listener on <main> covers both. The database
     // re-checks the caller on every call; buttons are convenience only.
     function wireMovementPlans() {
@@ -1131,7 +1298,6 @@
           Dash.getMovementPlans()          // 0048: planned moves (never auto-applied)
         ]);
         var machines = results[0];
-        var profile = results[4];
         MOVE.can = Dash.can("machines.edit");
         MOVE.projects = results[5];
         MOVE.projects.forEach(function (p) { DIR_BY_CODE[p.project_code] = p; });
@@ -1183,12 +1349,171 @@
           }
         });
 
-        document.getElementById("fleet-strip").innerHTML = fleetStrip(machines);
-        document.getElementById("attention").innerHTML = needsAttention(machines, openIssuesByMachine);
-        document.getElementById("upcoming").innerHTML = upcomingMovesZone();
-        document.getElementById("sites").innerHTML =
-          siteTables(machines, allIssuesByMachine, serviceByMachine, activityByMachine);
-        document.getElementById("zone-tools").hidden = false;
+        // ---- the Filter panel (Projects pattern, machine parameters) ----
+        function distinctVals(fn) {
+          var seen = {}, out = [];
+          machines.forEach(function (m) {
+            var v = fn(m);
+            if (v && !seen[v]) { seen[v] = true; out.push(v); }
+          });
+          return out.sort();
+        }
+
+        function fpOption(group, value, label) {
+          return '<label class="fp-opt"><input type="checkbox" data-group="' + group +
+                 '" data-value="' + esc(value) + '"' +
+                 (FLT.f[group][value] ? " checked" : "") + "> " + escHtml(label) +
+                 ' <span class="fp-n"></span></label>';
+        }
+
+        function fpGroup(title, opts) {
+          return opts.length
+            ? '<div class="fp-group"><div class="fp-label">' + title + "</div>" + opts.join("") + "</div>"
+            : "";
+        }
+
+        var SERVICE_OPTS = [["overdue", "Overdue"], ["due_soon", "Due Soon"],
+                            ["ok", "OK"], ["no_data", "No Data"]];
+
+        function buildFilterPop() {
+          document.getElementById("mf-groups").innerHTML =
+            fpGroup("State", FLEET_STATES.map(function (s) {
+              return fpOption("state", s[0], s[0]);
+            })) +
+            fpGroup("Site", distinctVals(function (m) { return m.current_site || "Unassigned"; })
+              .map(function (k) {
+                var name = DIR_BY_CODE[k] && DIR_BY_CODE[k].project_name;
+                return fpOption("site", k, k + (name ? " — " + name : ""));
+              })) +
+            fpGroup("Type", distinctVals(function (m) { return m.machine_type || "other"; })
+              .map(function (k) { return fpOption("type", k, UI.label(k)); })) +
+            fpGroup("Service", SERVICE_OPTS.map(function (s) {
+              return fpOption("service", s[0], s[1]);
+            })) +
+            fpGroup("Open Issues",
+              [fpOption("issues", "open", "Has Open Issues"),
+               fpOption("issues", "none", "No Open Issues")]);
+          syncFilterUI();
+        }
+
+        function activeTickCount() {
+          var n = 0, f = FLT.f;
+          for (var g in f) for (var k in f[g]) if (f[g][k]) n++;
+          return n;
+        }
+
+        // the two live read-outs, plus contextual per-option counts: each
+        // number answers "how many machines would this tick show, given the
+        // OTHER groups and the search"
+        function syncFilterUI() {
+          var ticks = activeTickCount();
+          document.getElementById("mf-btn").textContent = ticks ? "Filter (" + ticks + ")" : "Filter";
+          var n = machines.filter(machineMatches).length;
+          document.getElementById("mf-apply").textContent =
+            "Show " + n + (n === 1 ? " machine" : " machines");
+          var boxes = document.querySelectorAll("#mf-groups input[data-group]");
+          for (var i = 0; i < boxes.length; i++) {
+            var g = boxes[i].getAttribute("data-group");
+            var v = boxes[i].getAttribute("data-value");
+            var c = 0;
+            for (var j = 0; j < machines.length; j++) {
+              if (passes(machines[j], g) && optionHas(g, v, machines[j])) c++;
+            }
+            var span = boxes[i].parentNode.querySelector(".fp-n");
+            if (span) span.textContent = "(" + c + ")";
+          }
+        }
+
+        var shownNow = machines;    // what Export writes out
+
+        // one place to repaint — the fleet cards and the toolbar both land here
+        function paint() {
+          shownNow = machines.filter(machineMatches);
+          document.getElementById("fleet-strip").innerHTML = fleetStrip(machines);
+          document.getElementById("attention").innerHTML = needsAttention(machines, openIssuesByMachine);
+          document.getElementById("upcoming").innerHTML = upcomingMovesZone();
+          document.getElementById("sites").innerHTML =
+            siteTables(shownNow, allIssuesByMachine, serviceByMachine, activityByMachine);
+          buildFilterPop();                     // keep the pop and the cards in step
+        }
+        paint();
+        document.getElementById("mach-tools").hidden = false;
+
+        // the fleet cards are the state filter
+        document.getElementById("fleet-strip").addEventListener("click", function (ev) {
+          var b = ev.target.closest("button[data-fleet]");
+          if (!b) return;
+          var key = b.getAttribute("data-fleet");
+          if (key === "all" || stateOnly(key)) FLT.f.state = {};
+          else { FLT.f.state = {}; FLT.f.state[key] = true; }
+          paint();
+        });
+
+        // "View all moves" — delegated on the static container, so it survives
+        // every repaint of the panel's innerHTML
+        document.getElementById("upcoming").addEventListener("click", function (ev) {
+          var a = ev.target.closest('a[data-action="moves-toggle"]');
+          if (!a) return;
+          ev.preventDefault();
+          MOVES_ALL = !MOVES_ALL;
+          paint();
+        });
+
+        var tools = document.getElementById("mach-tools");
+        tools.addEventListener("input", function (ev) {
+          if (ev.target.id === "mt-q") { FLT.q = ev.target.value.trim().toLowerCase(); paint(); }
+        });
+        // filter pop wiring: ticks update the counts live, Show applies
+        var mfBtn = document.getElementById("mf-btn");
+        var mfPop = document.getElementById("mf-pop");
+        function closeMf() { mfPop.hidden = true; mfBtn.setAttribute("aria-expanded", "false"); }
+        mfBtn.addEventListener("click", function () {
+          mfPop.hidden = !mfPop.hidden;
+          mfBtn.setAttribute("aria-expanded", mfPop.hidden ? "false" : "true");
+        });
+        document.getElementById("mf-groups").addEventListener("change", function (ev) {
+          var cb = ev.target;
+          if (!cb.matches("input[type=checkbox][data-group]")) return;
+          FLT.f[cb.getAttribute("data-group")][cb.getAttribute("data-value")] = cb.checked;
+          syncFilterUI();
+        });
+        document.getElementById("mf-apply").addEventListener("click", function () {
+          paint();
+          closeMf();
+        });
+        document.getElementById("mf-clear").addEventListener("click", function () {
+          FLT.f = { state: {}, site: {}, type: {}, service: {}, issues: {} };
+          paint();
+        });
+        document.addEventListener("click", function (ev) {
+          if (mfPop.hidden) return;
+          if (ev.target.closest && ev.target.closest(".p-filter")) return;
+          closeMf();
+        });
+        document.addEventListener("keydown", function (ev) {
+          if (ev.key === "Escape") closeMf();
+        });
+
+        // CSV of exactly what is on screen — built here, no library, no upload
+        document.getElementById("mt-export").addEventListener("click", function () {
+          var cols = ["machine_code", "machine_type", "brand", "model", "registration_no",
+                      "current_site", "current_site_name", "last_status", "last_status_date",
+                      "mobilised_date", "current_hour_meter"];
+          function cell(v) {
+            if (v === null || v === undefined) return "";
+            var s = String(v);
+            return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+          }
+          var csv = [cols.join(",")].concat(shownNow.map(function (m) {
+            return cols.map(function (c) { return cell(m[c]); }).join(",");
+          })).join("\r\n");
+          var url = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }));
+          var a = document.createElement("a");
+          a.href = url;
+          a.download = "hf-machines-" + Dash.todayKL() + ".csv";
+          document.body.appendChild(a); a.click(); a.remove();
+          URL.revokeObjectURL(url);
+        });
 
         // coming back from a save? restore open site blocks + scroll position
         var savedOpen = OPEN.load();

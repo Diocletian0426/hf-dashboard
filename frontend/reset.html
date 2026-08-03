@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Set a new password — HF Bored Piles</title>
+  <title>Set a New Password — Nexus</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -20,13 +20,13 @@
 
       <div class="auth-brand">
         <svg class="auth-mark" viewBox="0 0 38 38" role="img" aria-label="HF Bored Piles logo">
-          <rect width="38" height="38" rx="9" fill="#0f172a"></rect>
-          <path d="M10 9v20M19 9v20M28 9v20" stroke="#2563eb" stroke-width="3" stroke-linecap="round"></path>
+          <rect width="38" height="38" rx="9" fill="#1f2532"></rect>
+          <path d="M10 9v20M19 9v20M28 9v20" stroke="#2f6fdc" stroke-width="3" stroke-linecap="round"></path>
           <path d="M6 13.5h26" stroke="#e2e8f0" stroke-width="1.5" stroke-linecap="round" opacity=".55"></path>
         </svg>
         <div class="auth-name">
-          HF Bored Piles
-          <span>Malaysia Sdn Bhd</span>
+          Nexus
+          <span>HF Bored Piles Malaysia</span>
         </div>
       </div>
 
@@ -35,14 +35,14 @@
              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M10 3 5 8l5 5"/>
         </svg>
-        Back to sign in
+        Back to Sign In
       </button>
 
-      <h1 id="r-title">Set a new password</h1>
+      <h1 id="r-title">Set a New Password</h1>
       <p class="sub" id="r-sub">Choose a new password for <strong id="r-email">your account</strong>.</p>
 
       <form id="reset-form" novalidate>
-        <label for="pw1">New password</label>
+        <label for="pw1">New Password</label>
         <div class="auth-pw">
           <input id="pw1" type="password" autocomplete="new-password" required
                  aria-describedby="r-hint r-msg" />
@@ -53,11 +53,11 @@
           <span>Use at least 8 characters.</span>
         </div>
 
-        <label for="pw2">Confirm new password</label>
+        <label for="pw2">Confirm New Password</label>
         <input id="pw2" type="password" autocomplete="new-password" required
                aria-describedby="r-msg" />
 
-        <button class="auth-submit" id="r-btn" type="submit">Save new password</button>
+        <button class="auth-submit" id="r-btn" type="submit">Save New Password</button>
         <div id="r-msg" class="auth-msg" role="status" aria-live="polite"></div>
       </form>
 
@@ -67,7 +67,7 @@
           This reset link has expired or has already been used.
         </div>
         <p class="sub">Reset links are single-use and time-limited. Request a new one from the sign-in page.</p>
-        <button class="auth-submit" id="r-back" type="button">Back to sign in</button>
+        <button class="auth-submit" id="r-back" type="button">Back to Sign In</button>
       </div>
 
       <p class="auth-note">
@@ -122,7 +122,7 @@
     function dead(why) {
       form.hidden = true;
       $("r-dead").hidden = false;
-      $("r-title").textContent = "This link is no longer valid";
+      $("r-title").textContent = "This Link Is No Longer Valid";
       $("r-sub").hidden = true;
       // Supabase's own words when it says why (e.g. "Email link is invalid or
       // has expired"), otherwise the generic line already in the markup.
@@ -192,7 +192,7 @@
       try {
         var res = await Dash.updatePassword(pw1.value);
         if (!res.ok) {
-          busy = false; btn.disabled = false; btn.textContent = "Save new password";
+          busy = false; btn.disabled = false; btn.textContent = "Save New Password";
           show(humanError(res.message), "bad");
           return;
         }
@@ -202,7 +202,7 @@
         await Dash.signOutQuiet();
         window.location.replace("login.html?reset=1");
       } catch (err) {
-        busy = false; btn.disabled = false; btn.textContent = "Save new password";
+        busy = false; btn.disabled = false; btn.textContent = "Save New Password";
         show("Could not reach the server. Check your connection and try again.", "bad");
       }
     });
