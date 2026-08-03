@@ -433,7 +433,9 @@ h1 {
 }
 .fp-opt:hover { color: var(--ink); }
 .fp-opt input { width: 15px; height: 15px; min-height: 0; accent-color: var(--brand); }
-.fp-opt .fp-n { color: var(--ink-3); font-size: var(--fs-xs); }
+/* counts sit flush right — a clean two-column read on every row, however
+   long the label (and identical on the Projects and Machines pops) */
+.fp-opt .fp-n { color: var(--ink-3); font-size: var(--fs-xs); margin-left: auto; padding-left: 12px; }
 .fp-foot {
   display: flex; justify-content: space-between; align-items: center; gap: var(--sp-2);
   margin-top: var(--sp-3); padding-top: var(--sp-3); border-top: 1px solid var(--rule);
@@ -645,16 +647,25 @@ td.wrap { white-space: normal; max-width: 340px; }
   font-family: var(--font); font-size: 12.5px; color: var(--ink-2); cursor: pointer;
 }
 .mach-tools button:hover { background: var(--surface-solid); color: var(--ink); }
-/* the generic toolbar-button rule above must not flatten the filter pop's
-   own buttons (it outranks .btn-primary/.btn-plain on specificity) */
+/* The generic toolbar-button rule above must not flatten the filter pop's
+   own buttons (it outranks .btn-primary/.btn-plain on specificity) — these
+   re-assert the EXACT base looks so the pop renders identically to the
+   Projects page's. */
 .mach-tools .filter-pop button.btn-primary {
   background: var(--charcoal); color: #fff; border: 0;
+  padding: 6px 14px; font-size: var(--fs-sm);
 }
 .mach-tools .filter-pop button.btn-primary:hover { background: #2c3547; color: #fff; }
 .mach-tools .filter-pop button.btn-plain {
-  background: none; border: 0; color: var(--brand); padding: 4px 6px;
+  background: rgba(255, 255, 255, 0.6); color: var(--danger-ink);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill); padding: 6px 14px; font-size: var(--fs-sm);
 }
-.mach-tools .filter-pop button.btn-plain:hover { background: none; text-decoration: underline; }
+.mach-tools .filter-pop button.btn-plain:hover {
+  background: var(--danger-soft); border-color: #fecaca; color: var(--danger-ink);
+}
+/* long "CODE — Site Name" labels need the room (owner screenshot) */
+.mach-tools .filter-pop { width: min(430px, 92vw); }
 .mach-tools button.btn-primary {
   background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 600;
 }
