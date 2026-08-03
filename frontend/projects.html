@@ -39,7 +39,7 @@
     // Project DIRECTORY: the master list is v_project_directory (every project,
     // both business lines); BP progress metrics (v_project_pulse) join on top
     // where they exist. Cards open the project hub.
-    var DIR = { rows: [], progById: {}, qtyById: {}, status: "active", q: "" };
+    var DIR = { rows: [], progById: {}, qtyById: {}, dailyBy: {}, status: "active", q: "" };
 
     // quantities line numbers (0053 rollup): null -> 0 (nothing cast yet)
     function fmtQ(v, dp) {
@@ -101,67 +101,118 @@
       return out.join(" ");
     }
 
+    // Card accent: green when the schedule verdict is fine, amber/red when it
+    // slips. The verdict is also written on the badge, so nothing rests on
+    // colour alone.
+    function toneOf(prog) {
+      if (!prog) return "neutral";
+      var l = String(workVsTimeLabel(prog));
+      if (l === "OVERDUE" || l === "Far behind") return "bad";
+      if (l === "Behind") return "warn";
+      return "ok";
+    }
+
+    function workVsTimeLabel(p) {
+      var el = p.days_elapsed, rem = p.days_remaining;
+      if (p.project_status === "completed" || Number(p.progress_pct) >= 100) return "Complete";
+      if (el === null || el === undefined || rem === null || rem === undefined) return "";
+      var total = el + Math.max(rem, 0);
+      if (total <= 0) return "";
+      var timePct = rem < 0 ? 100 : Math.min(100, Math.round(el / total * 100));
+      var diff = (Number(p.progress_pct) || 0) - timePct;
+      if (rem < 0) return "OVERDUE";
+      if (diff >= 10) return "Ahead";
+      if (diff >= -10) return "On track";
+      if (diff >= -25) return "Behind";
+      return "Far behind";
+    }
+
+    /* One card per project — same component as the Overview site cards
+       (.site-card in styles.css), fed with project-directory facts:
+       status + business-line chips, pile progress, 14-day cast trend, then
+       tests / concrete / steel as footer chips.
+       The mockup showed concrete+steel twice (a text line AND chips); kept
+       only the chips, since repeating the same numbers earns nothing. */
     function cardHtml(r) {
       var prog = DIR.progById[r.project_id];
-      var head = '<div class="pcard-head"><strong>' + UI.escHtml(r.project_code || "?") +
-                 "</strong> — " + UI.escHtml(r.project_name || "") + "</div>";
-      var statusLine = '<div class="pcard-line">' + statusBadge(r.status) + " " + scopeChips(r) +
-                       (prog ? " " + workVsTime(prog) : "") + "</div>";
-      var client = prog && prog.client_name
-        ? '<div class="pcard-line muted-line">' + UI.escHtml(prog.client_name) + "</div>" : "";
+      var qty = DIR.qtyById[r.project_id];
+      var tone = toneOf(prog);
 
-      var body = "";
+      var head =
+        '<div class="sc-top">' +
+          '<span class="sc-icon">' + UI.icon("site") + "</span>" +
+          '<span class="sc-title">' +
+            '<span class="sc-code">' + UI.escHtml(r.project_code || "?") + "</span>" +
+            '<span class="sc-name">' + UI.escHtml(r.project_name || "") + "</span>" +
+          "</span>" +
+          (prog ? '<span class="sc-go" aria-hidden="true">&rsaquo;</span>' : "") +
+        "</div>" +
+        '<div class="sc-rule"></div>';
+
+      var status =
+        '<div class="sc-status">' + statusBadge(r.status) + scopeChips(r) +
+          (prog ? workVsTime(prog) : "") +
+          (prog && prog.client_name
+            ? '<span class="sc-client">' + UI.escHtml(prog.client_name) + "</span>" : "") +
+        "</div>";
+
+      if (!prog) {
+        // sheet-piling projects have no BP metrics and no hub page to open
+        return '<div class="pcard site-card tone-neutral tier-normal">' + head + status +
+                 '<div class="sc-activity">Hai Fu sheet piling — tracked outside the ' +
+                 "bored-piling dashboard.</div>" +
+               "</div>";
+      }
+
+      var pct = Math.max(0, Math.min(100, Math.round(Number(prog.progress_pct) || 0)));
+      var total = prog.total_piles_planned || prog.total_piles_registered || 0;
+
+      var mid =
+        '<div class="sc-mid">' + UI.donut(pct) +
+          '<div class="sc-mid-body">' +
+            '<div class="sc-barline">' +
+              '<span class="sc-bar"><span style="width:' + pct + '%"></span></span>' +
+              '<span class="sc-num"><b>' + pct + "%</b></span>" +
+            "</div>" +
+            '<div class="sc-fact">' + UI.icon("pile") +
+              (prog.piles_completed || 0) + " of " + total + " piles cast</div>" +
+          "</div>" +
+        "</div>";
+
       var chips = [];
-      if (prog) {
-        var pct = Math.max(0, Math.min(100, Number(prog.progress_pct) || 0));
-        var total = prog.total_piles_planned || prog.total_piles_registered || 0;
-        body = '<div class="pcard-line"><span class="bar" style="flex:1"><span style="width:' +
-               pct + '%"></span></span><span>' + pct + "%</span></div>" +
-               '<div class="pcard-line muted-line">' + (prog.piles_completed || 0) + " of " +
-               total + " piles cast</div>";
+      if (prog.total_tests_required > 0)
+        chips.push('<span class="sc-chip">' + UI.icon("tests") + "Tests " +
+                   (prog.tests_completed || 0) + "/" + prog.total_tests_required + "</span>");
+      if (qty && qty.design_concrete_m3 !== null && qty.design_concrete_m3 !== undefined)
+        chips.push('<span class="sc-chip" title="in the ground (cast piles at design ' +
+                   'quantities) / design total">' + UI.icon("concrete") + "Concrete " +
+                   fmtQ(qty.committed_concrete_m3, 0) + "/" + fmtQ(qty.design_concrete_m3, 0) + " m³</span>");
+      if (qty && qty.design_steel_t !== null && qty.design_steel_t !== undefined)
+        chips.push('<span class="sc-chip' +
+                   (qty.piles_with_steel < qty.piles_registered ? " tone-warn" : "") +
+                   '" title="' + (qty.piles_with_steel < qty.piles_registered
+                     ? "steel spec is only captured on some piles" : "cast / design total") + '">' +
+                   UI.icon("steel") + "Steel " + fmtQ(qty.committed_steel_t, 1) + "/" +
+                   fmtQ(qty.design_steel_t, 1) + " t</span>");
+      var dl = prog.days_remaining;
+      if (dl !== null && dl !== undefined && r.status === "active")
+        chips.push('<span class="sc-chip' + (dl < 0 ? " tone-bad" : "") + '">' +
+                   (dl < 0 ? Math.abs(dl) + " days over" : dl + " days left") + "</span>");
+      // The contract window. The redesign dropped this chip; restored on the
+      // owner's decision — "days left" tells you the countdown, this tells
+      // you the actual dates it counts against.
+      if (prog.start_date)
+        chips.push('<span class="sc-chip" title="Contract start → target completion">' +
+                   UI.icon("clock") + UI.dstr(prog.start_date) +
+                   (prog.target_end_date ? " → " + UI.dstr(prog.target_end_date) : "") + "</span>");
 
-        // design-vs-consumed quantities (0053) — "in the ground / design total"
-        var qty = DIR.qtyById[r.project_id];
-        if (qty && (qty.design_concrete_m3 !== null || qty.design_steel_t !== null)) {
-          var qbits = [];
-          if (qty.design_concrete_m3 !== null)
-            qbits.push("concrete " + fmtQ(qty.committed_concrete_m3, 0) + " / " +
-                       fmtQ(qty.design_concrete_m3, 0) + " m³");
-          if (qty.design_steel_t !== null)
-            qbits.push("steel " + fmtQ(qty.committed_steel_t, 1) + " / " +
-                       fmtQ(qty.design_steel_t, 1) + " t");
-          if (qty.piles_with_steel < qty.piles_registered)
-            qbits.push('<span class="stale-warn">steel spec partial</span>');
-          body += '<div class="pcard-line muted-line" title="in the ground (cast piles at ' +
-                  'design quantities) / design total — full breakdown on the project hub">' +
-                  qbits.join(" · ") + "</div>";
-        }
-
-        if (prog.total_tests_required > 0)
-          chips.push('<span class="chip">Tests ' + (prog.tests_completed || 0) + "/" +
-                     prog.total_tests_required + "</span>");
-        var dl = prog.days_remaining;
-        if (dl !== null && dl !== undefined && r.status === "active") {
-          chips.push(dl < 0
-            ? '<span class="chip chip-bad">' + Math.abs(dl) + " days OVER target</span>"
-            : '<span class="chip">' + dl + " days left</span>");
-        }
-        if (prog.start_date)
-          chips.push('<span class="chip">' + UI.dstr(prog.start_date) + " → " +
-                     UI.dstr(prog.target_end_date) + "</span>");
-      } else {
-        body = '<div class="pcard-line muted-line">Hai Fu sheet piling — tracked outside the ' +
-               "bored-piling dashboard.</div>";
-      }
-
-      var inner = head + statusLine + client + body +
-                  (chips.length ? '<div class="pcard-chips">' + chips.join(" ") + "</div>" : "");
-
-      // only BP projects have a hub page to open
-      if (prog) {
-        return '<a class="pcard" href="project.html?project=' + r.project_id + '">' + inner + "</a>";
-      }
-      return '<div class="pcard" style="cursor:default">' + inner + "</div>";
+      return '<a class="pcard site-card tone-' + tone + ' tier-normal" ' +
+                'href="project.html?project=' + UI.esc(r.project_id) + '">' +
+               head + status + mid +
+               UI.sparkline(DIR.dailyBy[r.project_id], "piles_cast",
+                            "No daily reports in the last 14 days") +
+               (chips.length ? '<div class="sc-chips">' + chips.join("") + "</div>" : "") +
+             "</a>";
     }
 
     function chipBtn(key, label, count) {
@@ -195,8 +246,11 @@
     window.onShellReady = async function () {
       document.getElementById("cards").innerHTML = UI.empty("Loading…");
       try {
-        var res = await Promise.all([Dash.getProjectDirectory(), Dash.getProjects(),
-                                     Dash.getProjectQuantities()]);
+        var res = await Promise.all([
+          Dash.getProjectDirectory(), Dash.getProjects(), Dash.getProjectQuantities(),
+          // feeds each card's 14-day trend; losing it costs sparklines, not the page
+          Dash.getProjectDailyOutput().catch(function () { return []; })
+        ]);
         DIR.rows = res[0].slice().sort(function (a, b) {
           var aa = a.status === "active" ? 0 : 1, bb = b.status === "active" ? 0 : 1;
           if (aa !== bb) return aa - bb;
@@ -204,6 +258,16 @@
         });
         res[1].forEach(function (p) { DIR.progById[p.project_id] = p; });
         res[2].forEach(function (q) { DIR.qtyById[q.project_id] = q; });
+
+        // last 14 days per project, oldest first (the view returns newest first)
+        (res[3] || []).forEach(function (d) {
+          (DIR.dailyBy[d.project_id] = DIR.dailyBy[d.project_id] || []).push(d);
+        });
+        Object.keys(DIR.dailyBy).forEach(function (k) {
+          DIR.dailyBy[k] = DIR.dailyBy[k]
+            .sort(function (a, b) { return a.log_date < b.log_date ? -1 : 1; })
+            .slice(-14);
+        });
         if (!DIR.rows.some(function (r) { return r.status === "active"; })) DIR.status = "all";
         render();
 
