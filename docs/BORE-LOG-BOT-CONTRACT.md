@@ -14,8 +14,19 @@ What the bot writes to is `bore_log_submissions` — a staging table. A person t
 opens it on the dashboard, checks it against the scan, and presses Confirm. That
 is what creates the bore log.
 
-So the bot's job is: **put the file somewhere safe, and tell the system it
-arrived.** Anything beyond that is a bonus.
+The practical consequence, and it is a good one: **the worst a broken bot can do
+is create a bad draft that somebody rejects.** It cannot corrupt a confirmed
+record. Experiment freely.
+
+---
+
+## What actually arrives
+
+A **PDF of the certified sheet**, posted to a site group. Checked against the real
+files: these are scanned pages with **no text layer at all** — zero fonts, just
+compressed images — and the values are **handwritten**. Nothing can be pulled out
+as text; the sheet has to be read as a picture. The bot already does this
+reliably, which is what makes the rest of this document possible.
 
 ---
 
@@ -32,7 +43,43 @@ against `/rest/v1/rpc/<function>`).
 
 ---
 
-## Step 1 — put the file in storage
+## Recommended flow: let the extractor be the detector
+
+The hard part is not reading a bore log — it is knowing which arriving PDF *is*
+one. There is no training set for that, and guessing would drop invoices and
+claim certificates into the reviewer's inbox, which is worse than doing nothing.
+
+**So don't guess. Extract first, and let the result decide.**
+
+```
+1. a PDF arrives in a group
+2. run extraction on it
+3. did a toe level AND a cut-off level come out, as plausible mRL numbers?
+
+     NO  -> it was not a bore log. Drop it silently. Nothing is created,
+            nothing reaches the inbox.
+
+     YES -> 4. upload the file to storage
+            5. create_bore_log_submission
+            6. claim_bore_log_extraction
+            7. record_bore_log_extraction  (returns errors + warnings — log them)
+```
+
+An invoice will never yield a toe level. A claim certificate will not either. The
+document's own shape does the classifying, using the reader you already have — no
+examples, no threshold to tune, and nothing false landing in front of a human.
+
+Note this puts **extraction before upload**, the reverse of how a person uses the
+dashboard. That is deliberate and fine: the RPCs only require the file to be in
+storage before `create_bore_log_submission` names its path.
+
+`record_bore_log_extraction` then gives you a second gate for free — it returns
+the same validation the dashboard runs, so a document that extracted into
+nonsense says so.
+
+---
+
+## Step A — put the file in storage
 
 Bucket **`bore-logs`** (private). Path must start with `submissions/`:
 
@@ -40,12 +87,12 @@ Bucket **`bore-logs`** (private). Path must start with `submissions/`:
 submissions/<submission_id>/<n>-<safe_filename>
 ```
 
-- `<submission_id>` is a UUID **you generate** and reuse in step 2
+- `<submission_id>` is a UUID **you generate** and reuse in step B
 - `<n>` is 1, 2, 3… if one message carries several photos/pages
 - `<safe_filename>` — strip anything that is not `A-Za-z0-9._-`, cap ~80 chars.
   The real filename is kept on the row, so nothing is lost.
 
-Example: `submissions/9f2c.../1-boreloglog_A2.pdf`
+Example: `submissions/9f2c.../1-borelog_A2.pdf`
 
 PDFs and images are both fine — the review screen shows a PDF inline and photos
 in a zoomable viewer, and it decides per file, so a mixed message works.
@@ -55,7 +102,7 @@ cannot be verified, so at least one path is required.
 
 ---
 
-## Step 2 — register the submission
+## Step B — register the submission
 
 ```
 rpc: create_bore_log_submission
@@ -74,24 +121,28 @@ rpc: create_bore_log_submission
 returns: uuid
 ```
 
-**If you can work out the pile, send `p_pile_id`.** If you cannot, send null —
-that is the normal case and exactly why the staging table exists. The reviewer
-picks the pile on screen with a site → zone → pile chooser.
+**If you can work out the pile, send `p_pile_id`.** Two ways, most reliable
+first: the pile mark you extracted off the sheet, or the filename/caption
+(`A-2.pdf` → ABT A2). If neither is confident, send null — that is a normal case
+and exactly why the staging table exists. The reviewer picks the pile on screen
+with a site → zone → pile chooser.
 
 **Always send `p_wa_message_id`.** It is the idempotency key: if the same message
 id is submitted twice, the function returns the existing submission id instead of
 creating a duplicate or throwing. That makes retries safe — if your network drops
 after the upload, just call it again.
 
-**If this is all the bot does, you are done.** The submission sits in the office
-inbox marked *"needs typing in"*, and someone types the values off the scan. That
-is the primary path and it works with no AI at all.
+> If your gateway does not persist the WhatsApp message id yet, a stable
+> stand-in derived from your own row is acceptable and keeps retries safe. It is
+> still worth capturing the real id when convenient, for two reasons: a derived
+> key is only as stable as what it is derived from — recreate the row or change
+> the formula and the same message yields a different key, which is the duplicate
+> the key existed to prevent — and the real id lets a disputed figure be traced
+> back to the actual message months later.
 
 ---
 
-## Step 3 — only if the bot also reads the document
-
-Two calls, in this order:
+## Step C — hand over what you read
 
 ```
 rpc: claim_bore_log_extraction(p_submission_id)      -> marks it 'processing'
@@ -100,34 +151,50 @@ rpc: record_bore_log_extraction(
 rpc: fail_bore_log_extraction(p_submission_id, p_error)   -> on failure
 ```
 
-- `p_ai_raw` — whatever your model returned, unedited. Kept for audit.
+- `p_ai_raw` — whatever your reader returned, unedited. Kept for audit.
 - `p_ai_fields` — the cleaned values, in the shape below.
 - `p_ai_model` / `p_ai_prompt_version` — free text, shown on the review screen so
-  a reviewer knows what read it.
+  a reviewer knows what read the sheet.
 
 `record_bore_log_extraction` runs the **same validator** the dashboard uses and
 returns `{errors: [...], warnings: [...]}`. Those become the "N to fix / N to
 check" badges in the office inbox. **Read the return value** — if `errors` is
 non-empty, a human cannot confirm it until it is fixed, so log it.
 
-**Partial is fine and better than nothing.** Send only the fields you are
-confident about and omit the rest; the reviewer fills the gaps. A wrong value is
-far more expensive than a missing one.
+### Handwriting will occasionally be misread. Plan for it.
+
+**Omit a field you are not confident about. Never guess one.**
+
+A blank box gets typed in by the reviewer, who is looking at the sheet anyway. A
+confidently wrong number gets skimmed past and confirmed — and these figures feed
+the monthly claims. Partial extraction is not a degraded result here, it is the
+correct one.
+
+Two traps worth guarding specifically:
+
+- **Minus signs.** Toe and rock levels are usually negative. Dropping a minus
+  turns a −22.530 toe into +22.530. The validator catches that particular one
+  because it makes the pile geometrically impossible — but a wrong magnitude that
+  is still plausible sails straight through.
+- **Decimal points.** `7.319` read as `73.19`. Same problem, no safety net.
+
+If your reader gives a confidence signal, use it: below your threshold, leave the
+field out.
 
 ---
 
 ## The field shape (`p_ai_fields`)
 
-All keys optional. **Omit a key rather than guessing.**
+All keys optional. **Omit rather than guess.**
 
 ```jsonc
 {
   // LEVELS — metres, mRL. Going DOWN the pile these get SMALLER.
   "top_of_casing_level_m":    12.900,
   "piling_platform_level_m":  11.670,   // EGL
-  "cut_off_level_m":           7.319,   // required to confirm
+  "cut_off_level_m":           7.319,   // required before anyone can confirm
   "rock_socketing_level_m":  -15.030,   // top of the rock socket
-  "toe_level_m":             -22.530,   // required to confirm
+  "toe_level_m":             -22.530,   // required before anyone can confirm
 
   // BORING TIMES — any timestamp Postgres can read
   "boring_soil_started_at": "2026-07-04T08:20:00+08:00",
@@ -224,11 +291,14 @@ first, and the earlier submission is marked `superseded` — nothing is deleted.
 
 ## Quick checklist
 
+- [ ] extract FIRST — no toe level and cut-off level means it was not a bore log,
+      so drop it and create nothing
 - [ ] upload to `bore-logs` under `submissions/<uuid>/...`
 - [ ] `create_bore_log_submission` with `p_source: 'whatsapp'` and the real
       `p_wa_message_id`
-- [ ] send `p_pile_id` when you know it, null when you don't
-- [ ] if extracting: `claim` → `record` (or `fail`), and log the returned errors
+- [ ] send `p_pile_id` when the mark or filename makes it confident, null when not
+- [ ] `claim` → `record` (or `fail`), and log the errors/warnings returned
+- [ ] omit anything you are unsure of — a blank box beats a wrong number
 - [ ] numbers as numbers, no lap on the bottom cage, strata as depths
 - [ ] never send the `agreed_*` fields
 - [ ] retries are safe — same `p_wa_message_id` returns the same submission
