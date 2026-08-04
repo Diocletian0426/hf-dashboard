@@ -295,6 +295,109 @@
     });
   }
 
+  /* ---- idle sign-out ----
+     After IDLE_LOGOUT_MINUTES (config.js) with no activity in ANY open
+     dashboard tab, a countdown box appears; when it reaches zero the session
+     is revoked for real (signOut), not just hidden.
+
+     Activity is stamped into localStorage so every tab shares one clock —
+     typing in the Piles tab keeps the Claims tab signed in, and the tab that
+     stamps last speaks for all of them.
+
+     The countdown is always COMPUTED from that stamp, never ticked down with
+     a counter, because browsers freeze timers in background tabs and across
+     laptop sleep. On wake the next tick recomputes honestly: a sleep that
+     overshot the whole window signs out at once instead of replaying a stale
+     countdown. */
+
+  var IDLE_KEY = "hf-last-active";
+
+  function initIdleWatch() {
+    var cfg = window.DASH_CONFIG || {};
+    var idleMin = Number(cfg.IDLE_LOGOUT_MINUTES);
+    if (!idleMin || idleMin <= 0) return;                  // switched off
+    var idleMs  = idleMin * 60 * 1000;
+    var countMs = Math.max(5, Number(cfg.IDLE_COUNTDOWN_SECONDS) || 60) * 1000;
+
+    var lastWrite = 0;     // when THIS tab last wrote the shared clock
+    var box = null;        // the warning box, while it is on screen
+
+    function lastActive() {
+      var v = Number(localStorage.getItem(IDLE_KEY)) || 0;
+      // a stamp from the future means the machine's clock changed; treat as now
+      return v > Date.now() ? Date.now() : v;
+    }
+
+    function touch(force) {
+      var t = Date.now();
+      if (!force && t - lastWrite < 5000) return;          // throttle writes
+      lastWrite = t;
+      try { localStorage.setItem(IDLE_KEY, String(t)); } catch (e) { /* blocked */ }
+    }
+
+    function signOutIdle() {
+      // quiet variant so WE choose the destination: login.html explains the
+      // sign-out was deliberate, otherwise it looks like a crash
+      Dash.signOutQuiet().then(function () {
+        window.location.replace("login.html?idle=1");
+      });
+    }
+
+    function hideBox() {
+      if (box) { box.remove(); box = null; }
+    }
+
+    function showBox(secondsLeft) {
+      if (!box) {
+        box = document.createElement("div");
+        box.className = "modal-back";
+        box.innerHTML =
+          '<div class="modal-card" role="alertdialog" aria-modal="true" aria-labelledby="idle-title">' +
+            '<h3 id="idle-title">Are you still there?</h3>' +
+            '<p class="modal-note">Nobody has used this page for a while, so for security you will be ' +
+              'signed out in <b id="idle-count"></b>.</p>' +
+            '<div class="modal-actions">' +
+              '<button type="button" class="btn-plain" id="idle-out">Sign out now</button>' +
+              '<button type="button" id="idle-stay">Stay signed in</button>' +
+            "</div>" +
+          "</div>";
+        document.body.appendChild(box);
+        box.querySelector("#idle-stay").addEventListener("click", function () {
+          touch(true); hideBox();
+        });
+        box.querySelector("#idle-out").addEventListener("click", signOutIdle);
+        box.querySelector("#idle-stay").focus();
+      }
+      var n = Math.max(1, Math.ceil(secondsLeft));
+      box.querySelector("#idle-count").textContent = n + (n === 1 ? " second" : " seconds");
+    }
+
+    function check() {
+      var idle = Date.now() - lastActive();
+      if (idle >= idleMs + countMs) { signOutIdle(); return; }
+      if (idle >= idleMs) { showBox((idleMs + countMs - idle) / 1000); return; }
+      hideBox();                       // fresh activity (maybe another tab's)
+    }
+
+    // While the box is up, moving the mouse must NOT count as "still here" —
+    // only the button says that. Otherwise a nudge of the desk dismisses a
+    // security prompt nobody read.
+    function onActivity() { if (!box) touch(false); }
+
+    var evs = ["mousemove", "mousedown", "keydown", "scroll", "touchstart"];
+    for (var i = 0; i < evs.length; i++) {
+      window.addEventListener(evs[i], onActivity, { passive: true, capture: true });
+    }
+    // timers may have been frozen the whole time the tab was hidden — take an
+    // honest look the moment it comes back
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden) check();
+    });
+
+    touch(true);
+    setInterval(check, 1000);
+  }
+
   /* ---- boot ---- */
 
   async function boot() {
@@ -310,6 +413,8 @@
 
     var user = await Dash.requireLogin();
     if (!user) return;                            // redirecting to login.html
+
+    initIdleWatch();                              // signed in -> the idle clock runs
 
     var acc = await Dash.getMyAccess();
 

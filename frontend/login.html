@@ -135,6 +135,14 @@
     var deadLink = Dash.linkError();
     if (deadLink) show(deadLink + " Please request a new link.", "bad");
 
+    // the idle watcher (shell.js) signed this browser out — say so, otherwise
+    // an automatic sign-out reads as the dashboard crashing
+    if (/[?&]idle=1/.test(window.location.search)) {
+      var idleMin = (window.DASH_CONFIG && window.DASH_CONFIG.IDLE_LOGOUT_MINUTES) || 0;
+      show("You were signed out after " + (idleMin ? idleMin + " minutes of " : "") +
+           "inactivity. Please sign in again.", "good");
+    }
+
     // ---- already signed in? bounce before the form is usable ----------------
     // Awaited on purpose: the old page wired the form first, so you could start
     // typing into a page that was already navigating away.
