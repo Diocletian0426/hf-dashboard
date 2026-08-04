@@ -63,5 +63,19 @@ window.DASH_CONFIG = {
   //
   // Set to true to preview the Create account tab before either step is done.
   // ---------------------------------------------------------------------------
-  ALLOW_SIGNUP: false
+  ALLOW_SIGNUP: false,
+
+  // ---------------------------------------------------------------------------
+  // Automatic sign-out after inactivity (all dashboard pages).
+  //
+  // After IDLE_LOGOUT_MINUTES with no mouse/keyboard/touch activity in ANY open
+  // dashboard tab, a warning box appears and counts down IDLE_COUNTDOWN_SECONDS
+  // before signing the browser out. Pressing "Stay signed in" (or working in
+  // another tab) cancels it. Letting it finish revokes the saved session
+  // properly — the next visit needs a password, it is not just hidden.
+  //
+  // Set IDLE_LOGOUT_MINUTES to 0 to switch the whole feature off.
+  // ---------------------------------------------------------------------------
+  IDLE_LOGOUT_MINUTES: 15,
+  IDLE_COUNTDOWN_SECONDS: 60
 };
