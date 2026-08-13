@@ -15,6 +15,7 @@
     <p class="page-caption">GPS-verified punches from the worker punch app. Times are Malaysia time.</p>
 
     <div id="geofence-banner"></div>
+    <div id="open-shifts"></div>
 
     <div class="filters">
       <label>Date <input type="date" id="f-date" /></label>
@@ -55,6 +56,7 @@
   <script src="vendor/supabase.js"></script>
   <script src="config.js"></script>
   <script src="dashboard-client.js"></script>
+  <script src="ui.js"></script>
   <script src="shell.js"></script>
 
   <script>
@@ -63,6 +65,219 @@
       if (value) p.set(name, value); else p.delete(name);
       location.search = p.toString();
     }
+
+    // ---- geofence to-do list (sites with no GPS centre yet) -----------------
+    // Until a site has coordinates, punches there record as "no GPS boundary" —
+    // verified by nothing — and the punch cannot tell the office which site the
+    // worker was really at. So this banner is both the warning and the fix.
+    var GEO = { missing: [], openFor: null, err: "", okMsg: "" };
+
+    function esc(s) {
+      return String(s === null || s === undefined ? "" : s)
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+    }
+
+    function renderGeofenceBanner() {
+      var el = document.getElementById("geofence-banner");
+      var canSet = Dash.can("attendance.manage");
+      var html = "";
+
+      if (GEO.okMsg) html += '<div class="banner banner-green">' + esc(GEO.okMsg) + "</div>";
+      if (GEO.err)   html += '<div class="banner banner-red">Could not save: ' + esc(GEO.err) + "</div>";
+
+      if (GEO.missing.length) {
+        html += '<div class="banner banner-amber"><strong>' + GEO.missing.length +
+          " site(s) have no GPS geofence set</strong> — punches there can't be location-verified." +
+          (canSet ? " Set each site's centre from a WhatsApp location share or a machine's GPS." : "") +
+          '<ul style="margin:8px 0 0;padding-left:18px">' +
+          GEO.missing.map(function (s) {
+            var open = GEO.openFor === s.project_id;
+            return "<li style='margin:4px 0'>" + esc(s.project_name) +
+              ' <span class="muted">(' + esc(s.active_workers_assigned) + " workers)</span>" +
+              (canSet
+                ? ' <button type="button" data-geo="' + esc(s.project_id) + '">' +
+                  (open ? "Cancel" : "Set Coordinates") + "</button>"
+                : "") +
+              (open ? geoForm(s) : "") + "</li>";
+          }).join("") +
+          "</ul></div>";
+      }
+      el.innerHTML = html;
+    }
+
+    function geoForm(s) {
+      return '<div class="claim-form" style="margin-top:6px">' +
+        '<label>Latitude <input type="text" id="geo-lat" inputmode="decimal" placeholder="5.32819"></label>' +
+        '<label>Longitude <input type="text" id="geo-lng" inputmode="decimal" placeholder="102.19442"></label>' +
+        '<label>Radius (m) <input type="number" id="geo-radius" value="300" min="20" max="5000" size="5"></label>' +
+        '<button type="button" data-geo-save="' + esc(s.project_id) +
+        '" data-geo-name="' + esc(s.project_name) + '">Save</button>' +
+        '<span class="muted-line">Paste a WhatsApp location as "5.32819, 102.19442" into Latitude — it splits itself.</span>' +
+        "</div>";
+    }
+
+    // ---- forgotten punch-outs (0084) ---------------------------------------
+    // Shifts a worker opened and never closed, from finished work-days. The
+    // office attests the real knock-off time; it records as "Closed By Office"
+    // with who entered it — never disguised as a GPS punch. Today's shifts are
+    // excluded: an open shift today is just someone at work.
+    var OS = { list: null, openFor: null, err: "", okMsg: "" };
+
+    async function loadOpenShifts() {
+      try { OS.list = await Dash.getOpenShifts(); }
+      catch (e) { OS.list = null; }        // DB said no — section stays absent
+      renderOpenShifts();
+    }
+
+    function renderOpenShifts() {
+      var el = document.getElementById("open-shifts");
+      var html = "";
+      if (OS.okMsg) html += '<div class="banner banner-green">' + esc(OS.okMsg) + "</div>";
+      if (OS.err)   html += '<div class="banner banner-red">Could not save: ' + esc(OS.err) + "</div>";
+
+      if (OS.list && OS.list.length) {
+        html += '<div class="banner banner-amber"><strong>' + OS.list.length +
+          " shift(s) never punched out</strong> — enter the real knock-off time once you have " +
+          "confirmed it with the supervisor. It is recorded as closed by you, not as a GPS punch." +
+          '<ul style="margin:8px 0 0;padding-left:18px">' +
+          OS.list.map(function (s) {
+            var open = OS.openFor === s.punch_id;
+            return "<li style='margin:4px 0'><strong>" + esc(s.full_name) + "</strong> — " +
+              esc(s.project_name || "no site") + " · in " + esc(Dash.klDateTime(s.in_at)) +
+              ' <span class="muted">(' + esc(s.days_open) + " day" + (s.days_open === 1 ? "" : "s") + " ago)</span>" +
+              ' <button type="button" data-os="' + esc(s.punch_id) + '">' +
+              (open ? "Cancel" : "Close Shift") + "</button>" +
+              (open ? osForm(s) : "") +
+              "</li>";
+          }).join("") +
+          "</ul></div>";
+      }
+      el.innerHTML = html;
+    }
+
+    function osForm(s) {
+      // prefill 18:00 on the work-day; the office adjusts (cross-midnight
+      // knock-offs: just set the next day's date in the same field)
+      return '<div class="claim-form" style="margin-top:6px">' +
+        '<label>Knock-off time <input type="datetime-local" id="os-out" value="' +
+          esc(s.work_date) + 'T18:00"></label>' +
+        '<label>Note <input type="text" id="os-note" size="24" placeholder="e.g. confirmed with supervisor"></label>' +
+        '<button type="button" data-os-save="' + esc(s.punch_id) + '" data-os-staff="' + esc(s.staff_id) +
+        '" data-os-date="' + esc(s.work_date) + '" data-os-name="' + esc(s.full_name) + '">Save</button>' +
+        '<span class="muted-line">Malaysia time. Must be after the punch-in and within 24 hours of it.</span>' +
+        "</div>";
+    }
+
+    document.getElementById("open-shifts").addEventListener("click", async function (ev) {
+      var toggle = ev.target.closest("button[data-os]");
+      if (toggle) {
+        var pid = toggle.getAttribute("data-os");
+        OS.openFor = (OS.openFor === pid) ? null : pid;
+        OS.err = ""; OS.okMsg = "";
+        renderOpenShifts();
+        return;
+      }
+
+      var save = ev.target.closest("button[data-os-save]");
+      if (!save) return;
+
+      var raw = document.getElementById("os-out").value;   // "YYYY-MM-DDTHH:mm" KL wall time
+      if (!raw) { OS.err = "enter the knock-off time"; renderOpenShifts(); return; }
+      var outISO = raw + ":00+08:00";                      // Malaysia is UTC+8, no DST
+      var note = document.getElementById("os-note").value.trim();
+
+      save.disabled = true; save.textContent = "Saving…";
+      try {
+        var res = await Dash.closeShift(
+          save.getAttribute("data-os-staff"), save.getAttribute("data-os-date"), outISO, note);
+        if (res && res.ok) {
+          OS.okMsg = "Closed " + save.getAttribute("data-os-name") + "'s " +
+                     save.getAttribute("data-os-date") + " shift (" + res.hours +
+                     " h). It shows as Closed By Office.";
+          OS.openFor = null;
+          await loadOpenShifts();
+          return;
+        }
+        OS.err = (res && res.message) || (res && res.code) || "unknown error";
+      } catch (e) {
+        OS.err = (e && e.message) || String(e);
+      }
+      renderOpenShifts();
+    });
+
+    // remove a mistyped office close from the raw punches table (worker
+    // punches never get this button, and the database refuses them anyway)
+    document.getElementById("punch-rows").addEventListener("click", async function (ev) {
+      var btn = ev.target.closest("button[data-reopen]");
+      if (!btn) return;
+      if (!confirm("Remove this office-entered punch-out? The shift becomes open again.")) return;
+      btn.disabled = true;
+      try {
+        await Dash.reopenShift(btn.getAttribute("data-reopen"));
+        location.reload();
+      } catch (e) {
+        OS.err = (e && e.message) || String(e);
+        renderOpenShifts();
+        btn.disabled = false;
+      }
+    });
+
+    // one delegated handler on the static banner container — survives re-renders
+    document.getElementById("geofence-banner").addEventListener("click", async function (ev) {
+      var toggle = ev.target.closest("button[data-geo]");
+      if (toggle) {
+        var pid = toggle.getAttribute("data-geo");
+        GEO.openFor = (GEO.openFor === pid) ? null : pid;
+        GEO.err = ""; GEO.okMsg = "";
+        renderGeofenceBanner();
+        return;
+      }
+
+      var save = ev.target.closest("button[data-geo-save]");
+      if (!save) return;
+
+      var latRaw = document.getElementById("geo-lat").value.trim();
+      var lngRaw = document.getElementById("geo-lng").value.trim();
+      // a pasted WhatsApp pin arrives as "5.32819, 102.19442" in one box
+      if (!lngRaw && latRaw.indexOf(",") !== -1) {
+        var parts = latRaw.split(",");
+        latRaw = parts[0].trim(); lngRaw = parts[1].trim();
+      }
+      var lat = Number(latRaw), lng = Number(lngRaw);
+      var radius = Number(document.getElementById("geo-radius").value);
+
+      // Malaysia is roughly lat 0.8..7.5, lng 99..119. Catching a swapped pair
+      // here matters: a wrong centre silently invalidates every punch after it.
+      if (!latRaw || !lngRaw || isNaN(lat) || isNaN(lng)) {
+        GEO.err = "enter both latitude and longitude"; renderGeofenceBanner(); return;
+      }
+      if (lat < 0.5 || lat > 8 || lng < 98 || lng > 120) {
+        GEO.err = "that does not look like a Malaysian location (lat " + lat + ", lng " + lng +
+                  ") — check you have not swapped latitude and longitude";
+        renderGeofenceBanner(); return;
+      }
+      if (isNaN(radius) || radius < 20 || radius > 5000) {
+        GEO.err = "radius must be between 20 and 5000 metres"; renderGeofenceBanner(); return;
+      }
+
+      save.disabled = true; save.textContent = "Saving…";
+      try {
+        var res = await Dash.setSiteCoords(save.getAttribute("data-geo-save"), lat, lng, radius);
+        if (res && res.ok) {
+          var pidSaved = save.getAttribute("data-geo-save");
+          GEO.missing = GEO.missing.filter(function (m) { return m.project_id !== pidSaved; });
+          GEO.openFor = null;
+          GEO.okMsg = "Set the geofence for " + save.getAttribute("data-geo-name") +
+                      " (" + radius + " m). Punches there can be verified from now on.";
+        } else {
+          GEO.err = (res && res.code) || "unknown error";
+        }
+      } catch (e) {
+        GEO.err = (e && e.message) || String(e);
+      }
+      renderGeofenceBanner();
+    });
 
     window.onShellReady = async function () {
       var params  = new URLSearchParams(location.search);
@@ -97,14 +312,14 @@
                  p.project_code + " — " + p.project_name + "</option>";
         }).join("");
 
-        // geofence nag
-        if (missing.length) {
-          document.getElementById("geofence-banner").innerHTML =
-            '<div class="banner banner-amber"><strong>' + missing.length +
-            " site(s) have no GPS geofence set</strong> — punches there can't be location-verified: " +
-            missing.map(function (s) { return s.project_name + " (" + s.active_workers_assigned + " workers)"; }).join(", ") +
-            ". Register each site's coordinates from a WhatsApp location share.</div>";
-        }
+        // geofence nag — and the place the office actually fixes it. The list
+        // shrinks as each site is set, so it doubles as the to-do list.
+        GEO.missing = missing;
+        renderGeofenceBanner();
+
+        // forgotten punch-outs (0084) — loads on its own so a slow or refused
+        // read never delays the day's table
+        loadOpenShifts();
 
         // shifts
         if (!shifts.length) {
@@ -130,6 +345,7 @@
         // raw punches
         if (showRaw && punches) {
           document.getElementById("punches-section").style.display = "";
+          var canEdit = Dash.can("attendance.edit");
           document.getElementById("punch-rows").innerHTML = punches.length
             ? punches.map(function (p) {
                 var vCls = p.verification_status === "verified" ? "verified" : "anomaly";
@@ -139,7 +355,11 @@
                   "<td>" + (p.punch_type || "").toUpperCase() + "</td>" +
                   "<td>" + (p.project_name || "—") + "</td>" +
                   '<td class="num">' + (p.distance_m === null || p.distance_m === undefined ? "—" : Math.round(p.distance_m)) + "</td>" +
-                  '<td><span class="badge badge-' + vCls + '">' + (p.verification_status || "") + "</span></td>" +
+                  '<td><span class="badge badge-' + vCls + '">' + UI.label(p.verification_status || "") + "</span>" +
+                  (canEdit && p.verification_status === "office_closed"
+                    ? ' <button type="button" data-reopen="' + p.punch_id + '">Remove</button>'
+                    : "") +
+                  "</td>" +
                 "</tr>";
               }).join("")
             : '<tr><td colspan="6" class="empty">No raw punches for this date.</td></tr>';

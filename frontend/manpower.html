@@ -103,7 +103,10 @@
                hkFilter: null,               // 'joined' | 'code' | 'contact' | null
                roleFilter: "all", siteFilter: "all", driftOnly: false,
                supervisorsByPid: {},         // project_id -> "Name, Name"
-               machinesBySite: {} };         // project_code -> [{code,type}]
+               machinesBySite: {},           // project_code -> [{code,type}]
+               canDevices: false, canDevicesView: false,   // 0082 punch-app enrolment
+               devByStaff: {},               // staff_id -> enrolment state row
+               shownCode: {} };              // staff_id -> the code just issued (shown ONCE)
 
     // machine type -> the trade that runs it (crew-vs-plant hint)
     var MACHINE_TRADE = {
@@ -126,9 +129,16 @@
       if (!r.last_reported_date) return '<td class="muted-line" data-label="Last reported">—</td>';
       var label = new Intl.DateTimeFormat("en-MY", { day: "2-digit", month: "short" })
         .format(new Date(r.last_reported_date + "T00:00:00"));
-      var txt = label + " @ " + escHtml(r.last_reported_project_code || "?");
+      // 0083: this can now come from a GPS-verified punch instead of the bot's
+      // free text. Say which — a punch is evidence, a bot line is a claim.
+      var isGps = r.last_reported_source === "gps";
+      var src = r.last_reported_source ? (isGps ? " (GPS)" : " (bot)") : "";
+      var txt = label + " @ " + escHtml(r.last_reported_project_code || "?") + src;
       if (isDrift(r)) {
-        return '<td class="drift" data-label="Last reported" title="The bot last reported this worker at ' +
+        return '<td class="drift" data-label="Last reported" title="' +
+               (isGps
+                 ? "This worker PUNCHED IN at "
+                 : "The bot last reported this worker at ") +
                esc(r.last_reported_project_code || "?") + " on " + esc(r.last_reported_date) +
                ' — different from the assigned site. Check, then Move whichever is wrong.">' +
                txt + " &#9888;</td>";
@@ -489,6 +499,71 @@
         "</div>";
     }
 
+    // ================= PUNCH APP PHONE (0082) =================
+    // The office authorises a phone by issuing a one-time code FOR this worker;
+    // the worker types only that code, so the punch app never shows a list of
+    // names to pick from. The code is displayed ONCE — it cannot be read back
+    // from the database, only reissued.
+    function devicesBlock(r) {
+      if (!MP.canDevicesView) return "";     // no devices.view -> panel stays absent
+
+      var d = MP.devByStaff[r.staff_id];
+      var body;
+
+      if (d === undefined) {
+        body = '<div class="pc-line muted-line">Loading…</div>';
+      } else if (d === null) {
+        body = '<div class="pc-line muted-line">Could not read the enrolment state.</div>';
+      } else if (d.is_enrolled) {
+        body =
+          '<div class="pc-line">Phone: <strong>' + escHtml(d.device_label || "Registered") + "</strong>" +
+          (d.last_seen_at ? ' <span class="muted">last used ' + escHtml(Dash.klDateTime(d.last_seen_at)) + "</span>" : "") +
+          "</div>" +
+          (MP.canDevices
+            ? '<div class="pc-line"><span class="move-ctl">' +
+              '<button type="button" class="danger" data-action="dev-release" data-staff="' + r.staff_id +
+              '" data-name="' + esc(r.full_name) + '">Release Phone</button></span>' +
+              '<span class="muted-line">Releasing lets them enrol a replacement phone.</span></div>'
+            : "");
+      } else if (MP.shownCode[r.staff_id]) {
+        var c = MP.shownCode[r.staff_id];
+        body =
+          '<div class="pc-line">Give this code to <strong>' + escHtml(r.full_name) + "</strong>:</div>" +
+          '<div class="pc-line"><strong style="font-size:22px;letter-spacing:3px;font-family:ui-monospace,monospace">' +
+          escHtml(c.display) + "</strong></div>" +
+          '<div class="pc-line muted-line">Valid until ' + escHtml(c.expires) +
+          " · one use only · shown once, reissue if lost.</div>" +
+          (MP.canDevices
+            ? '<div class="pc-line"><span class="move-ctl">' +
+              '<button type="button" data-action="dev-issue" data-staff="' + r.staff_id +
+              '" data-name="' + esc(r.full_name) + '">Reissue</button>' +
+              '<button type="button" class="danger" data-action="dev-revoke" data-staff="' + r.staff_id +
+              '" data-name="' + esc(r.full_name) + '">Cancel Code</button></span></div>'
+            : "");
+      } else {
+        body =
+          '<div class="pc-line">Not enrolled' +
+          (d.has_live_code
+            ? ' · <span class="badge badge-gray">code issued</span> <span class="muted">expires ' +
+              escHtml(Dash.klDateTime(d.code_expires_at)) + "</span>"
+            : "") +
+          "</div>" +
+          (MP.canDevices
+            ? '<div class="pc-line"><span class="move-ctl">' +
+              '<button type="button" data-action="dev-issue" data-staff="' + r.staff_id +
+              '" data-name="' + esc(r.full_name) + '">' +
+              (d.has_live_code ? "Reissue Code" : "Issue Enrolment Code") + "</button>" +
+              (d.has_live_code
+                ? '<button type="button" class="danger" data-action="dev-revoke" data-staff="' + r.staff_id +
+                  '" data-name="' + esc(r.full_name) + '">Cancel Code</button>'
+                : "") +
+              "</span></div>"
+            : "");
+      }
+
+      return "<div><h3>Punch App Phone</h3>" + body + "</div>";
+    }
+
     function workerCard(r) {
       var d = MP.cardCache[r.staff_id] || {};
       var chips = [];
@@ -559,7 +634,7 @@
              '<div class="pc-grid"><div><h3>Movement history</h3>' +
              (histHtml || '<div class="muted-line">No moves recorded yet — backfill via the Recent moves panel.</div>') +
              '<div id="wcf-' + r.staff_id + '"></div></div>' +
-             '<div class="pc-side">' + where + plansBlock + "</div></div>" +
+             '<div class="pc-side">' + where + plansBlock + devicesBlock(r) + "</div></div>" +
              "</div></td></tr>";
     }
 
@@ -721,6 +796,20 @@
       });
     }
 
+    // 0082: this worker's punch-app enrolment state, fetched when their card
+    // opens (one row, gated on devices.view). Re-renders on its own so opening
+    // a card never waits on it.
+    async function loadDevices(sid) {
+      if (!MP.canDevicesView) return;
+      try {
+        var rowsD = await Dash.getWorkerDevices(sid);
+        MP.devByStaff[sid] = (rowsD && rowsD[0]) || null;
+      } catch (e) {
+        MP.devByStaff[sid] = null;                  // gated read said no — panel says so
+      }
+      if (MP.cardOpen === sid) { rememberOpenGroups(); render(); }
+    }
+
     function renderMoveLog() {
       if (!MP.canMove) return;                      // office-only history
       var el = document.getElementById("movelog");
@@ -851,6 +940,8 @@
       try {
         var profile = await Dash.getMyProfile();
         MP.canMove = Dash.can("manpower.edit");
+        MP.canDevicesView = Dash.can("devices.view");     // 0082: show the panel
+        MP.canDevices     = Dash.can("devices.manage");   // 0082: show its buttons
 
         var res = await Promise.all([
           Dash.getManpowerBySite(),
@@ -991,6 +1082,7 @@
               catch (e) { MP.cardCache[sid] = {}; }   // gated read said no — open facts only
             }
             render();
+            await loadDevices(sid);                   // 0082: fills in the phone panel
             return;
           }
           ev.preventDefault();
@@ -1013,6 +1105,55 @@
             } catch (e) { MP.err = (e && e.message) || String(e); render(); }
             return;
           }
+          // ---- 0082 punch-app phone: issue / cancel a code, release a phone ----
+          // The database re-checks devices.manage on every one of these; hiding
+          // the buttons only stops the interface lying to a viewer.
+          if (act === "dev-issue") {
+            rememberOpenGroups();
+            MP.err = ""; MP.okMsg = "";
+            try {
+              var iss = await Dash.issueEnrolmentCode(staffId);
+              if (iss && iss.ok) {
+                MP.shownCode[staffId] = {
+                  display: iss.enrolment_code_display,
+                  expires: iss.expires_at_local
+                };
+              } else {
+                MP.err = (iss && iss.message) ||
+                         ("could not issue a code" + (iss && iss.code ? " (" + iss.code + ")" : ""));
+              }
+            } catch (e) { MP.err = (e && e.message) || String(e); }
+            await loadDevices(staffId);
+            render();
+            return;
+          }
+          if (act === "dev-revoke") {
+            rememberOpenGroups();
+            MP.err = ""; MP.okMsg = "";
+            try {
+              await Dash.revokeEnrolmentCode(staffId);
+              delete MP.shownCode[staffId];
+              MP.okMsg = "Cancelled the enrolment code for " + (name || "this worker") + ".";
+            } catch (e) { MP.err = (e && e.message) || String(e); }
+            await loadDevices(staffId);
+            render();
+            return;
+          }
+          if (act === "dev-release") {
+            if (!confirm("Release " + (name || "this worker") +
+                         "'s phone? They will not be able to punch until a new code is issued and used.")) return;
+            rememberOpenGroups();
+            MP.err = ""; MP.okMsg = "";
+            try {
+              await Dash.releaseDevice(staffId);
+              delete MP.shownCode[staffId];
+              MP.okMsg = "Released " + (name || "this worker") + "'s phone. Issue a new code to enrol a replacement.";
+            } catch (e) { MP.err = (e && e.message) || String(e); }
+            await loadDevices(staffId);
+            render();
+            return;
+          }
+
           if (act === "edit-cancel") { MP.editing = null; rememberOpenGroups(); render(); return; }
           if (act === "edit-save")   { rememberOpenGroups(); await actEditSave(staffId); return; }
 

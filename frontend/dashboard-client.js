@@ -221,6 +221,21 @@
                                               the edit form (incl. contact/date
                                               joined — management/office only;
                                               whatsapp_name comes back read-only)
+   await Dash.getWorkerDevices(staffId?)   -> punch-app enrolment state per worker
+                                              (devices.view): is_enrolled, device
+                                              label/bound_at/last_seen_at, and
+                                              has_live_code + code_expires_at.
+                                              Never returns the token or the code.
+   await Dash.issueEnrolmentCode(staffId, hours?)
+                                           -> { ok, enrolment_code_display,
+                                              expires_at_local } (devices.manage).
+                                              The code is shown ONCE and cannot be
+                                              read back — reissue if it is lost.
+                                              { ok:false, code:'worker_already_bound' }
+                                              means release their phone first.
+   await Dash.revokeEnrolmentCode(staffId) -> cancel a code issued by mistake
+   await Dash.releaseDevice(staffId)       -> unbind a worker's phone (devices.manage)
+                                              so a replacement can be enrolled
    await Dash.updateStaff(staffId, {fullName?, role?, companyCode?, employeeCode?,
                                     designation?, dateJoined?, contactNumber?,
                                     countryOrigin?, allowDuplicate?})
@@ -746,8 +761,43 @@
     }));
   }
 
+  // ---- forgotten punch-outs (0084) ---------------------------------------
+  // A shift the worker never closed. The office attests the real knock-off
+  // time; it is recorded as 'office_closed' with who entered it — visibly an
+  // attestation, never disguised as a GPS punch. Today's shifts can't be
+  // closed (the worker may simply still be on site).
+  function getOpenShifts() {
+    return q(sb.rpc("get_open_shifts"));
+  }
+
+  function closeShift(staffId, workDate, outAtISO, note) {
+    return q(sb.rpc("close_shift", {
+      p_staff_id: staffId, p_work_date: workDate,
+      p_out_at: outAtISO, p_note: note || null
+    }));
+  }
+
+  // Retracts an office attestation entered by mistake. Refuses anything else —
+  // a worker's real punch can never be deleted through this.
+  function reopenShift(punchId) {
+    return q(sb.rpc("reopen_shift", { p_punch_id: punchId }));
+  }
+
   function getSitesMissingGeofence() {
     return q(sb.rpc("get_sites_missing_geofence"));
+  }
+
+  // Set a site's GPS centre + fence radius (attendance.manage). Until a site has
+  // this, every punch there records as 'no_geofence' — verified by nothing — and
+  // the punch cannot tell the office which site a worker was really at.
+  function setSiteCoords(projectId, lat, lng, radiusM) {
+    return q(sb.rpc("set_site_coords", {
+      p_project_id: projectId,
+      p_lat: Number(lat),
+      p_lng: Number(lng),
+      p_radius: (radiusM === undefined || radiusM === null || radiusM === "") ? null : Number(radiusM),
+      p_set_by: null                       // ignored for a signed-in user; the DB uses their own id
+    }));
   }
 
   function getRecentPunches(date, projectId, limit) {
@@ -1018,6 +1068,32 @@
 
   function getStaffDetail(staffId) {
     return q(sb.rpc("get_staff_detail", { p_staff_id: staffId }));
+  }
+
+  // ---- punch-app phone enrolment (0082) ----------------------------------
+  // The office authorises a phone by issuing a one-time code FOR a worker; the
+  // worker types only that code. Nothing here ever exposes a device token or a
+  // live code value — issueEnrolmentCode returns the code once and that is the
+  // only time it exists outside the database.
+  function getWorkerDevices(staffId) {
+    return q(sb.rpc("get_worker_devices", { p_staff_id: staffId || null }));
+  }
+
+  function issueEnrolmentCode(staffId, hours) {
+    return q(sb.rpc("issue_enrolment_code", {
+      p_staff_id: staffId,
+      p_hours: (hours === undefined || hours === null || hours === "") ? null : Number(hours)
+    }));
+  }
+
+  function revokeEnrolmentCode(staffId) {
+    return q(sb.rpc("revoke_enrolment_code", { p_staff_id: staffId }));
+  }
+
+  function releaseDevice(staffId) {
+    return q(sb.rpc("release_device", {
+      p_staff_id: staffId, p_device_uid: null, p_device_id: null, p_reason: null
+    }));
   }
 
   function updateMachine(machineId, o) {
@@ -1529,7 +1605,11 @@
     getMachineServiceHistory: getMachineServiceHistory,
     getMachineActivity: getMachineActivity,
     getShifts: getShifts,
+    getOpenShifts: getOpenShifts,
+    closeShift: closeShift,
+    reopenShift: reopenShift,
     getSitesMissingGeofence: getSitesMissingGeofence,
+    setSiteCoords: setSiteCoords,
     getRecentPunches: getRecentPunches,
     getLeaveBalances: getLeaveBalances,
     getLeaveRequests: getLeaveRequests,
@@ -1568,6 +1648,10 @@
     addMachine: addMachine,
     setStaffActive: setStaffActive,
     getStaffDetail: getStaffDetail,
+    getWorkerDevices: getWorkerDevices,
+    issueEnrolmentCode: issueEnrolmentCode,
+    revokeEnrolmentCode: revokeEnrolmentCode,
+    releaseDevice: releaseDevice,
     updateStaff: updateStaff,
     updateMachine: updateMachine,
     addServiceRecord: addServiceRecord,
