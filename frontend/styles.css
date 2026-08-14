@@ -2537,3 +2537,19 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
 }
 .move-ctl input[type="text"] { width: 96px; }
 .move-ctl input[type="date"] { width: 132px; }
+
+/* Machines: DIESEL 7D and OPEN ISSUES read as a count, not as money, and both
+   headings are wider than the number under them — right-aligning parked the
+   digit under the last letter of the heading with a hole in between. Centred,
+   the heading and its number share one axis. Tabular figures keep the column
+   straight. Above the 760px stacking breakpoint only: below it the rows turn
+   into label/value cards, where .table-stack td.num's right edge is correct. */
+@media (min-width: 761px) {
+  .mach-table th:nth-child(5), .mach-table td:nth-child(5),
+  .mach-table th:nth-child(8), .mach-table td:nth-child(8) {
+    text-align: center;
+  }
+  .mach-table td:nth-child(5), .mach-table td:nth-child(8) {
+    font-variant-numeric: tabular-nums;
+  }
+}
