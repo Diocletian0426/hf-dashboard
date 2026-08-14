@@ -2392,3 +2392,98 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
   .bl-left { position: static; }
   .bl-viewer-frame { height: 55vh; min-height: 260px; }
 }
+
+/* =====================================================================
+   ATTENDANCE — the worker detail drawer
+   =====================================================================
+   Added for the attendance page (ATTENDANCE-HANDOFF §5 rule 11: additions
+   go at the end, in their own block, nothing above is reformatted).
+   The worker's name is the control: pressing it opens the row underneath
+   with the punches behind the day's numbers. */
+.worker-btn {
+  display: inline-flex; align-items: center; gap: var(--sp-2);
+  margin: 0; padding: 0; min-height: 0;
+  font: inherit; color: inherit; text-align: left;
+  background: none; border: 0; box-shadow: none; cursor: pointer;
+}
+.worker-btn:hover strong { color: var(--brand-ink); }
+.worker-btn .caret {
+  width: 0; height: 0; flex: 0 0 auto;
+  border-left: 5px solid var(--ink-3);
+  border-top: 4px solid transparent; border-bottom: 4px solid transparent;
+  transition: transform 0.15s ease;
+}
+.shift-row.open .worker-btn .caret { transform: rotate(90deg) translateX(1px); }
+.shift-row.open { background: var(--surface-2); }
+
+.detail-row > td { padding: 0; }
+.detail-box {
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line-strong);
+}
+.detail-sum { margin: 0 0 var(--sp-2); font-size: var(--fs-sm); }
+.detail-note { margin: 0 0 var(--sp-2); font-size: var(--fs-xs); color: var(--ink-3); }
+
+/* one line per punch: what it was, when, whether the location held up */
+.punch-lines { margin: 0; padding: 0; list-style: none; }
+.punch-lines li {
+  display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2);
+  padding: 5px 0; font-size: var(--fs-sm);
+  border-top: 1px solid var(--line-strong);
+}
+.pl-type { flex: 0 0 42px; font-weight: 700; font-size: var(--fs-xs); letter-spacing: 0.04em; }
+.pl-time { flex: 0 0 80px; font-weight: 600; }
+.pl-where { color: var(--ink-3); font-size: var(--fs-xs); }
+
+/* overtime is the number that costs money — it says so */
+.ot-on { color: var(--warn-ink); font-weight: 700; }
+
+/* the badge legend under the attendance table */
+.table-legend {
+  display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-5);
+  margin: var(--sp-3) 0 0; font-size: var(--fs-xs); color: var(--ink-3);
+}
+.table-legend > span { display: inline-flex; align-items: center; gap: var(--sp-2); }
+
+/* Attendance table: the worker and the site read as text (left), everything
+   else is a fact about the day and sits CENTRED under its own heading —
+   headings and values on one axis, so the eye runs straight down a column. */
+.att-table th, .att-table td { text-align: center; }
+.att-table th:first-child, .att-table td:first-child,
+.att-table th:nth-child(2), .att-table td:nth-child(2) { text-align: left; }
+.att-table .worker-btn { display: inline-flex; }
+/* the drawer cell spans the table, so it keeps its own left-aligned reading */
+.att-table .detail-row > td { text-align: left; }
+
+/* Day / Month switch on the attendance filters */
+.view-switch {
+  display: inline-flex; align-items: center; gap: 2px; padding: 3px;
+  background: var(--surface-2); border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+}
+.view-switch a {
+  padding: 4px 14px; border-radius: var(--r-pill);
+  font-size: var(--fs-sm); color: var(--ink-2); text-decoration: none;
+}
+.view-switch a:hover { color: var(--ink); }
+.view-switch a.on { color: #fff; background: var(--brand); }
+
+/* the day-by-day table inside a worker's month drawer */
+.month-days { margin: 0; font-size: var(--fs-sm); }
+.month-days th { font-size: var(--fs-xs); }
+.month-days th, .month-days td { padding: 5px var(--sp-2); }
+
+/* The month picker wears the same pill as the date picker and the selects.
+   .filters styles input[type="date"] BY NAME, and a month input is a
+   different type, so it was falling through to the browser's square default —
+   two controls side by side in two different shapes. */
+.filters input[type="month"] {
+  font-size: var(--fs-md); padding: 8px 14px;
+  border: 1px solid var(--line-strong); border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.75); color: var(--ink);
+}
+/* matches how the file already grows the other filter controls for touch */
+@media (pointer: coarse) {
+  .filters input[type="month"] { min-height: var(--tap); }
+}
