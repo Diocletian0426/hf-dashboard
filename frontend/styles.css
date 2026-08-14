@@ -2487,3 +2487,53 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
 @media (pointer: coarse) {
   .filters input[type="month"] { min-height: var(--tap); }
 }
+
+/* =====================================================================
+   MANPOWER ROSTER TABLES
+   =====================================================================
+   Same complaint the machines page had, same cure: one table per SITE means
+   every block measured its own columns, so CODE / NAME / ROLE landed on a
+   different x in each group and the page read as a stack of unrelated
+   tables. Fixed layout with the widths declared once = one ruler down the
+   whole page.
+
+   Unlike .mach-table there is NO min-width here, on purpose: the office
+   should never have to scroll sideways to reach the buttons that move a
+   worker. The Actions cell wraps onto a second line instead (see below),
+   which costs a little height and saves the horizontal scrollbar. */
+.mp-table { table-layout: fixed; }
+.mp-table th:nth-child(1) { width: 10%; }   /* Code          */
+.mp-table th:nth-child(2) { width: 28%; }   /* Name          */
+.mp-table th:nth-child(3) { width: 17%; }   /* Role / Site   */
+.mp-table th:nth-child(4) { width: 12%; }   /* Company       */
+.mp-table th:nth-child(5) { width: 21%; }   /* Last reported */
+.mp-table th:nth-child(6) { width: 12%; }   /* Actions       */
+/* long names and site names wrap rather than push the column wider */
+.mp-table td { overflow-wrap: anywhere; }
+
+/* The one button the Actions column now holds. It carries .btn for the shared
+   pill geometry — without it a bare <button> falls back to the browser's own
+   square chrome, which is the only square thing left on the page — and then
+   takes the brand blue, because it is the row's one action and should look
+   like it. Equal width down the column so the edges line up. */
+.mp-open {
+  width: 100%; max-width: 110px; font-weight: 600;
+  color: #fff; background: var(--brand); border-color: var(--brand);
+}
+.mp-open:hover { color: #fff; background: var(--brand-ink); border-color: var(--brand-ink); }
+
+/* Move this worker — the controls that used to crowd every row, now in the
+   record card where there is room for them to sit on one line. */
+.pc-move { margin: var(--sp-3) 0 0; padding-top: var(--sp-3); border-top: 1px solid var(--rule); }
+.pc-move h3 { margin: 0 0 var(--sp-2); }
+.pc-move .move-ctl { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+
+/* The two loose inputs were the only square things left in the row — a text
+   box and a date box sitting next to pill selects and pill buttons. */
+.move-ctl input[type="text"], .move-ctl input[type="date"] {
+  padding: 5px 10px; font-size: 12.5px; color: var(--ink);
+  background: rgba(255, 255, 255, 0.75);
+  border: 1px solid var(--line-strong); border-radius: var(--r-pill);
+}
+.move-ctl input[type="text"] { width: 96px; }
+.move-ctl input[type="date"] { width: 132px; }
