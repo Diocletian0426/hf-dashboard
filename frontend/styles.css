@@ -1722,15 +1722,20 @@ summary.zone-rich::before { float: left; margin: 4px 8px 0 0; }
    x/y projection in index.html, so pins always land where they should.
    Layout: map beside a detail panel; on phones the panel drops underneath. */
 
-/* The map is the headline (owner decision): it fills its card's WIDTH and
-   takes the height its 540:600 shape demands, so there is no empty side
-   margin and the drawing is as large as the column allows. The popup
-   overlays beside the clicked pin. */
+/* The map is a summary, not the headline (owner, reversing the earlier call):
+   filling the card's width made a 540:600 drawing tall enough to push
+   everything under it off the screen. It is now capped by HEIGHT — see
+   --map-h on .map-panel — and centred, so the card keeps its width and the
+   page below stays reachable. The popup still overlays beside the pin. */
 .map-layout {
   display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(300px, 1fr);
   gap: var(--sp-4); align-items: start; margin-bottom: var(--sp-5);
 }
 .map-panel {
+  /* the one number that sets how tall the map is — change it here. The
+     peninsula is tall and narrow and the card is wide, so height is what
+     decides how big it reads; the sea either side comes with the shape. */
+  --map-h: 420px;
   position: relative;                    /* the pin popup anchors to this */
   background: var(--surface); border: 1px solid var(--line);
   -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
@@ -1743,8 +1748,14 @@ summary.zone-rich::before { float: left; margin: 4px 8px 0 0; }
   flex-wrap: wrap; margin-bottom: var(--sp-2);
 }
 .map-title { font-size: var(--fs-lg); font-weight: 500; }
-/* zoom controls + the state jumper, pushed to the header's right edge */
-.map-tools { margin-left: auto; display: inline-flex; align-items: center; gap: var(--sp-2); }
+/* zoom controls + the state jumper, floating on the map's top-right corner.
+   z-index clears Leaflet's own layers (panes 400, controls 1000) — they are
+   siblings in this stacking context, not children of the map. */
+.map-box { position: relative; }
+.map-tools {
+  position: absolute; top: 10px; right: 10px; z-index: 1100;
+  display: inline-flex; align-items: center; gap: var(--sp-2);
+}
 .map-tools .ctx-switch { max-width: 190px; }
 .map-tools .btn { padding: 4px 12px; min-height: 0; line-height: 1.4; }
 /* frosted controls (owner request): translucent over the map so they read as
@@ -1755,15 +1766,19 @@ summary.zone-rich::before { float: left; margin: 4px 8px 0 0; }
   -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
 }
 .map-tools .btn:hover, .map-tools .ctx-switch:hover { background: rgba(255, 255, 255, 0.85); }
-/* Width-sized: the drawing spans the card and its height follows the
-   viewBox shape — no internal letterboxing, no wasted margin. */
-.map-svg { display: block; width: 100%; height: auto; }
-/* zoom & pan: wheel zoom needs the cursor to say the map is grabbable, and
-   pan-y keeps one-finger page scrolling alive on phones (buttons + the
-   state dropdown do the zooming there) */
-.map-svg { touch-action: pan-y; }
-.map-svg.zoomed { cursor: grab; }
-.map-svg.dragging { cursor: grabbing; user-select: none; }
+/* The map box: full card width, height set by --map-h. Leaflet needs a real
+   height on its container or it renders nothing at all. */
+#map-host {
+  height: var(--map-h, 340px);
+  border-radius: var(--r-md); overflow: hidden;
+  background: #dfe8f2;                   /* sea, for the moment before tiles land */
+}
+/* Leaflet's own chrome, brought into the dashboard's type and palette */
+.leaflet-container { font-family: var(--font); font-size: var(--fs-xs); background: #dfe8f2; }
+.leaflet-control-attribution {
+  background: rgba(255, 255, 255, 0.75); font-size: 10px; color: var(--ink-3);
+}
+.leaflet-control-attribution a { color: var(--ink-2); }
 
 /* ---- states: recessive geographic context, NOT a data encoding ----
    Four tints, assigned so no two neighbouring states share one (four-colour
@@ -1787,23 +1802,47 @@ summary.zone-rich::before { float: left; margin: 4px 8px 0 0; }
 }
 
 /* pins — one <g> per site, colour = report freshness */
+/* A pin is an HTML marker anchored at its site's point. --fx/--fy are the
+   fan: a SCREEN nudge away from that point when several sites share it, so
+   the marker still sits on the one coordinate we actually know. */
 .pin { cursor: pointer; }
-.pin-halo { fill: currentColor; opacity: 0.18; transition: r 0.15s ease, opacity 0.15s ease; }
-.pin-dot  { fill: currentColor; stroke: #fff; stroke-width: 2; }
+.pin-dot {
+  position: absolute; left: var(--fx, 0px); top: var(--fy, 0px);
+  width: 15px; height: 15px; margin: -7.5px 0 0 -7.5px;
+  border: 2px solid #fff; border-radius: 50%; background: currentColor;
+  /* The white ring is a BORDER, not part of this shadow: the soft halo uses
+     relative-colour syntax, and on a browser that does not know it the whole
+     shadow is dropped — the ring has to survive that. */
+  box-shadow: 0 0 0 5px rgb(from currentColor r g b / 0.22), 0 1px 3px rgba(20, 45, 90, 0.35);
+  transition: box-shadow 0.15s ease;
+}
 .pin-label {
-  font-family: var(--font); font-size: 11px; font-weight: 600;
-  fill: var(--ink-2); paint-order: stroke;
-  stroke: rgba(255, 255, 255, 0.9); stroke-width: 3px; stroke-linejoin: round;
-  pointer-events: none;
+  position: absolute; left: calc(var(--fx, 0px) + 11px); top: var(--fy, 0px);
+  transform: translateY(-50%);
+  padding: 1px 5px; border-radius: 5px;
+  background: rgba(255, 255, 255, 0.82);
+  font-size: 11px; font-weight: 600; line-height: 1.5; white-space: nowrap;
+  color: var(--ink-2); pointer-events: none;
+}
+/* label on the far side when the fan puts the pin on the left of its group */
+.pin.lbl-l .pin-label { left: auto; right: calc(-1 * var(--fx, 0px) + 11px); }
+/* the thread back to the point the fan spread out from */
+.pin-leader {
+  position: absolute; left: 0; top: 0; height: 1px;
+  background: currentColor; opacity: 0.5;
+  transform-origin: 0 50%; pointer-events: none;
 }
 .pin.ok   { color: var(--ok); }
 .pin.warn { color: var(--warn); }
 .pin.bad  { color: var(--danger); }
-.pin:hover .pin-halo { opacity: 0.3; }
-.pin:hover .pin-label, .pin.sel .pin-label { fill: var(--ink); }
-.pin.sel .pin-halo { opacity: 0.34; }
-.pin.sel .pin-dot { stroke: var(--charcoal); stroke-width: 2.5; }
-.pin-leader { stroke: currentColor; stroke-width: 1; opacity: 0.45; }
+.pin:hover .pin-label, .pin.sel .pin-label { color: var(--ink); background: #fff; }
+.pin:hover .pin-dot {
+  box-shadow: 0 0 0 8px rgb(from currentColor r g b / 0.3), 0 1px 3px rgba(20, 45, 90, 0.35);
+}
+.pin.sel .pin-dot {
+  border-color: var(--charcoal);
+  box-shadow: 0 0 0 9px rgb(from currentColor r g b / 0.34), 0 1px 3px rgba(20, 45, 90, 0.35);
+}
 
 .map-legend {
   display: flex; gap: var(--sp-4); flex-wrap: wrap; align-items: center;

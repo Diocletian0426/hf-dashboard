@@ -4,7 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nexus — Overview</title>
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css" />
   <link rel="stylesheet" href="styles.css" />
+  <script src="vendor/leaflet/leaflet.js"></script>
 </head>
 <body>
 
@@ -15,23 +17,41 @@
     <p id="freshness" class="page-caption">Loading…</p>
 
     <!-- ================= SITE MAP =================================
-         Peninsular Malaysia as inline SVG. No map library and no tile
-         server: Leaflet/Mapbox/Google all need an external fetch at run
-         time, which this project forbids (and would ship our site
-         locations to a third party). The outline is a simplified
-         coastline stored as lon/lat pairs; pins run through the SAME
-         projection, so a pin can never drift off the coast.
+         A REAL map: Leaflet (vendored, no CDN) over CARTO's raster tiles.
+
+         This reverses the rule that stood here before — "no map library
+         and no tile server" — on the owner's decision, 2026-08-14, asked
+         three times: the hand-drawn peninsula did not read as a map to
+         the office. What that rule was protecting, so the trade is on the
+         record and can be re-argued:
+
+           - the tile server sees our IP and WHICH PATCH of map is on
+             screen. It never sees the site list, the codes or any data —
+             the pins are drawn by us, on top. Zoomed into one site, that
+             patch is a hint.
+           - no signal, no tiles: the map goes blank where the drawing
+             used to work anywhere. The site cards below are unaffected.
+           - one more thing that can be slow or go down, on the page the
+             office opens first.
 
          Pin position, best source first:
            1. real coordinates, if the pulse view ever carries them
            2. the state in the project code (HF-SGR-001 -> Selangor)
-         Sites sharing one state fan out around that state's point with a
-         leader line back to it — nothing is silently stacked. -->
+         Nothing has (1) yet, so every pin is its STATE'S centre point.
+         Sites sharing a state fan out in SCREEN pixels around that one
+         point — not around invented coordinates — so zooming in gathers
+         them back onto the single place we actually know. The caption
+         under the title says so in words. -->
+
     <div class="map-layout">
       <section class="map-panel" id="map-panel">
         <div class="map-head">
           <span class="map-title">Where Our Sites Are</span>
           <span class="muted" id="map-count"></span>
+        </div>
+        <!-- the controls sit ON the map, the way every map puts them -->
+        <div class="map-box">
+          <div id="map-host"></div>
           <span class="map-tools">
             <select id="map-state" class="ctx-switch" aria-label="Zoom to a state">
               <option value="">Whole peninsula</option>
@@ -41,7 +61,6 @@
             <button type="button" class="btn" id="map-zoom-reset">Reset</button>
           </span>
         </div>
-        <div id="map-host"></div>
         <div class="map-legend">
           <span><i class="dot status-ok"></i> Reported yesterday or today</span>
           <span><i class="dot status-warn"></i> 2–3 days silent</span>
@@ -115,6 +134,11 @@
     // the meridian convergence is under 0.5%, so no projection maths needed.
     function project(lon, lat) {
       return { x: (lon - LON0) * SCALE, y: (LAT0 - lat) * SCALE };
+    }
+    // back again — the fan below still thinks in these units, and Leaflet
+    // wants lat/lon
+    function unproject(x, y) {
+      return [LAT0 - y / SCALE, LON0 + x / SCALE];      // [lat, lon] for Leaflet
     }
 
     // Simplified coastline, clockwise from the Perlis corner: north border,
@@ -290,66 +314,72 @@
       return out;
     }
 
-    function renderMap(pins) {
-      var parts = ['<svg class="map-svg" viewBox="0 0 ' + MAP_W + " " + MAP_H +
-                   '" role="img" aria-label="Map of our active sites in Peninsular Malaysia">'];
+    // ---- the map itself -------------------------------------------------
+    // OpenStreetMap's standard tiles: green land, blue water, roads and place
+    // names — the look the owner asked for, and free without an API key or a
+    // billing account (Google Maps needs both, and the key would sit in a
+    // public repo). Attribution is a licence condition, not decoration:
+    // Leaflet's corner credit stays.
+    //
+    // To change the look, this is the only line that moves. Alternatives that
+    // need no key either:
+    //   CARTO Voyager  https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png  (subdomains "abcd")
+    //   CARTO Positron https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png            (subdomains "abcd")
+    //   Esri Street    https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}
+    var TILE_URL  = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+    var TILE_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+    var TILE_SUB  = "";                  // set to "abcd" for the CARTO styles
+    // the whole peninsula — the view the map opens on and Reset returns to
+    var HOME = [[LAT1, LON0], [LAT0, LON1]];
 
-      // states first (fills + internal borders), then one coastline stroke on
-      // top so the outer edge reads as a single continuous line
-      // data-state names each path so the state dropdown can zoom to its
-      // bounding box; non-scaling strokes keep the borders hairline-thin at
-      // every zoom level instead of fattening with the geometry
-      STATES.forEach(function (st) {
-        parts.push('<path class="st st-' + st.tint + '" data-state="' + UI.esc(st.name) +
-                   '" vector-effect="non-scaling-stroke" d="' + pathOf(resolve(st.spec)) + '"/>');
+    function buildMap(pins) {
+      var map = L.map("map-host", {
+        zoomControl: false,          // the card header carries its own + / - / Reset
+        attributionControl: true,
+        minZoom: 5, maxZoom: 17,
+        // zoomSnap 0 = fractional zoom. With the default 1 (or even 0.25)
+        // fitBounds rounds DOWN to the next step, and the peninsula opened a
+        // quarter-level too far out with Sumatra padding the view.
+        zoomSnap: 0
       });
-      parts.push('<path class="map-coast" vector-effect="non-scaling-stroke" d="' + pathOf(COAST) + '"/>');
-      parts.push('<path class="map-isle" vector-effect="non-scaling-stroke" d="' + pathOf(PENANG_ISLE) + '"/>');
-      parts.push('<path class="map-isle" vector-effect="non-scaling-stroke" d="' + pathOf(LANGKAWI) + '"/>');
+      var tileOpts = { attribution: TILE_ATTR, maxZoom: 19, detectRetina: true };
+      if (TILE_SUB) tileOpts.subdomains = TILE_SUB;
+      L.tileLayer(TILE_URL, tileOpts).addTo(map);
+      map.fitBounds(HOME, { padding: [6, 6] });
 
-      STATES.forEach(function (st) {
-        if (!st.at) return;                 // too small to carry a label
-        var c = project(st.at[0], st.at[1]);
-        // data-x/-y let the zoom engine counter-scale the label around its
-        // own anchor so it keeps a constant on-screen size
-        parts.push('<text class="st-label" data-x="' + c.x.toFixed(1) + '" data-y="' + c.y.toFixed(1) +
-                   '" x="' + c.x.toFixed(1) + '" y="' + c.y.toFixed(1) + '">' +
-                   UI.escHtml(st.name) + "</text>");
-      });
-
+      var markers = {};
       pins.forEach(function (pin) {
         var p = pin.site.pulse;
         var h = health(p.last_report_date);
         var label = String(p.project_code || "").replace(/^HF-/, "");
-        var leader = (pin.x !== pin.ax || pin.y !== pin.ay)
-          ? '<line class="pin-leader" x1="' + pin.ax.toFixed(1) + '" y1="' + pin.ay.toFixed(1) +
-            '" x2="' + pin.x.toFixed(1) + '" y2="' + pin.y.toFixed(1) + '"/>'
-          : "";
-        // Labels flip inward near the map edges: a left-pointing label on a
-        // pin near the west edge runs past the viewBox and gets clipped
-        // (Kedah's fan was losing "...2A"/"...2B" — owner screenshot).
+        // dx/dy come out of placePins in map units, and one unit is about one
+        // pixel at the opening view — near enough to reuse them as the pixel
+        // fan straight off. The MARKER stays on the true point.
+        var dx = pin.x - pin.ax, dy = pin.y - pin.ay;
         var left = pin.side === "l";
-        if (pin.x < 75) left = false;
-        if (pin.x > MAP_W - 75) left = true;
-        parts.push(
-          // data-ax/-ay = the pin's geographic anchor. The zoom engine scales
-          // the whole group around it, so dot, label, leader and fan radius
-          // all keep a constant on-screen size while staying pinned to the map.
-          '<g class="pin ' + h.cls + '" data-project="' + UI.esc(p.project_id) + '" ' +
-             'data-ax="' + pin.ax.toFixed(1) + '" data-ay="' + pin.ay.toFixed(1) + '" ' +
-             'tabindex="0" role="button" aria-label="' + UI.esc(p.project_code + " " + (p.project_name || "")) + '">' +
-            leader +
-            '<circle class="pin-halo" cx="' + pin.x.toFixed(1) + '" cy="' + pin.y.toFixed(1) + '" r="15"/>' +
-            '<circle class="pin-dot" cx="' + pin.x.toFixed(1) + '" cy="' + pin.y.toFixed(1) + '" r="7"/>' +
-            '<text class="pin-label" text-anchor="' + (left ? "end" : "start") + '" ' +
-                  'x="' + (pin.x + (left ? -12 : 12)).toFixed(1) + '" y="' + (pin.y + 4).toFixed(1) + '">' +
-              UI.escHtml(label) + "</text>" +
-          "</g>"
-        );
+        var icon = L.divIcon({
+          className: "pin " + h.cls + (left ? " lbl-l" : ""),
+          iconSize: [0, 0], iconAnchor: [0, 0],
+          html: (dx || dy
+                  ? '<i class="pin-leader" style="width:' + Math.hypot(dx, dy).toFixed(1) + 'px;' +
+                    'transform:rotate(' + (Math.atan2(dy, dx) * 180 / Math.PI).toFixed(1) + 'deg)"></i>'
+                  : "") +
+                '<i class="pin-dot"></i>' +
+                '<b class="pin-label">' + UI.escHtml(label) + "</b>"
+        });
+        var m = L.marker(unproject(pin.ax, pin.ay), {
+          icon: icon, keyboard: true, riseOnHover: true,
+          title: p.project_code + " " + (p.project_name || "")
+        }).addTo(map);
+        // the fan offset is a screen nudge, so it lives on the element, not
+        // on the coordinates
+        var el = m.getElement();
+        el.style.setProperty("--fx", dx.toFixed(1) + "px");
+        el.style.setProperty("--fy", dy.toFixed(1) + "px");
+        markers[String(p.project_id)] = m;
       });
 
-      parts.push("</svg>");
-      return parts.join("");
+      return { map: map, markers: markers };
     }
 
     /* =====================================================================
@@ -720,7 +750,7 @@
         });
 
         var pins = placePins(placed);
-        mapHost.innerHTML = renderMap(pins);
+        var MAP = buildMap(pins);
         initFeed();
 
         var anyExact = placed.some(function (s) { return s.exact; });
@@ -744,42 +774,32 @@
           for (var i = 0; i < g.length; i++) g[i].classList.remove("sel");
         }
 
-        // The map is a tall narrow shape centred in a wide panel, so there is
-        // clear margin either side of it. Park the popup in that margin —
-        // BESIDE the drawing, never on top of it — picking the side the pin
-        // is already on. West-coast sites open left, east-coast open right,
-        // which is what makes the page feel balanced instead of lopsided.
-        // Anchor to the pin's DOT, not the <g>: the <g> box includes the
-        // label, which would drag the popup off to one side.
+        // Leaflet keeps the markers in its own layer, so the panel — not the
+        // map — is what the popup is measured against and parented to.
+        function pinEl(id) {
+          var m = MAP.markers[String(id)];
+          return m ? m.getElement() : null;
+        }
+
+        // The map now fills the card, so there is no side margin to park in:
+        // the popup sits BESIDE the pin, on whichever side has room, and is
+        // clamped inside the panel. Anchored to the pin's DOT rather than its
+        // box, because the box also holds the label and the leader.
         function placePop() {
           if (!popEl || !popDot) return;
           if (getComputedStyle(popEl).position === "static") return;   // phone: docked under the map
-          var svg = mapHost.querySelector(".map-svg");
-          if (!svg) return;
           var pr = panelEl.getBoundingClientRect();
-          var sr = svg.getBoundingClientRect();
           var br = popDot.getBoundingClientRect();
           var w = popEl.offsetWidth, h = popEl.offsetHeight;
-          var gap = 18, edge = 12;
+          var gap = 16, edge = 12;
 
-          var svgL = sr.left - pr.left, svgR = sr.right - pr.left;
           var pinX = br.left + br.width / 2 - pr.left;
-          var leftSlot = svgL - gap - w;               // popup's left edge, parked left
-          var rightSlot = svgR + gap;                  // popup's left edge, parked right
-          var fitsLeft = leftSlot >= edge;
-          var fitsRight = rightSlot + w <= pr.width - edge;
-          var preferLeft = pinX < (svgL + svgR) / 2;
-
           var left, origin;
-          if (preferLeft && fitsLeft)       { left = leftSlot;  origin = "right center"; }
-          else if (!preferLeft && fitsRight){ left = rightSlot; origin = "left center"; }
-          else if (fitsLeft)                { left = leftSlot;  origin = "right center"; }
-          else if (fitsRight)               { left = rightSlot; origin = "left center"; }
+          if (pinX + gap + w <= pr.width - edge) { left = pinX + gap; origin = "left center"; }
+          else if (pinX - gap - w >= edge)       { left = pinX - gap - w; origin = "right center"; }
           else {
-            // window too narrow for a margin — fall back to beside the pin
-            left = pinX + gap; origin = "left center";
-            if (left + w > pr.width - edge) { left = pinX - gap - w; origin = "right center"; }
-            left = Math.max(edge, Math.min(left, pr.width - w - edge));
+            left = Math.max(edge, Math.min(pinX + gap, pr.width - w - edge));
+            origin = "left center";
           }
 
           // vertically centred on the pin — that alignment is what ties the
@@ -794,10 +814,10 @@
           var p = byId[String(id)];
           if (!p) return;
           closePop();
-          var chosen = mapHost.querySelector('.pin[data-project="' + id + '"]');
+          var chosen = pinEl(id);
           if (chosen) {
             chosen.classList.add("sel");
-            chosen.parentNode.appendChild(chosen);   // bring to front
+            MAP.markers[String(id)].setZIndexOffset(1000);   // over its neighbours
             popDot = chosen.querySelector(".pin-dot");
           }
           popEl = document.createElement("div");
@@ -810,30 +830,26 @@
           placePop();
         }
 
-        // A drag that ends over the map must not read as a click — the pan
-        // handler raises this for one tick after any real drag.
-        var dragJustEnded = false;
-
-        mapHost.addEventListener("click", function (ev) {
-          if (dragJustEnded) return;
-          var pin = ev.target.closest ? ev.target.closest(".pin") : null;
-          if (pin) select(pin.getAttribute("data-project"));
-        });
-        mapHost.addEventListener("keydown", function (ev) {
-          if (ev.key !== "Enter" && ev.key !== " ") return;
-          var pin = ev.target.closest ? ev.target.closest(".pin") : null;
-          if (pin) { ev.preventDefault(); select(pin.getAttribute("data-project")); }
+        // ---- clicks, keys and the header controls -------------------------
+        Object.keys(MAP.markers).forEach(function (id) {
+          MAP.markers[id].on("click", function (ev) {
+            L.DomEvent.stopPropagation(ev);          // not a click on the map
+            select(id);
+          });
         });
         document.addEventListener("keydown", function (ev) {
           if (ev.key === "Escape") closePop();
         });
-        window.addEventListener("resize", placePop);
+        // the popup is parked in panel coordinates, so it has to be re-parked
+        // whenever the map moves under it
+        MAP.map.on("move zoom resize", placePop);
+        MAP.map.on("click", closePop);               // empty map = dismiss
 
         // Clicking anywhere that is not the popup, a pin or the map tools
         // closes the popup — the × stays for keyboard users, but nobody
         // should have to aim for it (owner request 2026-08-03).
         document.addEventListener("click", function (ev) {
-          if (!popEl || dragJustEnded) return;
+          if (!popEl) return;
           if (popEl.contains(ev.target)) return;
           if (ev.target.closest &&
               (ev.target.closest(".pin") || ev.target.closest(".map-tools"))) return;
@@ -846,186 +862,44 @@
         // "most neglected" contest forever. The map now loads clean; the
         // freshness colours still tell the story, and the popup is one click.
 
-        /* ---- zoom & pan (owner request 2026-08-03) ------------------------
-           The SVG viewBox IS the camera: zooming shrinks the window, panning
-           slides it. Pins and state labels counter-scale around their own
-           anchors so they keep a constant on-screen size at every zoom, and
-           the state dropdown flies the camera to that state's bounding box. */
-        var svgEl = mapHost.querySelector(".map-svg");
+        /* ---- zoom, pan and the state jumper -------------------------------
+           Leaflet owns the camera now — wheel, drag, double-click and pinch
+           all come for free. These three buttons and the dropdown stay
+           because the office uses them, and because a trackpad user should
+           not have to know the gestures. */
         var stateSel = document.getElementById("map-state");
-        var VB = { x: 0, y: 0, w: MAP_W, h: MAP_H };     // current camera
-        var MAXZ = 8, flying = null;
 
-        // The dropdown is filled from the same table the map is drawn from,
-        // so the two can never disagree. The map keeps its short labels
-        // (cartographic shorthand), the dropdown speaks in full names.
+        // The dropdown is filled from the same table the map used to be drawn
+        // from, so the two can never disagree. Each state's outline is still
+        // stored here — no longer to draw, but to know where to fly to.
         var STATE_FULL = { "KL": "Kuala Lumpur", "N. Sembilan": "Negeri Sembilan" };
+        var STATE_BOUNDS = {};
         STATES.forEach(function (st) {
+          var pts = resolve(st.spec).map(function (c) { return [c[1], c[0]]; });  // lon/lat -> lat/lng
+          STATE_BOUNDS[st.name] = L.latLngBounds(pts);
           var o = document.createElement("option");
           o.value = st.name; o.textContent = STATE_FULL[st.name] || st.name;
           stateSel.appendChild(o);
         });
 
-        function applyView() {
-          svgEl.setAttribute("viewBox", VB.x.toFixed(2) + " " + VB.y.toFixed(2) +
-                             " " + VB.w.toFixed(2) + " " + VB.h.toFixed(2));
-          var s = VB.w / MAP_W;                          // = 1 / zoom
-          // Pins grow as you zoom, but at HALF the rate of the geography
-          // (square root): at 4x zoom a pin looks 2x bigger. Full growth made
-          // them comical balloons, full counter-scale felt like nothing was
-          // happening (owner feedback) — closer should FEEL closer.
-          var ps = Math.sqrt(s);
-          var els = mapHost.querySelectorAll(".pin"), i, el, ax, ay;
-          for (i = 0; i < els.length; i++) {
-            el = els[i]; ax = +el.getAttribute("data-ax"); ay = +el.getAttribute("data-ay");
-            el.setAttribute("transform", "translate(" + (ax * (1 - ps)).toFixed(2) + " " +
-                            (ay * (1 - ps)).toFixed(2) + ") scale(" + ps.toFixed(4) + ")");
-          }
-          els = mapHost.querySelectorAll(".st-label");
-          for (i = 0; i < els.length; i++) {
-            el = els[i]; ax = +el.getAttribute("data-x"); ay = +el.getAttribute("data-y");
-            el.setAttribute("transform", "translate(" + (ax * (1 - s)).toFixed(2) + " " +
-                            (ay * (1 - s)).toFixed(2) + ") scale(" + s.toFixed(4) + ")");
-          }
-          svgEl.classList.toggle("zoomed", VB.w < MAP_W - 0.5);
-          placePop();                                    // popup follows its pin
-        }
-
-        function clampVB() {
-          VB.w = Math.min(MAP_W, Math.max(MAP_W / MAXZ, VB.w));
-          VB.h = VB.w * (MAP_H / MAP_W);
-          VB.x = Math.min(MAP_W - VB.w, Math.max(0, VB.x));
-          VB.y = Math.min(MAP_H - VB.h, Math.max(0, VB.y));
-        }
-
-        // client px -> map units, honouring the letterbox that
-        // preserveAspectRatio (default "meet") adds when the element and the
-        // viewBox have different shapes
-        function toMap(cx, cy) {
-          var r = svgEl.getBoundingClientRect();
-          var k = Math.min(r.width / VB.w, r.height / VB.h);
-          var ox = (r.width - VB.w * k) / 2, oy = (r.height - VB.h * k) / 2;
-          return { x: VB.x + (cx - r.left - ox) / k,
-                   y: VB.y + (cy - r.top - oy) / k, k: k };
-        }
-
-        function zoomAt(factor, cx, cy) {
-          if (flying) { cancelAnimationFrame(flying); flying = null; }
-          var m = toMap(cx, cy);
-          var oldW = VB.w;
-          VB.w = Math.min(MAP_W, Math.max(MAP_W / MAXZ, VB.w / factor));
-          var f = oldW / VB.w;                           // the factor that stuck
-          VB.h = VB.w * (MAP_H / MAP_W);
-          // keep the point under the cursor stationary
-          VB.x = m.x - (m.x - VB.x) / f;
-          VB.y = m.y - (m.y - VB.y) / f;
-          clampVB();
-          stateSel.value = "";                           // manual zoom leaves the state
-          applyView();
-        }
-
-        function flyTo(target) {
-          if (flying) cancelAnimationFrame(flying);
-          var from = { x: VB.x, y: VB.y, w: VB.w };
-          var t0 = performance.now(), DUR = 350;
-          function stepFly(now) {
-            var t = Math.min(1, (now - t0) / DUR);
-            var e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-            VB.x = from.x + (target.x - from.x) * e;
-            VB.y = from.y + (target.y - from.y) * e;
-            VB.w = from.w + (target.w - from.w) * e;
-            VB.h = VB.w * (MAP_H / MAP_W);
-            applyView();
-            flying = t < 1 ? requestAnimationFrame(stepFly) : null;
-          }
-          flying = requestAnimationFrame(stepFly);
-        }
-
-        // an aspect-correct, padded, clamped camera around a bounding box
-        function cameraFor(bb) {
-          var pad = 0.18;
-          var w = bb.width * (1 + pad * 2), h = bb.height * (1 + pad * 2);
-          if (w / h < MAP_W / MAP_H) w = h * (MAP_W / MAP_H);
-          else h = w * (MAP_H / MAP_W);
-          w = Math.min(MAP_W, Math.max(MAP_W / MAXZ, w));
-          h = w * (MAP_H / MAP_W);
-          var x = bb.x + bb.width / 2 - w / 2, y = bb.y + bb.height / 2 - h / 2;
-          return { x: Math.min(MAP_W - w, Math.max(0, x)),
-                   y: Math.min(MAP_H - h, Math.max(0, y)), w: w, h: h };
-        }
-
         stateSel.addEventListener("change", function () {
-          if (!this.value) { flyTo({ x: 0, y: 0, w: MAP_W, h: MAP_H }); return; }
-          var stPath = mapHost.querySelector('.st[data-state="' + this.value + '"]');
-          if (stPath) flyTo(cameraFor(stPath.getBBox()));
+          closePop();
+          if (!this.value) { MAP.map.flyToBounds(HOME, { padding: [10, 10] }); return; }
+          var b = STATE_BOUNDS[this.value];
+          if (b) MAP.map.flyToBounds(b, { padding: [24, 24] });
         });
 
         document.getElementById("map-zoom-in").addEventListener("click", function () {
-          var r = svgEl.getBoundingClientRect();
-          zoomAt(1.5, r.left + r.width / 2, r.top + r.height / 2);
+          MAP.map.zoomIn();
         });
         document.getElementById("map-zoom-out").addEventListener("click", function () {
-          var r = svgEl.getBoundingClientRect();
-          zoomAt(1 / 1.5, r.left + r.width / 2, r.top + r.height / 2);
+          MAP.map.zoomOut();
         });
         document.getElementById("map-zoom-reset").addEventListener("click", function () {
           stateSel.value = "";
-          flyTo({ x: 0, y: 0, w: MAP_W, h: MAP_H });
+          closePop();
+          MAP.map.flyToBounds(HOME, { padding: [10, 10] });
         });
-
-        // Wheel to zoom at the cursor — the standard map gesture. The factor
-        // is exponential in the wheel delta rather than a fixed step: a mouse
-        // notch (deltaY ±100) gives a gentle ~9%, a trackpad's stream of small
-        // deltas glides smoothly, and one event can never jump more than 25%.
-        svgEl.addEventListener("wheel", function (ev) {
-          ev.preventDefault();
-          var f = Math.exp(-ev.deltaY * 0.00085);
-          zoomAt(Math.min(1.25, Math.max(0.8, f)), ev.clientX, ev.clientY);
-        }, { passive: false });
-
-        svgEl.addEventListener("dblclick", function (ev) {
-          ev.preventDefault();
-          zoomAt(2, ev.clientX, ev.clientY);
-        });
-
-        // drag to pan when zoomed in. Mouse only, on purpose: on a phone one
-        // finger must keep scrolling the PAGE (touch-action: pan-y in the
-        // stylesheet), and the buttons + state dropdown cover zooming there.
-        var drag = null;
-        svgEl.addEventListener("pointerdown", function (ev) {
-          if (ev.pointerType !== "mouse" || ev.button !== 0) return;
-          if (VB.w >= MAP_W - 0.5) return;               // not zoomed in
-          // NO pointer capture here: capturing on the down-stroke retargets
-          // the coming click to the svg, which silently killed every pin
-          // click while zoomed (owner bug report). Capture is taken only
-          // once real movement makes this an actual drag.
-          drag = { id: ev.pointerId, x: ev.clientX, y: ev.clientY, moved: false };
-        });
-        svgEl.addEventListener("pointermove", function (ev) {
-          if (!drag) return;
-          if (!drag.moved) {
-            if (Math.abs(ev.clientX - drag.x) + Math.abs(ev.clientY - drag.y) <= 4) return;
-            drag.moved = true;                           // now it's a drag
-            svgEl.setPointerCapture(drag.id);
-            svgEl.classList.add("dragging");
-          }
-          var k = toMap(0, 0).k;
-          VB.x -= (ev.clientX - drag.x) / k;
-          VB.y -= (ev.clientY - drag.y) / k;
-          clampVB(); applyView();
-          drag.x = ev.clientX; drag.y = ev.clientY;
-        });
-        function endDrag() {
-          if (!drag) return;
-          svgEl.classList.remove("dragging");
-          if (drag.moved) {
-            dragJustEnded = true;
-            setTimeout(function () { dragJustEnded = false; }, 0);
-          }
-          drag = null;
-        }
-        svgEl.addEventListener("pointerup", endDrag);
-        svgEl.addEventListener("pointercancel", endDrag);
 
         // ---- the site board under the map ----
         var TIERS = [
