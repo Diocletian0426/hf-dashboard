@@ -53,6 +53,11 @@
       <span><span class="badge badge-anomaly">check</span> at least one punch that day could not
         be location-verified — outside the site fence, weak GPS, or the site has no fence set</span>
       <span><span class="badge badge-gray">on site</span> punched in, no punch out yet</span>
+      <span><span class="badge badge-anomaly">Closed By Office</span> in the raw punches: the
+        office entered this punch-out (Close Shift) — Remove retracts it</span>
+      <span><span class="badge badge-anomaly">Auto Closed</span> in the raw punches: no punch-out
+        by 6 AM next day, so the system closed the shift at 17:30 with no overtime — Remove it and
+        use Close Shift if real overtime was worked</span>
     </p>
 
     <div class="table-wrap" id="month-wrap" hidden>
