@@ -1772,6 +1772,13 @@ summary.zone-rich::before { float: left; margin: 4px 8px 0 0; }
   height: var(--map-h, 340px);
   border-radius: var(--r-md); overflow: hidden;
   background: #dfe8f2;                   /* sea, for the moment before tiles land */
+  /* Trap Leaflet's internal panes (z-index 200–700: tiles, markers, its own
+     popup layer) inside this element's OWN stacking context, so they can
+     never rise above sibling overlays like the pin popup (.map-pop, z-index
+     20). Without this the marker pane (600) beats the popup (20) and the
+     namecard renders BEHIND the map. The drawn-SVG map this popup was built
+     against had no z-indexed layers, which is why it used to look fine. */
+  position: relative; z-index: 0;
 }
 /* Leaflet's own chrome, brought into the dashboard's type and palette */
 .leaflet-container { font-family: var(--font); font-size: var(--fs-xs); background: #dfe8f2; }
