@@ -127,6 +127,7 @@
     no_gps: "No GPS",
     no_geofence: "Site Has No GPS Boundary",
     office_closed: "Closed By Office",
+    auto_closed: "Auto Closed",
 
     /* machine status + common machine types */
     operating: "Operating",

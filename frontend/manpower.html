@@ -181,9 +181,20 @@
       }).join("") + (withUnassign ? '<option value="unassign">— unassigned —</option>' : "");
     }
 
+    // The row shows one button. Seven controls per row — a site dropdown, a
+    // remarks box, a date, and four buttons — was either a horizontal scroll
+    // or a two-line row 110px tall, repeated for every worker on the page.
+    // They live in the record card that already opens under the row instead.
     function actionCell(r) {
       if (!MP.canMove) return "";
-      return '<td><span class="move-ctl">' +
+      return '<td><button type="button" class="btn mp-open" data-action="card" data-staff="' +
+             r.staff_id + '" title="Open this worker\'s record — move, edit, plan, mark left">' +
+             "Manage</button></td>";
+    }
+
+    // the same controls as before, now inside the card
+    function moveControls(r) {
+      return '<span class="move-ctl">' +
              '<select data-staff="' + r.staff_id + '"><option value="">move to…</option>' +
              siteOptions(true) + "</select>" +
              '<input type="text" data-staff-remarks="' + r.staff_id + '" size="8" placeholder="remarks"' +
@@ -196,7 +207,7 @@
              '" data-name="' + esc(r.full_name) + '" title="record a FUTURE move — nothing changes until Execute">plan</button>' +
              '<button type="button" class="danger" data-action="mark-left" data-staff="' + r.staff_id +
              '" data-name="' + esc(r.full_name) + '">left</button>' +
-             "</span></td>";
+             "</span>";
     }
 
     function rowSearchAttr(r) {
@@ -326,7 +337,7 @@
              '<div class="group-head"><span class="zone-name">' + escHtml(title) + "</span> " +
              chips.join(" ") + "</div>" +
              '<div class="group-meta">' + metaBits.join(" · ") + "</div></summary>" +
-             '<div class="table-wrap table-stack"><table>' +
+             '<div class="table-wrap table-stack"><table class="mp-table">' +
              "<thead><tr><th>Code</th><th>Name</th><th>" + (byRole ? "Site" : "Role") + "</th><th>Company</th>" +
              "<th>Last reported</th>" +
              (MP.canMove ? "<th>Actions</th>" : "") + "</tr></thead>" +
@@ -630,7 +641,11 @@
         histHtml += '<div class="pc-meta">+ ' + (hist.length - 8) + " older move(s) recorded</div>";
       }
 
-      return '<tr class="pile-card-row"><td colspan="6"><div class="pile-card">' + head +
+      var moveBlock = MP.canMove
+        ? '<div class="pc-move"><h3>Move this worker</h3>' + moveControls(r) + "</div>"
+        : "";
+
+      return '<tr class="pile-card-row"><td colspan="6"><div class="pile-card">' + head + moveBlock +
              '<div class="pc-grid"><div><h3>Movement history</h3>' +
              (histHtml || '<div class="muted-line">No moves recorded yet — backfill via the Recent moves panel.</div>') +
              '<div id="wcf-' + r.staff_id + '"></div></div>' +
@@ -1089,6 +1104,20 @@
           var act = btn.getAttribute("data-action");
           var staffId = btn.getAttribute("data-staff");
           var name = btn.getAttribute("data-name");
+
+          // the row's Manage button — same card the row click opens, but
+          // reachable from the keyboard
+          if (act === "card") {
+            rememberOpenGroups();
+            if (MP.cardOpen === staffId) { MP.cardOpen = null; render(); return; }
+            MP.cardOpen = staffId;
+            if (!MP.cardCache[staffId]) {
+              try { MP.cardCache[staffId] = await Dash.getStaffDetail(staffId); }
+              catch (e) { MP.cardCache[staffId] = {}; }
+            }
+            render();
+            return;
+          }
 
           if (act === "add-form")   { MP.showAdd = true; MP.editing = null; MP.okMsg = ""; rememberOpenGroups(); render(); return; }
           if (act === "add-cancel") { MP.showAdd = false; rememberOpenGroups(); render(); return; }

@@ -17,8 +17,15 @@
     <div id="geofence-banner"></div>
     <div id="open-shifts"></div>
 
+    <!-- Two questions, two views. DAY answers "who is on site today"; MONTH
+         answers "what do I pay this man" — one row per worker, his own days,
+         his own hours, his own overtime. -->
     <div class="filters">
-      <label>Date <input type="date" id="f-date" /></label>
+      <span class="view-switch" id="view-switch">
+        <a href="#" data-view="day">Day</a><a href="#" data-view="month">Month</a>
+      </span>
+      <label id="lbl-date">Date <input type="date" id="f-date" /></label>
+      <label id="lbl-month" hidden>Month <input type="month" id="f-month" /></label>
       <label>Site
         <select id="f-site"><option value="">All sites</option></select>
       </label>
@@ -26,16 +33,42 @@
     </div>
 
     <div class="table-wrap">
-      <table>
+      <table class="att-table">
         <thead>
           <tr>
             <th>Worker</th><th>Site</th><th>In</th><th>Out</th>
-            <th class="num">Hours</th><th>Flags</th>
+            <th class="num">Working Hours</th><th class="num">Over Time</th><th>Attention</th>
           </tr>
         </thead>
-        <tbody id="rows"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
+        <tbody id="rows"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
       </table>
     </div>
+
+    <!-- The badges in the last column used to be called "flags", which told
+         nobody anything. They are spelled out here, and each badge repeats its
+         line as a tooltip. Hidden until there are rows to explain. -->
+    <p class="table-legend" id="legend" hidden>
+      <span><span class="badge badge-anomaly">overlong</span> the shift ran longer than the
+        system's limit — usually a worker who forgot to punch out</span>
+      <span><span class="badge badge-anomaly">check</span> at least one punch that day could not
+        be location-verified — outside the site fence, weak GPS, or the site has no fence set</span>
+      <span><span class="badge badge-gray">on site</span> punched in, no punch out yet</span>
+    </p>
+
+    <div class="table-wrap" id="month-wrap" hidden>
+      <table class="att-table">
+        <thead>
+          <tr>
+            <th>Worker</th><th>Sites</th>
+            <th class="num">Days Worked</th>
+            <th class="num">Working Hours</th><th class="num">Over Time</th>
+            <th>Attention</th>
+          </tr>
+        </thead>
+        <tbody id="month-rows"></tbody>
+      </table>
+    </div>
+    <p class="table-legend" id="month-note" hidden></p>
 
     <div id="punches-section" style="display:none">
       <h2 class="section-title">Raw punches</h2>
@@ -57,9 +90,64 @@
   <script src="config.js"></script>
   <script src="dashboard-client.js"></script>
   <script src="ui.js"></script>
+  <!-- DEV ONLY: does nothing unless the URL has ?demo=1, and never writes.
+       Delete this line + attendance-demo.js before the pilot starts. -->
+  <script src="attendance-demo.js"></script>
   <script src="shell.js"></script>
 
   <script>
+    /* =====================================================================
+       HOW A DAY IS COUNTED — the company rule (owner-confirmed 2026-08-14)
+       ---------------------------------------------------------------------
+       ONE shift, 08:30–17:30. Working Hours = time inside that window minus
+       the 1 h unpaid lunch (a day with 6 h or less inside the window keeps
+       its lunch); Over Time = everything AFTER 17:30, in full, to the
+       punch-out. Time before 08:30 never counts, and there are no night
+       starts. The worker's phone computes the SAME rule (splitMinutes in
+       hf-punch-system/frontend/index.html): a worker who sees one figure on
+       the phone and another on the office screen will bring the phone to
+       the office. Change both together, or neither.
+       ===================================================================== */
+    var SHIFT_START_MIN = 8 * 60 + 30;   // 08:30 — the working day starts here
+    var SHIFT_END_MIN   = 17 * 60 + 30;  // 17:30 — anything after this is OT
+    var LUNCH_MIN       = 60;            // unpaid, out of the normal window
+    var LUNCH_AFTER_MIN = 6 * 60;        // short days keep their lunch hour
+
+    // minutes-of-day in Malaysia for a timestamptz string (KL = UTC+8, no DST)
+    function klMinutes(ts) {
+      if (!ts) return null;
+      var d = new Date(ts);
+      if (isNaN(d)) return null;
+      return (d.getUTCHours() * 60 + d.getUTCMinutes() + 8 * 60) % 1440;
+    }
+
+    // The work/OT split for one day-row, from its REAL punch times (duration
+    // alone cannot express a clock-boundary rule). Null while still on shift.
+    function splitShift(s) {
+      var start = klMinutes(s.first_in_at), end = klMinutes(s.last_out_at);
+      if (start === null || end === null) return null;
+      if (end < start) end += 1440;                      // crossed midnight
+      var normal = Math.max(0, Math.min(end, SHIFT_END_MIN) - Math.max(start, SHIFT_START_MIN));
+      if (normal > LUNCH_AFTER_MIN) normal -= LUNCH_MIN;
+      var ot = Math.max(0, end - Math.max(start, SHIFT_END_MIN));
+      return {
+        gross:  (s.hours_on_site === null || s.hours_on_site === undefined) ? 0 : Number(s.hours_on_site),
+        normal: normal / 60,
+        ot:     ot / 60,
+        worked: (normal + ot) / 60
+      };
+    }
+
+    // 8.25 -> "8 Hours 15 Mins". Spelled out, and spelled the SAME way the
+    // worker's phone spells it — a decimal like "8.25" invites bad arithmetic,
+    // and a different wording invites an argument.
+    function hm(hours) {
+      if (hours === null || hours === undefined) return "—";
+      var mins = Math.round(Number(hours) * 60);
+      var h = Math.floor(mins / 60), m = mins % 60;
+      return h + (h === 1 ? " Hour " : " Hours ") + m + (m === 1 ? " Min" : " Mins");
+    }
+
     function setParam(name, value) {
       var p = new URLSearchParams(location.search);
       if (value) p.set(name, value); else p.delete(name);
@@ -284,13 +372,35 @@
       var date    = params.get("date") || Dash.todayKL();
       var site    = params.get("site") || "";
       var showRaw = params.get("punches") === "1";
+      var view    = params.get("view") === "month" ? "month" : "day";
+      var month   = params.get("month") || date.slice(0, 7);
 
       // wire the filters
-      var dateEl = document.getElementById("f-date");
-      var siteEl = document.getElementById("f-site");
+      var dateEl  = document.getElementById("f-date");
+      var monthEl = document.getElementById("f-month");
+      var siteEl  = document.getElementById("f-site");
       dateEl.value = date;
+      monthEl.value = month;
       dateEl.addEventListener("change", function () { setParam("date", this.value); });
+      monthEl.addEventListener("change", function () { setParam("month", this.value); });
       siteEl.addEventListener("change", function () { setParam("site", this.value); });
+
+      // view switch
+      var sw = document.getElementById("view-switch");
+      sw.querySelector('[data-view="' + view + '"]').classList.add("on");
+      sw.addEventListener("click", function (ev) {
+        var a = ev.target.closest ? ev.target.closest("[data-view]") : null;
+        if (!a) return;
+        ev.preventDefault();
+        setParam("view", a.getAttribute("data-view") === "month" ? "month" : "");
+      });
+      document.getElementById("lbl-date").hidden = (view === "month");
+      document.getElementById("lbl-month").hidden = (view !== "month");
+      document.getElementById("punch-toggle").hidden = (view === "month");
+      if (view === "month") {
+        document.querySelector(".table-wrap").hidden = true;
+        document.getElementById("month-wrap").hidden = false;
+      }
       document.getElementById("punch-toggle").textContent = showRaw ? "Hide raw punches" : "Show raw punches";
       document.getElementById("punch-toggle").addEventListener("click", function (e) {
         e.preventDefault(); setParam("punches", showRaw ? "" : "1");
@@ -321,26 +431,139 @@
         // read never delays the day's table
         loadOpenShifts();
 
-        // shifts
+        // ---- month view: one row per worker, his own numbers ---------------
+        if (view === "month") { await renderMonth(month, site); return; }
+
+        // ---- the shift table ----------------------------------------------
+        // One row per worker. The NAME is a button: it opens a detail row
+        // underneath holding the punches behind the numbers — each punch's
+        // time, how far from the site it was taken, and whether the location
+        // checked out. That detail is the answer to "why is this flagged",
+        // which is the only reason anyone opens this page twice.
         if (!shifts.length) {
-          tbody.innerHTML = '<tr><td colspan="6" class="empty">No punches on ' + date +
+          tbody.innerHTML = '<tr><td colspan="7" class="empty">No punches on ' + date +
             ". The punch app pilot hasn't started at the sites yet.</td></tr>";
         } else {
-          tbody.innerHTML = shifts.map(function (s) {
+          tbody.innerHTML = shifts.map(function (s, i) {
+            // the same words as the legend under the table, on hover
             var flags = [];
-            if (s.overlong_shift) flags.push('<span class="badge badge-anomaly">overlong</span>');
-            else if (s.has_anomaly) flags.push('<span class="badge badge-anomaly">check</span>');
-            if (s.in_count && !s.out_count) flags.push('<span class="badge badge-gray">on site</span>');
-            return "<tr>" +
-              "<td><strong>" + (s.full_name || "") + "</strong></td>" +
-              "<td>" + (s.project_name || "—") + "</td>" +
+            if (s.overlong_shift) {
+              flags.push('<span class="badge badge-anomaly" title="The shift ran longer than the ' +
+                         'system\'s limit — usually a worker who forgot to punch out.">overlong</span>');
+            } else if (s.has_anomaly) {
+              flags.push('<span class="badge badge-anomaly" title="At least one punch that day ' +
+                         'could not be location-verified — outside the site fence, weak GPS, or ' +
+                         'the site has no fence set.">check</span>');
+            }
+            if (s.in_count && !s.out_count) {
+              flags.push('<span class="badge badge-gray" title="Punched in, no punch out yet.">on site</span>');
+            }
+            var h = splitShift(s);
+            return '<tr class="shift-row" data-i="' + i + '">' +
+              '<td><button type="button" class="worker-btn" data-i="' + i + '" ' +
+                   'aria-expanded="false" aria-controls="d' + i + '">' +
+                 '<span class="caret" aria-hidden="true"></span>' +
+                 "<strong>" + esc(s.full_name) + "</strong></button></td>" +
+              "<td>" + esc(s.project_name || "—") + "</td>" +
               "<td>" + (s.first_in_at ? Dash.klTime(s.first_in_at) : "—") + "</td>" +
               "<td>" + (s.last_out_at ? Dash.klTime(s.last_out_at) : "—") + "</td>" +
-              '<td class="num">' + (s.hours_on_site === null || s.hours_on_site === undefined ? "—" : s.hours_on_site) + "</td>" +
+              // An overlong shift is a BROKEN shift — nearly always a missing
+              // punch-out. Printing "1011 Hours 8 Mins" of overtime next to a
+              // worker's name on the screen the office pays from is worse than
+              // printing nothing: someone will believe it. Fix the punch first.
+              '<td class="num">' + (h && !s.overlong_shift ? hm(h.normal) : "—") + "</td>" +
+              '<td class="num">' + (h && !s.overlong_shift
+                  ? (h.ot > 0 ? '<span class="ot-on">' + hm(h.ot) + "</span>" : hm(0))
+                  : "—") + "</td>" +
               "<td>" + (flags.join(" ") || "—") + "</td>" +
-            "</tr>";
+            "</tr>" +
+            '<tr class="detail-row" id="d' + i + '" hidden><td colspan="7"></td></tr>';
           }).join("");
+          document.getElementById("legend").hidden = false;
         }
+
+        /* ---- the detail drawer ---------------------------------------------
+           The raw punches are fetched ONCE, the first time a name is opened,
+           and reused for every other name on the page: get_recent_punches has
+           no per-worker filter, so asking again per worker would re-download
+           the same list. */
+        var punchCache = null;
+
+        async function punchesFor(name) {
+          if (punchCache === null) {
+            punchCache = await Dash.getRecentPunches(date, site || null, 1000);
+          }
+          // Matched on the name the two functions share. There is no staff_id
+          // in either payload today — when the read layer grows one, key on
+          // that instead: two workers can be called the same thing.
+          return (punchCache || []).filter(function (p) { return p.full_name === name; });
+        }
+
+        function punchLine(p) {
+          var v = p.verification_status || "";
+          var vCls = v === "verified" ? "verified" : "anomaly";
+          var lat = p.gps_lat !== undefined ? p.gps_lat : p.gps_latitude;
+          var lng = p.gps_lng !== undefined ? p.gps_lng : p.gps_longitude;
+          var where = (lat !== null && lat !== undefined && lng !== null && lng !== undefined)
+            ? Number(lat).toFixed(5) + ", " + Number(lng).toFixed(5)
+            : "no location recorded";
+          var dist = (p.distance_m === null || p.distance_m === undefined)
+            ? "" : " · " + Math.round(p.distance_m) + " m from the site";
+          return '<li><span class="pl-type">' + esc((p.punch_type || "").toUpperCase()) + "</span>" +
+                 '<span class="pl-time">' + Dash.klTime(p.punched_at) + "</span>" +
+                 '<span class="badge badge-' + vCls + '">' + esc(v.replace(/_/g, " ")) + "</span>" +
+                 '<span class="pl-where">' + esc(where) + esc(dist) + "</span></li>";
+        }
+
+        function detailHtml(s, punches) {
+          var h = splitShift(s);
+          var sum = s.overlong_shift
+            ? "This shift is longer than the system allows (" + hm(h ? h.gross : 0) +
+              " on site), so its hours are not counted. Almost always a missing punch-out — " +
+              "check the punches below, then have the office correct the record."
+            : h
+            ? "On site " + hm(h.gross) + " · by the company rule (08:30–17:30 less the 1 h lunch; OT only after 17:30): " +
+              hm(h.normal) + " Working Hours" +
+              (h.ot > 0 ? " + " + hm(h.ot) + " overtime" : ", no overtime")
+            : "Still on site — no punch out yet, so the day is not counted.";
+          var extra = "";
+          if (s.in_count > 1 || s.out_count > 1) {
+            extra = '<p class="detail-note">' + s.in_count + " punch-in(s), " + s.out_count +
+                    " punch-out(s) — the table shows the first in and the last out.</p>";
+          }
+          return '<div class="detail-box">' +
+            '<p class="detail-sum">' + esc(sum) + "</p>" + extra +
+            (punches.length
+              ? '<ul class="punch-lines">' + punches.map(punchLine).join("") + "</ul>"
+              : '<p class="detail-note">No raw punch rows came back for this worker.</p>') +
+          "</div>";
+        }
+
+        tbody.addEventListener("click", async function (ev) {
+          var btn = ev.target.closest ? ev.target.closest(".worker-btn") : null;
+          if (!btn) return;
+          var i = btn.getAttribute("data-i");
+          var row = document.getElementById("d" + i);
+          var open = btn.getAttribute("aria-expanded") === "true";
+          btn.setAttribute("aria-expanded", open ? "false" : "true");
+          btn.parentNode.parentNode.classList.toggle("open", !open);
+          row.hidden = open;
+          if (open || row.dataset.loaded) return;
+          var cell = row.querySelector("td");
+          cell.innerHTML = '<div class="detail-box"><p class="detail-note">Loading…</p></div>';
+          try {
+            var s = shifts[Number(i)];
+            var list = await punchesFor(s.full_name);
+            // the RPC hands them back newest first; a day reads forwards
+            list.sort(function (a, b) { return a.punched_at < b.punched_at ? -1 : 1; });
+            cell.innerHTML = detailHtml(s, list);
+            row.dataset.loaded = "1";
+          } catch (e) {
+            // rule 4: a failure is visible, never a silent blank
+            cell.innerHTML = '<div class="banner banner-red">Could not load this worker\'s punches: ' +
+                             esc(e.message || e) + "</div>";
+          }
+        });
 
         // raw punches
         if (showRaw && punches) {
@@ -356,7 +579,7 @@
                   "<td>" + (p.project_name || "—") + "</td>" +
                   '<td class="num">' + (p.distance_m === null || p.distance_m === undefined ? "—" : Math.round(p.distance_m)) + "</td>" +
                   '<td><span class="badge badge-' + vCls + '">' + UI.label(p.verification_status || "") + "</span>" +
-                  (canEdit && p.verification_status === "office_closed"
+                  (canEdit && (p.verification_status === "office_closed" || p.verification_status === "auto_closed")
                     ? ' <button type="button" data-reopen="' + p.punch_id + '">Remove</button>'
                     : "") +
                   "</td>" +
@@ -370,6 +593,157 @@
           '<div class="banner banner-red">Could not load: ' + (e.message || e) + "</div>";
       }
     };
+
+    /* =======================================================================
+       MONTH VIEW — the payroll question
+       -----------------------------------------------------------------------
+       One row per worker: HIS days, HIS hours, HIS overtime. Not the site's
+       and not the company's — this is the sheet wages are worked out from.
+
+       ⚠ STOPGAP: the read layer has no date-range function yet, only
+       get_daily_shifts(ONE date), so this asks for the month one day at a
+       time, six days at once. It is correct but chatty — 26 calls for a
+       month. The migration that replaces it with a single call is drafted
+       (get_shifts_range); when it lands, only daysOfMonth()/fetchMonth()
+       below change, and nothing else on this page moves.
+
+       ⚠ Workers are grouped BY NAME, because neither function returns a
+       staff_id yet. Two workers with the same name would merge into one
+       payroll row. The same migration fixes this. Until it is applied, a
+       duplicate name is a real risk on this screen — check the roster.
+       ======================================================================= */
+    function daysOfMonth(month) {
+      var parts = month.split("-");
+      var y = Number(parts[0]), m = Number(parts[1]);
+      var last = new Date(y, m, 0).getDate();
+      var today = Dash.todayKL();
+      var out = [];
+      for (var d = 1; d <= last; d++) {
+        var iso = month + "-" + (d < 10 ? "0" : "") + d;
+        if (iso > today) break;              // tomorrow has no attendance
+        out.push(iso);
+      }
+      return out;
+    }
+
+    async function fetchMonth(month, site, onProgress) {
+      var dates = daysOfMonth(month), all = [], i = 0;
+      while (i < dates.length) {
+        var batch = dates.slice(i, i + 6);
+        var got = await Promise.all(batch.map(function (d) {
+          return Dash.getShifts(d, site || null).then(function (rows) {
+            return (rows || []).map(function (r) {
+              if (!r.work_date) r.work_date = d;   // older rows may not carry it
+              return r;
+            });
+          });
+        }));
+        got.forEach(function (rows) { all = all.concat(rows); });
+        i += batch.length;
+        if (onProgress) onProgress(Math.min(i, dates.length), dates.length);
+      }
+      return all;
+    }
+
+    // day rows -> one bucket per worker, added up ONE DAY AT A TIME
+    function byWorker(rows) {
+      var map = {};
+      rows.forEach(function (r) {
+        var key = r.full_name || "(unnamed)";
+        var w = map[key] || (map[key] = {
+          name: key, sites: {}, days: 0, normal: 0, ot: 0, broken: 0, open: 0, rows: []
+        });
+        if (r.project_name) w.sites[r.project_name] = true;
+        var h = splitShift(r);
+        if (r.overlong_shift) w.broken++;
+        else if (!r.last_out_at || !h) w.open++;
+        else { w.days++; w.normal += h.normal; w.ot += h.ot; }
+        w.rows.push(r);
+      });
+      return Object.keys(map).sort().map(function (k) { return map[k]; });
+    }
+
+    function monthDetail(w) {
+      var lines = w.rows.slice().sort(function (a, b) {
+        return a.work_date < b.work_date ? -1 : 1;
+      }).map(function (r) {
+        var h = splitShift(r);
+        var counted = !r.overlong_shift && r.last_out_at && h;
+        return "<tr>" +
+          "<td>" + esc(r.work_date) + "</td>" +
+          "<td>" + (r.first_in_at ? Dash.klTime(r.first_in_at) : "—") + "</td>" +
+          "<td>" + (r.last_out_at ? Dash.klTime(r.last_out_at) : "—") + "</td>" +
+          '<td class="num">' + (counted ? hm(h.normal) : "—") + "</td>" +
+          '<td class="num">' + (counted ? (h.ot > 0 ? '<span class="ot-on">' + hm(h.ot) + "</span>" : hm(0)) : "—") + "</td>" +
+          "<td>" + (r.overlong_shift
+              ? '<span class="badge badge-anomaly">overlong</span>'
+              : (!r.last_out_at ? '<span class="badge badge-gray">no punch out</span>'
+                                : (r.has_anomaly ? '<span class="badge badge-anomaly">check</span>' : "—"))) + "</td>" +
+        "</tr>";
+      }).join("");
+      return '<div class="detail-box"><table class="att-table month-days"><thead><tr>' +
+        "<th>Date</th><th>In</th><th>Out</th><th class=\"num\">Working Hours</th>" +
+        "<th class=\"num\">Over Time</th><th>Attention</th></tr></thead><tbody>" +
+        lines + "</tbody></table></div>";
+    }
+
+    async function renderMonth(month, site) {
+      var tbody = document.getElementById("month-rows");
+      var note = document.getElementById("month-note");
+      tbody.innerHTML = '<tr><td colspan="6" class="empty">Reading the month…</td></tr>';
+
+      var rows = await fetchMonth(month, site, function (done, total) {
+        tbody.innerHTML = '<tr><td colspan="6" class="empty">Reading the month… ' +
+                          done + " of " + total + " days</td></tr>";
+      });
+      var workers = byWorker(rows);
+
+      if (!workers.length) {
+        tbody.innerHTML = '<tr><td colspan="6" class="empty">No punches in ' + esc(month) +
+          ". The punch app pilot hasn't started at the sites yet.</td></tr>";
+        note.hidden = true;
+        return;
+      }
+
+      tbody.innerHTML = workers.map(function (w, i) {
+        var att = [];
+        if (w.broken) att.push('<span class="badge badge-anomaly" title="Day(s) with a shift ' +
+          'longer than the system allows — almost always a missing punch out. Not counted ' +
+          'in this worker\'s totals until corrected.">' + w.broken + " to fix</span>");
+        if (w.open) att.push('<span class="badge badge-gray" title="Day(s) with a punch in and ' +
+          'no punch out. No hours to count yet.">' + w.open + " open</span>");
+        return '<tr class="shift-row" data-i="' + i + '">' +
+          '<td><button type="button" class="worker-btn" data-i="' + i + '" aria-expanded="false">' +
+            '<span class="caret" aria-hidden="true"></span><strong>' + esc(w.name) + "</strong></button></td>" +
+          "<td>" + esc(Object.keys(w.sites).join(", ") || "—") + "</td>" +
+          '<td class="num">' + w.days + "</td>" +
+          '<td class="num">' + hm(w.normal) + "</td>" +
+          '<td class="num">' + (w.ot > 0 ? '<span class="ot-on">' + hm(w.ot) + "</span>" : hm(0)) + "</td>" +
+          "<td>" + (att.join(" ") || "—") + "</td></tr>" +
+          '<tr class="detail-row" id="m' + i + '" hidden><td colspan="6"></td></tr>';
+      }).join("");
+
+      note.hidden = false;
+      note.innerHTML = "<span>Days a worker was on site with a completed punch out. " +
+        "Overtime is counted per day (time after 17:30 that day), never from the " +
+        "monthly total — a 12-hour Monday and a 4-hour Tuesday is 4 hours of overtime, not none. " +
+        "Days marked <em>to fix</em> or <em>open</em> are left out of the totals.</span>";
+
+      tbody.addEventListener("click", function (ev) {
+        var btn = ev.target.closest ? ev.target.closest(".worker-btn") : null;
+        if (!btn) return;
+        var i = btn.getAttribute("data-i");
+        var row = document.getElementById("m" + i);
+        var open = btn.getAttribute("aria-expanded") === "true";
+        btn.setAttribute("aria-expanded", open ? "false" : "true");
+        btn.parentNode.parentNode.classList.toggle("open", !open);
+        row.hidden = open;
+        if (!open && !row.dataset.loaded) {
+          row.querySelector("td").innerHTML = monthDetail(workers[Number(i)]);
+          row.dataset.loaded = "1";
+        }
+      });
+    }
   </script>
 </body>
 </html>
