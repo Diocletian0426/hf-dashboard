@@ -1749,11 +1749,14 @@ summary.zone-rich::before { float: left; margin: 4px 8px 0 0; }
 }
 .map-title { font-size: var(--fs-lg); font-weight: 500; }
 /* zoom controls + the state jumper, floating on the map's top-right corner.
-   z-index clears Leaflet's own layers (panes 400, controls 1000) — they are
-   siblings in this stacking context, not children of the map. */
+   Stacking, from the bottom: the map host traps ALL of Leaflet's internal
+   layers at z-index 0, the frosted tools float above the map at 10, and the
+   pin popup (.map-pop, 20) tops both — so an open namecard is never sliced
+   by the zoom buttons. (The tools were 1100 back when they had to outbid
+   Leaflet's untrapped panes; that world ended with #map-host's context.) */
 .map-box { position: relative; }
 .map-tools {
-  position: absolute; top: 10px; right: 10px; z-index: 1100;
+  position: absolute; top: 10px; right: 10px; z-index: 10;
   display: inline-flex; align-items: center; gap: var(--sp-2);
 }
 .map-tools .ctx-switch { max-width: 190px; }
