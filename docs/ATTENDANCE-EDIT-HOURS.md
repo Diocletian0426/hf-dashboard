@@ -1,4 +1,4 @@
-# Edit Hours — frontend contract (DB 0090 + 0091, live 2026-08-16)
+# Edit Hours — frontend contract (DB 0090 + 0091 + 0092, live 2026-08-16)
 
 The backend for office attendance corrections is **live**. This doc is the
 contract for replacing the **Close Shift** button with **Edit Hours** on the
@@ -57,6 +57,33 @@ Every set/clear is written to `audit_log` with old→new values.
 
 A day the office entered whole-cloth (no punches at all) appears as a normal
 row with `in_count = 0` and null raw times.
+
+## Provenance — who did what (0092, owner-required)
+
+Every time shown MUST be attributable at a glance: "did the worker punch out
+at 17:00 themselves, or did they punch 17:30 and the office set 17:00?" The
+data now states it outright — never infer from status codes:
+
+- **Per punch** (`get_recent_punches` rows): `punched_by` is exactly
+  `'worker'` (their own tap), `'office'` (attested — show `entered_by_name`),
+  or `'system'` (auto-close). `entry_note` carries the row's own explanation
+  (auto-close text, offline-rescue text, office note); `synced_late` marks a
+  tap that arrived from the phone's offline queue. A rescued auto-close reads
+  `worker` again — correct, the real tap replaced the machine's guess.
+- **Per day** (`get_daily_shifts` rows): raw tap times (`first_in_at` /
+  `last_out_at`) vs the office ruling (`corrected_*`, `corrected_by_name`,
+  `corrected_at`, `correction_reason`) are separate columns — show BOTH when
+  a correction exists, e.g. "Tapped 5:30 PM · Office set 5:00 PM — *reason*
+  (by NAME)". Never display a corrected time as if it were the tap.
+
+The four ways a day can end, and how each looks:
+
+| What happened | punched_by | day view |
+|---|---|---|
+| Worker tapped 17:00 | worker | plain time, no badges |
+| Worker tapped 17:30, office set 17:00 | worker (the tap stays) | tap 17:30 + Office Adjusted 17:00, name, reason |
+| No tap — machine closed at 17:00 | system | Auto-Closed badge, zero OT |
+| No tap — office attested (historic Close Shift) | office | Office-Closed badge + who |
 
 ## Suggested UI
 
