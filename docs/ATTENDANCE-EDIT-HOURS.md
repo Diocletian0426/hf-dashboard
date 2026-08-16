@@ -1,4 +1,4 @@
-# Edit Hours — frontend contract (DB 0090, live 2026-08-16)
+# Edit Hours — frontend contract (DB 0090 + 0091, live 2026-08-16)
 
 The backend for office attendance corrections is **live**. This doc is the
 contract for replacing the **Close Shift** button with **Edit Hours** on the
@@ -47,8 +47,9 @@ Every set/clear is written to `audit_log` with old→new values.
 
 | Column | Meaning |
 |---|---|
+| `working_minutes` / `ot_minutes` | **(0091) THE official figures — bind sums and rows to these and DELETE the local `splitShift` function.** Computed server-side by `fn_shift_minutes` from the effective times with the exact same rule (08:30–17:00, lunch when in-window > 6 h, OT after 17:00, before 08:30 clipped, midnight crossing). `null` = day is open or broken (> 16 h span) — show "—", exclude from sums, exactly like today's overlong handling. The database is now the single authority for this rule; a rule change is a DB migration, not a frontend edit. |
 | `has_correction` | an office ruling exists for this day |
-| `effective_in_at` / `effective_out_at` | correction-first times — **use these for the hours math** (same splitShift 08:30/17:00/lunch rules as now) |
+| `effective_in_at` / `effective_out_at` | correction-first times — display only, no math needed |
 | `effective_hours` | raw span of the effective pair (2 dp) |
 | `corrected_in_at` / `corrected_out_at` | the ruling itself (null = that end not corrected) |
 | `correction_reason`, `corrected_by_name`, `corrected_at` | show in the drawer |
@@ -76,8 +77,11 @@ row with `in_count = 0` and null raw times.
   tap (flagged `synced_late`, audited `late_sync_replaced_auto_close`).
   Human-made closures are never overridden; the lost tap is audit-logged as
   `late_punch_discarded`.
-- `get_my_history` v3 (punch app): each day now also carries `adjusted`,
+- `get_my_history` v3+v4 (punch app): each day now also carries `adjusted`,
   `official_in_local`, `official_out_local`, `closed_by_system`,
-  `closed_by_office`. The current app safely ignores them; the punch-app UI
-  catch-up to *display* them (badges: "Adjusted by office — reason", "Closed
-  automatically at 5:00 PM") is a separate small task.
+  `closed_by_office`, and (0091) `working_minutes` / `ot_minutes` — the
+  server-official figures. The current app safely ignores them; the punch-app
+  UI catch-up to *display* them (badges: "Adjusted by office — reason",
+  "Closed automatically at 5:00 PM"; History tab showing the official hours)
+  is a separate small task. The phone's local `splitMinutes` stays only as
+  the live ticking preview while on shift — the server is the authority.
