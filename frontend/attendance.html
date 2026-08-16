@@ -56,7 +56,7 @@
       <span><span class="badge badge-anomaly">Closed By Office</span> in the raw punches: the
         office entered this punch-out (Close Shift) — Remove retracts it</span>
       <span><span class="badge badge-anomaly">Auto Closed</span> in the raw punches: no punch-out
-        by 6 AM next day, so the system closed the shift at 17:30 with no overtime — Remove it and
+        by 6 AM next day, so the system closed the shift at 17:00 with no overtime — Remove it and
         use Close Shift if real overtime was worked</span>
     </p>
 
@@ -104,9 +104,9 @@
     /* =====================================================================
        HOW A DAY IS COUNTED — the company rule (owner-confirmed 2026-08-14)
        ---------------------------------------------------------------------
-       ONE shift, 08:30–17:30. Working Hours = time inside that window minus
+       ONE shift, 08:30–17:00. Working Hours = time inside that window minus
        the 1 h unpaid lunch (a day with 6 h or less inside the window keeps
-       its lunch); Over Time = everything AFTER 17:30, in full, to the
+       its lunch); Over Time = everything AFTER 17:00, in full, to the
        punch-out. Time before 08:30 never counts, and there are no night
        starts. The worker's phone computes the SAME rule (splitMinutes in
        hf-punch-system/frontend/index.html): a worker who sees one figure on
@@ -114,7 +114,7 @@
        the office. Change both together, or neither.
        ===================================================================== */
     var SHIFT_START_MIN = 8 * 60 + 30;   // 08:30 — the working day starts here
-    var SHIFT_END_MIN   = 17 * 60 + 30;  // 17:30 — anything after this is OT
+    var SHIFT_END_MIN   = 17 * 60;       // 17:00 — anything after this is OT
     var LUNCH_MIN       = 60;            // unpaid, out of the normal window
     var LUNCH_AFTER_MIN = 6 * 60;        // short days keep their lunch hour
 
@@ -527,7 +527,7 @@
               " on site), so its hours are not counted. Almost always a missing punch-out — " +
               "check the punches below, then have the office correct the record."
             : h
-            ? "On site " + hm(h.gross) + " · by the company rule (08:30–17:30 less the 1 h lunch; OT only after 17:30): " +
+            ? "On site " + hm(h.gross) + " · by the company rule (08:30–17:00 less the 1 h lunch; OT only after 17:00): " +
               hm(h.normal) + " Working Hours" +
               (h.ot > 0 ? " + " + hm(h.ot) + " overtime" : ", no overtime")
             : "Still on site — no punch out yet, so the day is not counted.";
@@ -730,7 +730,7 @@
 
       note.hidden = false;
       note.innerHTML = "<span>Days a worker was on site with a completed punch out. " +
-        "Overtime is counted per day (time after 17:30 that day), never from the " +
+        "Overtime is counted per day (time after 17:00 that day), never from the " +
         "monthly total — a 12-hour Monday and a 4-hour Tuesday is 4 hours of overtime, not none. " +
         "Days marked <em>to fix</em> or <em>open</em> are left out of the totals.</span>";
 
