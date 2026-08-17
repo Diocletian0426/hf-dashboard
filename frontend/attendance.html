@@ -126,17 +126,33 @@
       return (d.getUTCHours() * 60 + d.getUTCMinutes() + 8 * 60) % 1440;
     }
 
-    // The work/OT split for one day-row, from its REAL punch times (duration
+    // The times the day is PAID from: the office's ruling where it made one,
+    // the worker's own taps everywhere else. Never use these to print "when he
+    // punched" — that is first_in_at/last_out_at and the two must stay tellable
+    // apart (0092). These are for arithmetic and for the Working Hours column.
+    function effIn(s)  { return s.effective_in_at  || s.corrected_in_at  || s.first_in_at; }
+    function effOut(s) { return s.effective_out_at || s.corrected_out_at || s.last_out_at; }
+
+    // The work/OT split for one day-row, from its effective times (duration
     // alone cannot express a clock-boundary rule). Null while still on shift.
+    //
+    // 0091 added server-computed working_minutes/ot_minutes and they are meant
+    // to replace this function outright, so a rule change becomes one migration
+    // instead of an edit in every client. Until that swap is done here and in
+    // the month view, this stays — but it now reads the corrected times, so an
+    // amended day pays what the office ruled, not what the phone recorded.
     function splitShift(s) {
-      var start = klMinutes(s.first_in_at), end = klMinutes(s.last_out_at);
+      var start = klMinutes(effIn(s)), end = klMinutes(effOut(s));
       if (start === null || end === null) return null;
       if (end < start) end += 1440;                      // crossed midnight
       var normal = Math.max(0, Math.min(end, SHIFT_END_MIN) - Math.max(start, SHIFT_START_MIN));
       if (normal > LUNCH_AFTER_MIN) normal -= LUNCH_MIN;
       var ot = Math.max(0, end - Math.max(start, SHIFT_END_MIN));
       return {
-        gross:  (s.hours_on_site === null || s.hours_on_site === undefined) ? 0 : Number(s.hours_on_site),
+        // "on site" must match the pair above it, or the drawer's summary
+        // argues with its own numbers on an amended day
+        gross:  (function (g) { return (g === null || g === undefined) ? 0 : Number(g); })(
+                  s.has_correction ? s.effective_hours : s.hours_on_site),
         normal: normal / 60,
         ot:     ot / 60,
         worked: (normal + ot) / 60
@@ -152,6 +168,33 @@
       var h = Math.floor(mins / 60), m = mins % 60;
       return h + (h === 1 ? " Hour " : " Hours ") + m + (m === 1 ? " Min" : " Mins");
     }
+
+    // One time in the day table. A time the office ruled carries a mark, so
+    // this column can never be misread as "this is when he tapped" — the whole
+    // point of 0092. The tap itself is one click away, in the drawer.
+    function timeCell(ts, correctedTs) {
+      if (!ts) return "—";
+      var t = esc(Dash.klTime(ts));
+      return correctedTs
+        ? '<span class="t-office" title="Set by the office — the worker tapped a ' +
+          'different time. Open the worker to see both.">' + t + "</span>"
+        : t;
+    }
+
+    // timestamptz -> the "YYYY-MM-DDTHH:mm" a datetime-local input wants, in
+    // Malaysia wall time. Shifting by +8 h and then reading the UTC fields is
+    // the whole trick: it makes the browser's own timezone irrelevant, so the
+    // office sees the same clock whether the laptop is set to KL or not.
+    function klInputValue(ts) {
+      if (!ts) return "";
+      var d = new Date(ts);
+      if (isNaN(d)) return "";
+      return new Date(d.getTime() + 8 * 3600 * 1000).toISOString().slice(0, 16);
+    }
+
+    // ...and back again. Malaysia is UTC+8 with no daylight saving, so the
+    // offset can be written flat rather than computed.
+    function klInputToISO(v) { return v ? v + ":00+08:00" : null; }
 
     function setParam(name, value) {
       var p = new URLSearchParams(location.search);
@@ -463,6 +506,18 @@
             if (s.in_count && !s.out_count) {
               flags.push('<span class="badge badge-gray" title="Punched in, no punch out yet.">on site</span>');
             }
+            // The office overruled the clock for this day. It sits with the
+            // other badges because this column is "what should I know about
+            // this row before I pay it", and a changed time is top of that
+            // list. The reason and who changed it are in the drawer.
+            if (s.has_correction) {
+              flags.push('<span class="badge badge-amended" title="' +
+                esc("The office corrected this day's hours" +
+                    (s.corrected_by_name ? " (" + s.corrected_by_name + ")" : "") +
+                    (s.correction_reason ? " — " + s.correction_reason : "") +
+                    ". Open the worker for the tapped times and the reason.") +
+                '">amended</span>');
+            }
             var h = splitShift(s);
             return '<tr class="shift-row" data-i="' + i + '">' +
               '<td><button type="button" class="worker-btn" data-i="' + i + '" ' +
@@ -470,8 +525,12 @@
                  '<span class="caret" aria-hidden="true"></span>' +
                  "<strong>" + esc(s.full_name) + "</strong></button></td>" +
               "<td>" + esc(s.project_name || "—") + "</td>" +
-              "<td>" + (s.first_in_at ? Dash.klTime(s.first_in_at) : "—") + "</td>" +
-              "<td>" + (s.last_out_at ? Dash.klTime(s.last_out_at) : "—") + "</td>" +
+              // The IN/OUT columns show the time the day is PAID from, which on
+              // an amended day is the office's, not the worker's. It is marked
+              // as theirs rather than left to look like a tap (0092) — the tap
+              // itself is one click away in the drawer.
+              "<td>" + timeCell(effIn(s),  s.corrected_in_at)  + "</td>" +
+              "<td>" + timeCell(effOut(s), s.corrected_out_at) + "</td>" +
               // An overlong shift is a BROKEN shift — nearly always a missing
               // punch-out. Printing "1011 Hours 8 Mins" of overtime next to a
               // worker's name on the screen the office pays from is worse than
@@ -520,7 +579,92 @@
                  '<span class="pl-where">' + esc(where) + esc(dist) + "</span></li>";
         }
 
-        function detailHtml(s, punches) {
+        /* ---- Edit Hours (DB 0090–0092) -------------------------------------
+           The office's ruling on a day's true hours. It NEVER edits or deletes
+           a worker's punch — "else they would say we are taking advantage" —
+           it lays a decision on top, keeps the reason beside it, and shows the
+           two together from then on. So this block always reads "he tapped X,
+           we set Y, because Z", never just Y. */
+
+        function provLine(label, tapped, ruled) {
+          return '<li><span class="pl-type">' + label + "</span>" +
+            '<span class="pl-time">' +
+              esc(ruled ? Dash.klTime(ruled) : (tapped ? Dash.klTime(tapped) : "—")) + "</span>" +
+            (ruled
+              ? '<span class="badge badge-amended">office set</span>' +
+                '<span class="pl-where">' +
+                  (tapped ? "the worker tapped " + esc(Dash.klTime(tapped))
+                          : "the worker never tapped this end") + "</span>"
+              : '<span class="badge badge-verified">worker</span>' +
+                '<span class="pl-where">left as tapped</span>') +
+          "</li>";
+        }
+
+        function correctionBlock(s) {
+          if (!s.has_correction) return "";
+          var by = s.corrected_by_name ? " by " + s.corrected_by_name : "";
+          var at = s.corrected_at ? " on " + Dash.klDateTime(s.corrected_at) : "";
+          return '<div class="amend-note">' +
+            '<p class="detail-note"><strong>Hours amended by the office</strong>' + esc(by + at) +
+              ". The punches below are untouched — this is the ruling laid over them. " +
+              "The worker reads this reason in their own app.</p>" +
+            '<ul class="punch-lines">' +
+              provLine("IN",  s.first_in_at,  s.corrected_in_at) +
+              provLine("OUT", s.last_out_at,  s.corrected_out_at) +
+            "</ul>" +
+            '<p class="detail-note">Reason: <em>' + esc(s.correction_reason || "—") + "</em></p>" +
+          "</div>";
+        }
+
+        function amendForm(s, i) {
+          // Reading the day is one permission, ruling on it is another.
+          if (!Dash.can("attendance.edit")) return "";
+          // set_day_correction is keyed on the worker, and this row has no id
+          // to key on. Better a plain explanation than a button that throws.
+          if (!s.staff_id) {
+            return '<p class="detail-note">Hours cannot be amended from this screen: the day ' +
+                   'row came back without a worker id, which the correction is keyed on.</p>';
+          }
+          // WHICH DAYS MAY BE AMENDED IS THE DATABASE'S RULE, NOT THIS PAGE'S.
+          // set_day_correction refuses a day that is not over yet and answers
+          // with the reason in words the office can read, so the button stays
+          // live and that answer is what gets shown. The client used to repeat
+          // the rule and grey the button out; it hid the whole feature on the
+          // date this page opens on, and it meant one rule living in two places
+          // — the same trap 0091 pulled the hours calculation out of.
+          return '<div class="amend-wrap">' +
+            '<button type="button" data-amend="' + i + '">' +
+              (s.has_correction ? "Edit the amendment" : "Amend hours") + "</button>" +
+            (s.has_correction
+              ? ' <button type="button" data-amend-clear="' + i + '">Remove amendment</button>'
+              : "") +
+            // Stacked, not the usual one-line filter row: the two times are a
+            // pair and read side by side, but the reason is a sentence someone
+            // has to write and the worker has to live with — it gets its own
+            // full width, and the button sits under the thing it commits.
+            '<div class="claim-form amend-form" id="amend' + i + '" hidden>' +
+              '<div class="amend-times">' +
+                '<label>Punch in <input type="datetime-local" id="amend-in' + i + '" value="' +
+                  esc(klInputValue(s.corrected_in_at || s.first_in_at)) + '"></label>' +
+                '<label>Punch out <input type="datetime-local" id="amend-out' + i + '" value="' +
+                  esc(klInputValue(s.corrected_out_at || s.last_out_at)) + '"></label>' +
+              "</div>" +
+              '<label class="amend-reason">Reason' +
+                '<input type="text" id="amend-why' + i + '" ' +
+                'placeholder="e.g. forgot to punch out, supervisor confirmed 6 pm" value="' +
+                esc(s.correction_reason || "") + '"></label>' +
+              '<div class="amend-actions">' +
+                '<button type="button" data-amend-save="' + i + '">Update</button>' +
+              "</div>" +
+              '<span class="muted-line">Malaysia time. Updating sends BOTH times and replaces any ' +
+              'earlier amendment for this day, so leave the end you are not changing as it is. ' +
+              'The reason is required and the worker sees it.</span>' +
+            "</div>" +
+            '<div id="amend-msg' + i + '"></div>' +
+          "</div>";
+        }
+
+        function detailHtml(s, punches, i) {
           var h = splitShift(s);
           var sum = s.overlong_shift
             ? "This shift is longer than the system allows (" + hm(h ? h.gross : 0) +
@@ -538,9 +682,11 @@
           }
           return '<div class="detail-box">' +
             '<p class="detail-sum">' + esc(sum) + "</p>" + extra +
+            correctionBlock(s) +
             (punches.length
               ? '<ul class="punch-lines">' + punches.map(punchLine).join("") + "</ul>"
               : '<p class="detail-note">No raw punch rows came back for this worker.</p>') +
+            amendForm(s, i) +
           "</div>";
         }
 
@@ -561,12 +707,90 @@
             var list = await punchesFor(s.full_name);
             // the RPC hands them back newest first; a day reads forwards
             list.sort(function (a, b) { return a.punched_at < b.punched_at ? -1 : 1; });
-            cell.innerHTML = detailHtml(s, list);
+            cell.innerHTML = detailHtml(s, list, i);
             row.dataset.loaded = "1";
           } catch (e) {
             // rule 4: a failure is visible, never a silent blank
             cell.innerHTML = '<div class="banner banner-red">Could not load this worker\'s punches: ' +
                              esc(e.message || e) + "</div>";
+          }
+        });
+
+        /* ---- Edit Hours: open, save, remove ---------------------------------
+           Its own delegated listener rather than more branches inside the
+           drawer's: opening a name and ruling on a day are different jobs, and
+           a throw in one should not take the other down with it.
+
+           Both writes reload the page on success. The ruling changes the hours
+           column, the badges and the day's totals at once, and re-deriving all
+           of that by hand is exactly how a screen ends up disagreeing with the
+           database it just wrote to. */
+        tbody.addEventListener("click", async function (ev) {
+          if (!ev.target.closest) return;
+
+          var toggle = ev.target.closest("[data-amend]");
+          if (toggle) {
+            var ti = toggle.getAttribute("data-amend");
+            var form = document.getElementById("amend" + ti);
+            form.hidden = !form.hidden;
+            toggle.textContent = form.hidden
+              ? (shifts[Number(ti)].has_correction ? "Edit the amendment" : "Amend hours")
+              : "Cancel";
+            // an open form already has its own blue Update — two filled blue
+            // buttons in one box is two invitations to the same act
+            toggle.classList.toggle("btn-quiet", !form.hidden);
+            if (!form.hidden) document.getElementById("amend-in" + ti).focus();
+            return;
+          }
+
+          var save = ev.target.closest("[data-amend-save]");
+          if (save) {
+            var i   = save.getAttribute("data-amend-save");
+            var s   = shifts[Number(i)];
+            var msg = document.getElementById("amend-msg" + i);
+            var why = document.getElementById("amend-why" + i).value.trim();
+            // Checked here as well as in the database because this one is not
+            // an error, it is the point: the worker is owed the reason.
+            if (!why) {
+              msg.innerHTML = '<div class="banner banner-red">Give a reason — the worker ' +
+                              "reads it in their app.</div>";
+              return;
+            }
+            save.disabled = true; save.textContent = "Updating…";
+            try {
+              var res = await Dash.setDayCorrection(
+                s.staff_id, date,
+                klInputToISO(document.getElementById("amend-in" + i).value),
+                klInputToISO(document.getElementById("amend-out" + i).value),
+                why);
+              if (res && res.ok) { location.reload(); return; }
+              // the database's messages are written for the office to read
+              msg.innerHTML = '<div class="banner banner-red">Could not amend: ' +
+                esc((res && res.message) || (res && res.code) || "unknown error") + "</div>";
+            } catch (e) {
+              msg.innerHTML = '<div class="banner banner-red">Could not amend: ' +
+                esc(e.message || e) + "</div>";
+            }
+            save.disabled = false; save.textContent = "Update";
+            return;
+          }
+
+          var drop = ev.target.closest("[data-amend-clear]");
+          if (drop) {
+            if (!confirm("Remove this amendment? The worker's own punch times stand again.")) return;
+            var ci = drop.getAttribute("data-amend-clear");
+            drop.disabled = true;
+            try {
+              var r = await Dash.clearDayCorrection(shifts[Number(ci)].staff_id, date);
+              if (r && r.ok) { location.reload(); return; }
+              document.getElementById("amend-msg" + ci).innerHTML =
+                '<div class="banner banner-red">Could not remove: ' +
+                esc((r && r.message) || (r && r.code) || "unknown error") + "</div>";
+            } catch (e2) {
+              document.getElementById("amend-msg" + ci).innerHTML =
+                '<div class="banner banner-red">Could not remove: ' + esc(e2.message || e2) + "</div>";
+            }
+            drop.disabled = false;
           }
         });
 

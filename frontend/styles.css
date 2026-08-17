@@ -2449,6 +2449,74 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
 /* overtime is the number that costs money — it says so */
 .ot-on { color: var(--warn-ink); font-weight: 700; }
 
+/* ---- office amendments to a day's hours (DB 0090–0092) --------------------
+   An amended day is not a PROBLEM day, so none of this borrows the amber the
+   anomaly badges use — it reads as a decision on the record, in the same blue
+   the rest of the app uses for office actions. */
+.badge-amended { background: #dbeafe; color: #1e40af; }
+
+/* A time in the day table that the office set rather than the worker tapped.
+   Dotted-underlined because the column is otherwise all worker taps and the
+   two must never be read as the same thing (0092) — hovering says who. */
+.t-office {
+  border-bottom: 1px dotted currentColor;
+  cursor: help;
+}
+
+/* the ruling, sitting above the punches it was laid over */
+.amend-note {
+  margin: 0 0 var(--sp-2); padding: var(--sp-2) var(--sp-3);
+  background: #eff6ff; border: 1px solid #bfdbfe; border-radius: var(--r-md);
+}
+.amend-note .punch-lines li { border-top-color: #bfdbfe; }
+.amend-note .detail-note:last-child { margin-bottom: 0; }
+
+.amend-wrap { margin-top: var(--sp-3); }
+
+/* The form sits under its own button and reads DOWN the page, overriding the
+   one-line row .claim-form gives every other form on the site. That row is
+   right for filters, where the fields are peers you scan across. Here they are
+   a sequence: fix the times, say why, commit — and the reason is a sentence
+   written for the worker to read, so it gets the full width a sentence needs
+   rather than being squeezed between two time pickers. */
+.amend-form {
+  margin-top: var(--sp-2);
+  flex-direction: column; align-items: stretch; gap: var(--sp-3);
+}
+.amend-times { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
+.amend-reason input { width: 100%; }
+/* left-aligned under the reason, not stretched across it — a button as wide as
+   the form reads like the page's main action, and this one is not */
+.amend-actions { display: flex; }
+
+/* The drawer's action buttons wear the app's blue pill — the same one the Day
+   switch and the sidebar's current page wear. Left alone they came out as raw
+   browser rectangles, which is the one thing on this page that looks like it
+   belongs to a different program. */
+.amend-wrap button,
+.amend-actions button {
+  font-family: var(--font);
+  background: var(--brand); border: 1px solid var(--brand); color: #fff;
+  border-radius: var(--r-pill); padding: 7px 16px;
+  font-size: 12.5px; cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.amend-wrap button:hover,
+.amend-actions button:hover { background: var(--brand-ink); border-color: var(--brand-ink); }
+.amend-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* Cancel, and removing an amendment, are not the thing being invited — same
+   pill, no fill, so the blue keeps meaning one thing on the screen. */
+.amend-wrap button.btn-quiet,
+.amend-wrap button[data-amend-clear] {
+  background: rgba(255, 255, 255, 0.7);
+  border-color: var(--line-strong); color: var(--ink-2);
+}
+.amend-wrap button.btn-quiet:hover,
+.amend-wrap button[data-amend-clear]:hover {
+  background: var(--surface-solid); color: var(--ink);
+}
+
 /* the badge legend under the attendance table */
 .table-legend {
   display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-5);

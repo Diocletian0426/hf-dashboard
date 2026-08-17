@@ -783,6 +783,36 @@
     return q(sb.rpc("reopen_shift", { p_punch_id: punchId }));
   }
 
+  // ---- office corrections to a day's hours (0090–0092) --------------------
+  // A worker's punch rows are NEVER edited or deleted — "else they would say we
+  // are taking advantage." The office's ruling on a day's true hours lives in
+  // its own layer on top, one row per person per day, and both stay visible:
+  // "tapped 7:58 · office set 8:30 — reason".
+  //
+  // Send the WHOLE ruling every time. This is an upsert of the day, not a merge
+  // into the previous correction, so prefill the form from the current one or a
+  // re-save will silently drop the end you left out. A null time means "keep
+  // the worker's raw punch for that end"; the two laid together must still make
+  // a complete pair. The reason is required and the worker reads it in their
+  // own app history, so it is written for them, not for us.
+  function setDayCorrection(staffId, workDate, inAtISO, outAtISO, reason) {
+    return q(sb.rpc("set_day_correction", {
+      p_staff_id: staffId,
+      p_work_date: workDate,
+      p_in_at:  inAtISO  || null,
+      p_out_at: outAtISO || null,
+      p_reason: reason
+    }));
+  }
+
+  // Drops the ruling; the worker's raw punches stand again. Both this and the
+  // set above are audit-logged old→new by the database.
+  function clearDayCorrection(staffId, workDate) {
+    return q(sb.rpc("clear_day_correction", {
+      p_staff_id: staffId, p_work_date: workDate
+    }));
+  }
+
   function getSitesMissingGeofence() {
     return q(sb.rpc("get_sites_missing_geofence"));
   }
@@ -1608,6 +1638,8 @@
     getOpenShifts: getOpenShifts,
     closeShift: closeShift,
     reopenShift: reopenShift,
+    setDayCorrection: setDayCorrection,
+    clearDayCorrection: clearDayCorrection,
     getSitesMissingGeofence: getSitesMissingGeofence,
     setSiteCoords: setSiteCoords,
     getRecentPunches: getRecentPunches,
