@@ -270,6 +270,9 @@
     play:     '<circle cx="12" cy="12" r="8.6"/><path d="M10.3 8.9 15.4 12l-5.1 3.1z"/>',
     search:   '<circle cx="11" cy="11" r="6.4"/><path d="M15.7 15.7 20.4 20.4"/>',
     download: '<path d="M12 4v11"/><path d="M8.2 11.4 12 15.2l3.8-3.8"/><path d="M4.5 19.5h15"/>',
+    // a parcel — a load on its way somewhere, not one parked at a site
+    delivery: '<path d="M12 3.2 20.4 7.4v9.2L12 20.8 3.6 16.6V7.4z"/>' +
+              '<path d="M3.6 7.4 12 11.6l8.4-4.2"/><path d="M12 11.6v9.2"/>',
     question: '<circle cx="12" cy="12" r="8.6"/>' +
               '<path d="M9.7 9.5a2.4 2.4 0 1 1 2.9 2.6v1.4"/><path d="M12.6 16.2v.4"/>'
   };

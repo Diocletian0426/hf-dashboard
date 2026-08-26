@@ -1,0 +1,868 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nexus — Delivery Status</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <header id="nav"></header>
+
+  <main id="main">
+    <!-- ================= DELIVERY STATUS =========================
+         One line per lorry-load: the date, what was on it, which site
+         it left, which site it is going to, how many, who drove it,
+         the D.O. number on the paperwork, and a tick once the
+         receiving end confirms it arrived.
+
+         WHERE THE RECORD LIVES. frontend/delivery-data.js, on this
+         machine — the office's spreadsheet has no delivery section
+         and the database has no deliveries table. Saving goes to
+         tools/tooling-api.py, exactly as the consumables half of the
+         Tooling page does. Nothing is seeded: an invented delivery
+         in a delivery record is worse than an empty page.
+
+         NOTHING SAVES AS YOU TYPE. Changes pile up until Save is
+         pressed, so a mis-typed row can be thrown away with Discard.
+
+         Access rides on machines.view (PAGE_ACCESS in shell.js).
+    -->
+    <div class="page-eyebrow">Machines</div>
+    <h1>Delivery Status</h1>
+
+    <p id="dlv-sub" class="page-caption">Loading…</p>
+
+    <div id="error"></div>
+
+    <!-- Overall, one month, or one year. The cards AND the table follow this
+         switch together: counts that do not match the lines underneath them are
+         the fastest way to lose trust in a page. -->
+    <div class="period-switch" id="period-switch">
+      <span class="ps-label">Showing</span>
+      <button type="button" data-period="all" class="active">Overall</button>
+      <button type="button" data-period="month">By month</button>
+      <button type="button" data-period="year">By year</button>
+      <select id="f-period" hidden aria-label="Which month or year"></select>
+    </div>
+
+    <!-- the four questions asked before any others: how many deliveries are on
+         the book, how many are still on the road, how many have landed, and
+         how many have no D.O. number to match against the paperwork -->
+    <div class="istats" id="dlv-stats"></div>
+
+    <div class="mp-controls" id="dlv-controls">
+      <span>Show:
+        <button type="button" data-status="" class="active">All</button>
+        <button type="button" data-status="transit">On the way</button>
+        <button type="button" data-status="done">Delivered</button>
+      </span>
+      <span>Site: <select id="f-site"></select></span>
+      <span>Driver: <select id="f-driver"></select>
+        <button type="button" id="btn-drivers" class="dlv-link">Edit list</button>
+      </span>
+      <!-- same search field as the Tooling page: icon inside on the left, pill
+           outline, and the count riding inside the right-hand end -->
+      <span class="tool-search">
+        <svg class="ric" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="11" cy="11" r="6.5"/><path d="M15.8 15.8 20.5 20.5"/>
+        </svg>
+        <input type="search" id="f-text"
+               placeholder="Search item, site, driver, D.O. or remark…"
+               aria-label="Search deliveries" />
+        <span class="muted" id="f-count"></span>
+      </span>
+    </div>
+
+    <!-- Who drives what. Loader, cargo, lorries — the office's own order, and
+         the office's own list: it changes when somebody joins or leaves, and a
+         code change for that is a code change nobody will ask for twice. -->
+    <div id="driver-panel" class="driver-panel" hidden></div>
+
+    <div id="dlv-body"></div>
+
+    <!-- Adding lives under the table. A new line is only written if it has
+         something on it — an empty row pressed by accident is not a delivery. -->
+    <div id="dlv-edit">
+      <div id="pending-bar" class="banner banner-info" hidden></div>
+      <div id="new-rows"></div>
+      <p class="tool-edit-actions">
+        <button type="button" id="btn-add" class="btn">+ Add delivery record</button>
+        <span class="muted" id="edit-note"></span>
+      </p>
+    </div>
+
+    <!-- Sites already used are offered as you type, but the list is not a fence:
+         a delivery can come from a supplier that is not one of our sites. Drivers
+         ARE a list (see the panel above) — a delivery has a driver, not a guess
+         at one, and a name typed six different ways cannot be counted. -->
+    <datalist id="dlv-sites"></datalist>
+
+    <p class="page-caption" id="dlv-source"></p>
+  </main>
+
+  <script src="vendor/supabase.js"></script>
+  <script src="config.js"></script>
+  <script src="dashboard-client.js"></script>
+  <script src="ui.js"></script>
+  <script src="tooling-data.js"></script>
+  <script src="delivery-data.js"></script>
+  <script src="shell.js"></script>
+
+  <script>
+    "use strict";
+
+    var esc = UI.esc, escHtml = UI.escHtml;
+
+    var META = window.DELIVERY_DATA || {};
+    // the site list the Tooling page already keeps — one list of sites for the
+    // whole store, so "Tasek Store" is spelled the same on both pages
+    var SITES = (window.TOOLING_DATA && window.TOOLING_DATA.siteOptions) || [];
+
+    // What each driver drives, and the order the office reads the list in:
+    // loader, cargo, then the lorries. Anything else typed in lands after them.
+    var VEHICLES = ["Loader", "Cargo", "Lorry"];
+
+    var DRIVERS = (META.drivers || []).map(function (d) {
+      return { name: String(d.name || ""), vehicle: String(d.vehicle || "") };
+    }).filter(function (d) { return d.name; });
+
+    var DRIVER_ADDS = [];      // new drivers waiting to be saved
+    var DRIVER_DROPS = {};     // name -> true, drivers waiting to come off the list
+
+    // the columns, in the order the table shows them
+    var FIELDS = ["date", "item", "from", "to", "qty", "driver", "doNum", "remark", "received"];
+
+    var ALL = (META.rows || []).map(function (r, i) {
+      var o = {};
+      FIELDS.forEach(function (f) { o[f] = f === "received" ? !!r[f] : (r[f] || ""); });
+      o.id = r.id || ("d" + (i + 1));
+      return o;
+    });
+
+    var BY_ID = {};
+    ALL.forEach(function (r) { BY_ID[r.id] = r; });
+
+    var EDITS = {};        // id -> { field: value } waiting to be saved
+    var NEWROWS = [];      // brand-new deliveries waiting to be written
+    var DELETED = {};      // id -> true, lines marked for removal
+    var CAN_SAVE = false;  // set by the health check — see onShellReady
+
+    /* ------------------------- the current picture -------------------------- */
+    // what the cell should show: the unsaved edit if there is one, else the file
+
+    function val(r, field) {
+      var e = EDITS[r.id];
+      return (e && e[field] !== undefined) ? e[field] : r[field];
+    }
+
+    function changed(r, field) {
+      var e = EDITS[r.id];
+      return !!(e && e[field] !== undefined && e[field] !== r[field]);
+    }
+
+    // period: "all" | "month" | "year", with the picked month ("2026-08") or
+    // year ("2026") beside it — see the switch above the cards
+    var F = { period: "all", month: "", year: "", status: "", site: "", driver: "", text: "" };
+
+    // A line with no date cannot be in August, so a chosen period drops it. That
+    // is the honest answer: an undated delivery belongs to no month.
+    function inPeriod(r) {
+      if (F.period === "all") return true;
+      var d = val(r, "date");
+      if (!d) return false;
+      if (F.period === "month") return !F.month || d.slice(0, 7) === F.month;
+      return !F.year || d.slice(0, 4) === F.year;
+    }
+
+    function periodLabel() {
+      if (F.period === "month" && F.month) return UI.mstr(F.month + "-01");
+      if (F.period === "year" && F.year) return F.year;
+      return "";
+    }
+
+    function match(r) {
+      if (!inPeriod(r)) return false;
+      var done = !!val(r, "received");
+      if (F.status === "transit" && done) return false;
+      if (F.status === "done" && !done) return false;
+      if (F.site && val(r, "from") !== F.site && val(r, "to") !== F.site) return false;
+      if (F.driver && val(r, "driver") !== F.driver) return false;
+      if (F.text) {
+        var hay = [val(r, "item"), val(r, "from"), val(r, "to"), val(r, "driver"),
+                   val(r, "doNum"), val(r, "remark")].join(" ").toLowerCase();
+        if (hay.indexOf(F.text) === -1) return false;
+      }
+      return true;
+    }
+
+    // Newest first — a delivery book is read from today backwards. Lines with no
+    // date yet sit at the top, because a line with no date is one somebody is
+    // still filling in, not one from 1970.
+    function shown() {
+      return ALL.filter(match).sort(function (a, b) {
+        var da = val(a, "date"), db = val(b, "date");
+        if (!da && !db) return 0;
+        if (!da) return -1;
+        if (!db) return 1;
+        return db.localeCompare(da);
+      });
+    }
+
+    /* ---------------------------- the driver list --------------------------- */
+
+    // the list as it stands right now, unsaved changes included, in the office's
+    // own order — loader, cargo, lorry, then anything else
+    function driversNow() {
+      return DRIVERS.concat(DRIVER_ADDS)
+        .filter(function (d) { return !DRIVER_DROPS[d.name]; })
+        .sort(function (a, b) {
+          var ra = VEHICLES.indexOf(a.vehicle), rb = VEHICLES.indexOf(b.vehicle);
+          return (ra === -1 ? VEHICLES.length : ra) - (rb === -1 ? VEHICLES.length : rb);
+        });
+    }
+
+    // Grouped by what they drive, so a dropdown reads as three short lists rather
+    // than one long one. A name already on a delivery but no longer on the list
+    // is kept at the top: a record must never quietly lose its driver.
+    function driverOptions(current, opt) {
+      opt = opt || {};
+      var list = driversNow(), groups = {}, order = [], html = "";
+
+      if (opt.blank !== false) html += '<option value=""' + (current ? "" : " selected") + ">—</option>";
+      if (current && !list.some(function (d) { return d.name === current; })) {
+        html += '<option value="' + esc(current) + '" selected>' + escHtml(current) +
+                " (not on the list)</option>";
+      }
+
+      list.forEach(function (d) {
+        if (!groups[d.vehicle]) { groups[d.vehicle] = []; order.push(d.vehicle); }
+        groups[d.vehicle].push(d);
+      });
+      html += order.map(function (v) {
+        return '<optgroup label="' + esc(v || "Other") + '">' +
+          groups[v].map(function (d) {
+            return '<option value="' + esc(d.name) + '"' +
+                   (d.name === current ? " selected" : "") + ">" + escHtml(d.name) + "</option>";
+          }).join("") + "</optgroup>";
+      }).join("");
+
+      // names that appear on a delivery but are not on the list any more
+      var strays = (opt.extra || []).filter(function (n) {
+        return n && !list.some(function (d) { return d.name === n; }) && n !== current;
+      });
+      if (strays.length) {
+        html += '<optgroup label="Not on the list">' + strays.map(function (n) {
+          return '<option value="' + esc(n) + '">' + escHtml(n) + "</option>";
+        }).join("") + "</optgroup>";
+      }
+      return html;
+    }
+
+    function driverPanelHtml() {
+      var list = driversNow(), groups = {}, order = [];
+      list.forEach(function (d) {
+        if (!groups[d.vehicle]) { groups[d.vehicle] = []; order.push(d.vehicle); }
+        groups[d.vehicle].push(d);
+      });
+
+      var body = order.map(function (v) {
+        return '<div class="drv-group"><span class="drv-kind">' + escHtml(v || "Other") + "</span>" +
+          groups[v].map(function (d) {
+            return '<span class="drv-chip">' + escHtml(d.name) +
+                   '<button type="button" class="dlv-x" data-drv-drop="' + esc(d.name) +
+                   '" title="Take ' + esc(d.name) + ' off the list" aria-label="Remove ' +
+                   esc(d.name) + '">\u00d7</button></span>';
+          }).join("") + "</div>";
+      }).join("");
+      if (!list.length) body = '<p class="muted">Nobody on the list yet.</p>';
+
+      return body +
+        '<div class="drv-add">' +
+          '<input type="text" id="drv-name" placeholder="Driver name" aria-label="Driver name">' +
+          '<select id="drv-vehicle" aria-label="What they drive">' +
+            VEHICLES.map(function (v) {
+              return '<option value="' + esc(v) + '">' + escHtml(v) + "</option>";
+            }).join("") +
+          "</select>" +
+          '<button type="button" id="btn-drv-add" class="btn">+ Add driver</button>' +
+          '<span class="muted">Saved with the rest of the page — press Save. Taking a driver ' +
+            "off the list leaves the deliveries they already drove exactly as they are.</span>" +
+        "</div>";
+    }
+
+    function renderDrivers() {
+      document.getElementById("driver-panel").innerHTML = driverPanelHtml();
+    }
+
+    /* ------------------------------- counts -------------------------------- */
+
+    function renderStats() {
+      var rows = shown();
+      var done = rows.filter(function (r) { return !!val(r, "received"); }).length;
+      var noDo = rows.filter(function (r) { return !String(val(r, "doNum")).trim(); }).length;
+
+      var where = periodLabel();
+      var cards = [
+        { n: rows.length, label: "Deliveries", sub: where ? "lines in " + where : "lines on the book",
+          icon: "delivery", tone: "brand" },
+        { n: rows.length - done, label: "On the way", sub: "not ticked as arrived",
+          icon: "clock", tone: rows.length - done ? "info" : "grey" },
+        { n: done, label: "Delivered", sub: "the receiving end confirmed it",
+          icon: "check", tone: done ? "ok" : "grey" },
+        { n: noDo, label: "No D.O. number", sub: "nothing to match the paperwork to",
+          icon: "question", tone: noDo ? "grey" : "grey" }
+      ];
+
+      document.getElementById("dlv-stats").innerHTML = cards.map(function (c) {
+        return '<div class="istat tone-' + c.tone + '">' +
+                 '<span class="istat-ic">' + UI.icon(c.icon) + "</span>" +
+                 '<span class="istat-body">' +
+                   '<span class="istat-top"><b>' + c.n + "</b><i>" + escHtml(c.label) + "</i></span>" +
+                   '<span class="istat-sub">' + escHtml(c.sub) + "</span>" +
+                 "</span>" +
+               "</div>";
+      }).join("");
+    }
+
+    /* ------------------------------- the table ------------------------------ */
+
+    function thead(editable) {
+      return "<thead><tr>" +
+               "<th>Date</th><th>Item</th><th>From</th><th>To</th>" +
+               "<th" + (editable ? "" : ' class="num"') + ">Qty</th>" +
+               "<th>Driver</th><th>D.O. No.</th><th>Remark</th>" +
+               '<th class="dlv-tick-head" title="Tick it when the site confirms it landed">Arrived</th>' +
+               (editable ? "<th></th>" : "") +
+             "</tr></thead>";
+    }
+
+    function textCell(r, field, ph) {
+      return '<input type="text" class="cell-edit" data-id="' + esc(r.id) + '" data-field="' + field +
+             '" value="' + esc(val(r, field)) + '"' + (ph ? ' placeholder="' + esc(ph) + '"' : "") + ">";
+    }
+
+    // a site box, not a site dropdown: most deliveries move between our own
+    // sites (offered as you type) but some come from a supplier that is not one
+    function siteCell(r, field) {
+      return '<input type="text" list="dlv-sites" class="cell-edit" data-id="' + esc(r.id) +
+             '" data-field="' + field + '" value="' + esc(val(r, field)) + '" placeholder="—">';
+    }
+
+    function driverCell(r) {
+      return '<select class="cell-edit" data-id="' + esc(r.id) + '" data-field="driver">' +
+               driverOptions(val(r, "driver")) + "</select>";
+    }
+
+    function dateCell(r) {
+      return '<input type="date" class="cell-edit" data-id="' + esc(r.id) +
+             '" data-field="date" value="' + esc(val(r, "date")) + '">';
+    }
+
+    // The tick. It is an edit like any other — it goes amber and waits for Save,
+    // because "arrived" is a claim about the real world and a stray click on a
+    // trackpad should be as undoable as a mis-typed number.
+    function tickCell(r, editable) {
+      var on = !!val(r, "received");
+      if (!editable) {
+        return on ? '<span class="chip chip-ok">arrived</span>'
+                  : '<span class="chip">on the way</span>';
+      }
+      return '<label class="dlv-tick"><input type="checkbox" class="dlv-check" data-id="' + esc(r.id) +
+             '" data-field="received"' + (on ? " checked" : "") +
+             ' aria-label="Received"><span></span></label>';
+    }
+
+    function rowHtml(r, editable) {
+      var gone = !!DELETED[r.id];
+      var cls = function (field) { return changed(r, field) ? "cell-changed" : ""; };
+      var d = val(r, "date");
+
+      return '<tr data-id="' + esc(r.id) + '" class="' +
+               (gone ? "row-deleted " : "") + (val(r, "received") ? "row-done" : "") + '">' +
+        UI.td("Date", editable ? dateCell(r)
+                               : (d ? UI.dstr(d) : '<span class="muted">no date</span>'), cls("date")) +
+        UI.td("Item", editable ? textCell(r, "item", "what was sent")
+                               : "<strong>" + escHtml(val(r, "item")) + "</strong>",
+              (editable ? "" : "wrap ") + cls("item")) +
+        UI.td("From", editable ? siteCell(r, "from") : escHtml(val(r, "from")),
+              (editable ? "" : "wrap ") + cls("from")) +
+        UI.td("To", editable ? siteCell(r, "to") : escHtml(val(r, "to")),
+              (editable ? "" : "wrap ") + cls("to")) +
+        UI.td("Qty", editable ? textCell(r, "qty") : escHtml(val(r, "qty")),
+              (editable ? "" : "num ") + cls("qty")) +
+        UI.td("Driver", editable ? driverCell(r) : escHtml(val(r, "driver")), cls("driver")) +
+        UI.td("D.O. No.", editable ? textCell(r, "doNum", "D.O.")
+                                   : (val(r, "doNum") ? "<code>" + escHtml(val(r, "doNum")) + "</code>" : ""),
+              cls("doNum")) +
+        UI.td("Remark", editable ? textCell(r, "remark", "—") : escHtml(val(r, "remark")),
+              (editable ? "" : "wrap ") + cls("remark")) +
+        '<td data-label="Arrived" class="dlv-tick-cell ' + cls("received") + '">' +
+          tickCell(r, editable) + "</td>" +
+        (editable
+          ? '<td class="dlv-row-act"><button type="button" class="dlv-x" data-drop="' + esc(r.id) +
+            '" title="' + (gone ? "Put this line back" : "Remove this line") + '" aria-label="' +
+            (gone ? "Undo remove" : "Remove") + '">' + (gone ? "\u21ba" : "\u00d7") + "</button></td>"
+          : "") +
+      "</tr>";
+    }
+
+    function table(rows) {
+      return '<div class="table-wrap table-stack"><table class="tool-table dlv-table' +
+               (CAN_SAVE ? " dlv-editable tool-editable with-remove" : "") + '">' +
+               thead(CAN_SAVE) + "<tbody>" +
+               rows.map(function (r) { return rowHtml(r, CAN_SAVE); }).join("") +
+             "</tbody></table></div>";
+    }
+
+    /* ------------------------- new deliveries + saving ---------------------- */
+
+    function blankRow() {
+      return { date: Dash.todayKL(), item: "", from: "", to: "", qty: "1",
+               driver: "", doNum: "", remark: "", received: false };
+    }
+
+    function newField(i, field, type, ph, list) {
+      if (type === "driver") {
+        return '<select class="new-edit" data-i="' + i + '" data-field="driver">' +
+                 driverOptions(NEWROWS[i].driver) + "</select>";
+      }
+      if (type === "checkbox") {
+        return '<label class="dlv-tick"><input type="checkbox" class="new-edit" data-i="' + i +
+               '" data-field="' + field + '"' + (NEWROWS[i][field] ? " checked" : "") +
+               ' aria-label="Received"><span></span></label>';
+      }
+      return '<input type="' + type + '" class="new-edit" data-i="' + i + '" data-field="' + field +
+             '" value="' + esc(NEWROWS[i][field]) + '"' +
+             (list ? ' list="' + list + '"' : "") +
+             (ph ? ' placeholder="' + esc(ph) + '"' : "") + ">";
+    }
+
+    function newRowsHtml() {
+      if (!NEWROWS.length) return "";
+      return '<div class="table-wrap"><table class="tool-new dlv-new">' +
+               "<thead><tr><th>Date</th><th>Item</th><th>From</th><th>To</th><th>Qty</th>" +
+                 "<th>Driver</th><th>D.O. No.</th><th>Remark</th>" +
+                 '<th class="dlv-tick-head">Arrived</th><th></th>' +
+               "</tr></thead><tbody>" +
+               NEWROWS.map(function (n, i) {
+                 return "<tr>" +
+                   "<td>" + newField(i, "date", "date") + "</td>" +
+                   "<td>" + newField(i, "item", "text", "what was sent") + "</td>" +
+                   "<td>" + newField(i, "from", "text", "from", "dlv-sites") + "</td>" +
+                   "<td>" + newField(i, "to", "text", "to", "dlv-sites") + "</td>" +
+                   "<td>" + newField(i, "qty", "text") + "</td>" +
+                   "<td>" + newField(i, "driver", "driver") + "</td>" +
+                   "<td>" + newField(i, "doNum", "text", "D.O.") + "</td>" +
+                   "<td>" + newField(i, "remark", "text") + "</td>" +
+                   '<td class="dlv-tick-cell">' + newField(i, "received", "checkbox") + "</td>" +
+                   '<td class="dlv-row-act"><button type="button" class="dlv-x" data-remove="' + i +
+                     '" title="Remove this line" aria-label="Remove">\u00d7</button></td>' +
+                 "</tr>";
+               }).join("") +
+             "</tbody></table></div>";
+    }
+
+    // a new line is worth writing once it says what was delivered, or carries a
+    // D.O. number to match against
+    function pendingAdds() {
+      return NEWROWS.filter(function (n) {
+        return String(n.item).trim() || String(n.doNum).trim();
+      });
+    }
+
+    function pendingEdits() {
+      var out = [];
+      Object.keys(EDITS).forEach(function (id) {
+        if (DELETED[id]) return;                       // a removed line's edits are moot
+        var base = BY_ID[id], e = EDITS[id];
+        if (!base) return;
+        for (var i = 0; i < FIELDS.length; i++) {
+          var f = FIELDS[i];
+          if (e[f] !== undefined && e[f] !== base[f]) { out.push(id); return; }
+        }
+      });
+      return out;
+    }
+
+    function pendingDrops() { return Object.keys(DELETED); }
+
+    function pendingCrew() { return DRIVER_ADDS.length + Object.keys(DRIVER_DROPS).length; }
+
+    // the whole record as it would stand after a save — this is what gets sent
+    function docRows() {
+      var out = [];
+      ALL.forEach(function (r) {
+        if (DELETED[r.id]) return;
+        var o = { id: r.id };
+        FIELDS.forEach(function (f) { o[f] = val(r, f); });
+        out.push(o);
+      });
+      var n = ALL.length;
+      pendingAdds().forEach(function (a, i) {
+        var o = { id: "d" + (n + i + 1) + "-" + Date.now().toString(36) };
+        FIELDS.forEach(function (f) { o[f] = a[f]; });
+        out.push(o);
+      });
+      return out;
+    }
+
+    // Rebuilding #new-rows while somebody is typing in it would take the caret
+    // with it, so the counter updates on its own.
+    function renderPendingBarOnly() {
+      var edits = pendingEdits(), adds = pendingAdds(), drops = pendingDrops();
+      var crew = pendingCrew();
+      var n = edits.length + adds.length + drops.length + crew;
+      var bar = document.getElementById("pending-bar");
+      bar.hidden = !n;
+      if (!n) return;
+      bar.className = "banner banner-info";
+      bar.innerHTML =
+        "<strong>" + n + " unsaved change" + (n === 1 ? "" : "s") + "</strong> — " +
+        edits.length + " line" + (edits.length === 1 ? "" : "s") + " edited, " +
+        adds.length + " new" + (drops.length ? ", " + drops.length + " removed" : "") +
+        (crew ? ", " + crew + " change" + (crew === 1 ? "" : "s") + " to the driver list" : "") + ". " +
+        "Nothing has been written to the record yet. " +
+        '<button type="button" id="btn-save" class="btn btn-primary">Save</button> ' +
+        '<button type="button" id="btn-discard" class="btn">Discard</button>';
+    }
+
+    function renderEdit() {
+      document.getElementById("new-rows").innerHTML = newRowsHtml();
+      renderPendingBarOnly();
+      document.getElementById("btn-add").disabled = !CAN_SAVE;
+      document.getElementById("edit-note").innerHTML = CAN_SAVE
+        ? "Saved on this machine, in <code>frontend/delivery-data.js</code>."
+        : "Editing is off: the save endpoint is not running. Start it with " +
+          "<code>python3 tools/tooling-api.py</code>, then reload.";
+    }
+
+    function save() {
+      var bar = document.getElementById("pending-bar");
+      var btn = document.getElementById("btn-save");
+      if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
+
+      fetch("http://127.0.0.1:8125/deliveries", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rows: docRows(), drivers: driversNow() })
+      }).then(function (res) { return res.json().then(function (j) { return { ok: res.ok, j: j }; }); })
+        .then(function (r) {
+          if (!r.ok || !r.j.ok) throw new Error(r.j.error || "the save endpoint refused it");
+          UI.saveScroll();
+          window.location.reload();          // show what the record now says
+        })
+        .catch(function (e) {
+          if (btn) { btn.disabled = false; btn.textContent = "Save"; }
+          bar.className = "banner banner-red";
+          bar.innerHTML = "Could not save: " + escHtml(e.message || e) +
+            '<br><span class="muted">Nothing was changed. ' +
+            "Is tools/tooling-api.py still running?</span>";
+        });
+    }
+
+    /* ------------------------------- render -------------------------------- */
+
+    function render() {
+      var rows = shown();
+      renderStats();
+      document.getElementById("f-count").textContent =
+        rows.length === ALL.length ? "" : rows.length + " of " + ALL.length + " shown";
+
+      document.getElementById("dlv-body").innerHTML = !ALL.length
+        ? UI.empty("No deliveries recorded yet.",
+                   CAN_SAVE ? "Press “+ Add delivery record” below to write the first one."
+                            : "Start tools/tooling-api.py to add one.")
+        : !rows.length
+          ? UI.empty("Nothing matches that.", "Clear the search or pick a different site.")
+          : table(rows);
+
+      renderEdit();
+    }
+
+    /* ------------------------------- controls ------------------------------ */
+
+    // every site and driver the record has ever seen, plus the standing site list
+    function usedValues(field) {
+      var m = {};
+      ALL.forEach(function (r) { var v = val(r, field); if (v) m[v] = (m[v] || 0) + 1; });
+      return m;
+    }
+
+    function fillDatalists() {
+      var sites = {};
+      SITES.forEach(function (s) { sites[s] = 1; });
+      Object.keys(usedValues("from")).forEach(function (s) { sites[s] = 1; });
+      Object.keys(usedValues("to")).forEach(function (s) { sites[s] = 1; });
+      document.getElementById("dlv-sites").innerHTML = Object.keys(sites).sort()
+        .map(function (s) { return '<option value="' + esc(s) + '">'; }).join("");
+    }
+
+    function fillFilters() {
+      var sites = {};
+      Object.keys(usedValues("from")).forEach(function (s) { sites[s] = 1; });
+      Object.keys(usedValues("to")).forEach(function (s) { sites[s] = 1; });
+      var siteSel = document.getElementById("f-site");
+      siteSel.innerHTML = '<option value="">All sites</option>' +
+        Object.keys(sites).sort().map(function (s) {
+          return '<option value="' + esc(s) + '"' + (s === F.site ? " selected" : "") + ">" +
+                 escHtml(s) + "</option>";
+        }).join("");
+
+      // the standing list, grouped by what they drive, plus anyone who appears
+      // on a delivery but is no longer on it
+      document.getElementById("f-driver").innerHTML =
+        '<option value=""' + (F.driver ? "" : " selected") + ">All drivers</option>" +
+        driverOptions(F.driver, { blank: false, extra: Object.keys(usedValues("driver")) });
+    }
+
+    // The months and years the record actually covers, newest first — with
+    // today's own month and year always offered, because a page that cannot be
+    // pointed at this month until somebody types a delivery into it argues back.
+    function periodOptions(kind) {
+      var cut = kind === "month" ? 7 : 4;
+      var m = {};
+      m[Dash.todayKL().slice(0, cut)] = 1;
+      ALL.forEach(function (r) {
+        var d = val(r, "date");
+        if (d) m[d.slice(0, cut)] = 1;
+      });
+      return Object.keys(m).sort().reverse();
+    }
+
+    function fillPeriod() {
+      var sel = document.getElementById("f-period");
+      sel.hidden = F.period === "all";
+      if (F.period === "all") return;
+      var kind = F.period;
+      var opts = periodOptions(kind);
+      var current = kind === "month" ? F.month : F.year;
+      if (opts.indexOf(current) === -1) current = opts[0];      // first visit: the newest
+      if (kind === "month") F.month = current; else F.year = current;
+      sel.innerHTML = opts.map(function (o) {
+        return '<option value="' + esc(o) + '"' + (o === current ? " selected" : "") + ">" +
+               escHtml(kind === "month" ? UI.mstr(o + "-01") : o) + "</option>";
+      }).join("");
+    }
+
+    function noteEdit(id, field, value) {
+      var base = BY_ID[id];
+      if (!base) return null;
+      var e = EDITS[id] = EDITS[id] || {};
+      if (value === base[field]) delete e[field];        // typed it back — not a change
+      else e[field] = value;
+      if (!Object.keys(e).length) delete EDITS[id];
+      return e;
+    }
+
+    function wire() {
+      fillDatalists();
+      fillFilters();
+      fillPeriod();
+
+      document.getElementById("period-switch").addEventListener("click", function (ev) {
+        var b = ev.target.closest("button[data-period]");
+        if (!b) return;
+        F.period = b.getAttribute("data-period");
+        b.parentElement.querySelectorAll("button").forEach(function (x) {
+          x.classList.toggle("active", x === b);
+        });
+        fillPeriod();
+        render();
+      });
+
+      document.getElementById("f-period").addEventListener("change", function (e) {
+        if (F.period === "month") F.month = e.target.value;
+        else F.year = e.target.value;
+        render();
+      });
+
+      document.getElementById("dlv-controls").addEventListener("click", function (ev) {
+        var b = ev.target.closest("button[data-status]");
+        if (!b) return;
+        F.status = b.getAttribute("data-status");
+        b.parentElement.querySelectorAll("button").forEach(function (x) {
+          x.classList.toggle("active", x === b);
+        });
+        render();
+      });
+
+      document.getElementById("f-site").addEventListener("change", function (e) {
+        F.site = e.target.value; render();
+      });
+      document.getElementById("f-driver").addEventListener("change", function (e) {
+        F.driver = e.target.value; render();
+      });
+
+      document.getElementById("btn-drivers").addEventListener("click", function (ev) {
+        var panel = document.getElementById("driver-panel");
+        panel.hidden = !panel.hidden;
+        ev.target.textContent = panel.hidden ? "Edit list" : "Close list";
+        if (!panel.hidden) { renderDrivers(); document.getElementById("drv-name").focus(); }
+      });
+
+      // Adding or dropping a driver changes every dropdown on the page, so the
+      // table is rebuilt with it — unsaved cell edits ride along untouched,
+      // because the cells are drawn from the edits, not from the DOM.
+      function afterCrewChange() {
+        renderDrivers();
+        fillFilters();
+        render();
+      }
+
+      document.getElementById("driver-panel").addEventListener("click", function (ev) {
+        var drop = ev.target.closest("button[data-drv-drop]");
+        if (drop) {
+          var name = drop.getAttribute("data-drv-drop"), at = -1;
+          DRIVER_ADDS.forEach(function (d, k) { if (d.name === name) at = k; });
+          if (at !== -1) DRIVER_ADDS.splice(at, 1);   // never saved — just forget it
+          else DRIVER_DROPS[name] = true;
+          afterCrewChange();
+          return;
+        }
+        if (ev.target.id !== "btn-drv-add") return;
+        var box = document.getElementById("drv-name");
+        var name2 = box.value.trim();
+        if (!name2) { box.focus(); return; }
+        delete DRIVER_DROPS[name2];                   // re-adding puts them back
+        var known = driversNow().some(function (d) {
+          return d.name.toLowerCase() === name2.toLowerCase();
+        });
+        if (!known) {
+          DRIVER_ADDS.push({ name: name2, vehicle: document.getElementById("drv-vehicle").value });
+        }
+        afterCrewChange();
+        document.getElementById("drv-name").focus();
+      });
+
+      // Enter in the name box adds, the way it would in any other one-line form
+      document.getElementById("driver-panel").addEventListener("keydown", function (ev) {
+        if (ev.key === "Enter" && ev.target.id === "drv-name") {
+          ev.preventDefault();
+          document.getElementById("btn-drv-add").click();
+        }
+      });
+      document.getElementById("f-text").addEventListener("input", function (e) {
+        F.text = e.target.value.trim().toLowerCase(); render();
+      });
+
+      var body = document.getElementById("dlv-body");
+
+      // typing in a cell records the change; it does not send it anywhere
+      body.addEventListener("change", function (ev) {
+        var el = ev.target.closest(".cell-edit, .dlv-check");
+        if (!el) return;
+        var id = el.getAttribute("data-id"), field = el.getAttribute("data-field");
+        var isTick = el.classList.contains("dlv-check");
+        var e = noteEdit(id, field, isTick ? el.checked : el.value);
+        if (e === null) return;
+
+        var cell = el.closest("td");
+        if (cell) cell.classList.toggle("cell-changed", !!(e && e[field] !== undefined));
+        if (isTick) {
+          var tr = el.closest("tr");
+          if (tr) tr.classList.toggle("row-done", el.checked);
+          renderStats();                  // the tick moves the counts above
+        }
+        renderPendingBarOnly();
+      });
+
+      // free text needs the same treatment on every keystroke, or the pending
+      // count only catches up when the field loses focus
+      body.addEventListener("input", function (ev) {
+        if (ev.target.closest('input[type="text"].cell-edit')) {
+          ev.target.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+      });
+
+      // Remove marks the line and leaves it on screen, struck through, until
+      // Save — so it can be put back without reloading the page.
+      body.addEventListener("click", function (ev) {
+        var b = ev.target.closest("button[data-drop]");
+        if (!b) return;
+        var id = b.getAttribute("data-drop");
+        if (DELETED[id]) delete DELETED[id];
+        else DELETED[id] = true;
+        var tr = b.closest("tr");
+        if (tr) tr.classList.toggle("row-deleted", !!DELETED[id]);
+        b.innerHTML = DELETED[id] ? "\u21ba" : "\u00d7";
+        b.title = DELETED[id] ? "Put this line back" : "Remove this line";
+        renderPendingBarOnly();
+      });
+
+      var newRows = document.getElementById("new-rows");
+      newRows.addEventListener("input", function (ev) {
+        var el = ev.target.closest(".new-edit");
+        if (!el || el.type === "checkbox") return;   // the tick is handled on change
+        NEWROWS[el.getAttribute("data-i")][el.getAttribute("data-field")] = el.value;
+        renderPendingBarOnly();           // do NOT re-render the inputs mid-typing
+      });
+      newRows.addEventListener("change", function (ev) {
+        var el = ev.target.closest(".new-edit");
+        if (!el) return;
+        var rec = NEWROWS[el.getAttribute("data-i")], field = el.getAttribute("data-field");
+        rec[field] = el.type === "checkbox" ? el.checked : el.value;
+        renderPendingBarOnly();
+      });
+      newRows.addEventListener("click", function (ev) {
+        var b = ev.target.closest("button[data-remove]");
+        if (!b) return;
+        NEWROWS.splice(Number(b.getAttribute("data-remove")), 1);
+        renderEdit();
+      });
+
+      document.getElementById("btn-add").addEventListener("click", function () {
+        NEWROWS.push(blankRow());
+        renderEdit();
+        var last = document.querySelector("#new-rows tbody tr:last-child input[data-field='item']");
+        if (last) last.focus();
+      });
+
+      document.getElementById("pending-bar").addEventListener("click", function (ev) {
+        if (ev.target.id === "btn-save") return save();
+        if (ev.target.id === "btn-discard") {
+          EDITS = {}; NEWROWS = []; DELETED = {}; DRIVER_ADDS = []; DRIVER_DROPS = {};
+          renderDrivers();
+          fillFilters();
+          render();
+        }
+      });
+    }
+
+    // delivery-data.js is written by the save endpoint, and the dev server
+    // reloads the page when it changes. Not while there is unsaved typing on
+    // screen — see tools/serve-live.py.
+    window.__hfHoldReload = function () {
+      return pendingEdits().length + pendingAdds().length +
+             pendingDrops().length + pendingCrew() > 0;
+    };
+
+    window.onShellReady = function () {
+      try {
+        document.getElementById("dlv-sub").innerHTML =
+          "What is on its way to site, what has arrived, and who is driving it" +
+          (META.updated ? " — last written <strong>" + UI.dstr(META.updated) + "</strong>." : ".");
+
+        document.getElementById("dlv-source").innerHTML =
+          "Kept on this machine in <code>frontend/delivery-data.js</code> — not in the " +
+          "spreadsheet and not in the database, so it is only as current as what is typed here.";
+
+        wire();
+
+        // Ask the save endpoint whether it is there BEFORE showing anything
+        // editable — twenty lines typed and only then finding out they cannot be
+        // saved is the worst version of this page.
+        fetch("http://127.0.0.1:8125/health")
+          .then(function (r) { return r.json(); })
+          .then(function (j) { CAN_SAVE = !!j.ok; })
+          .catch(function () { CAN_SAVE = false; })
+          .then(function () { render(); UI.restoreScroll(); });
+      } catch (e) {
+        document.getElementById("error").innerHTML = UI.errorBanner(e.message || e);
+      }
+    };
+  </script>
+</body>
+</html>

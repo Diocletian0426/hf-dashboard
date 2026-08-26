@@ -941,6 +941,435 @@ details.zone > .table-wrap { margin-top: 6px; }
 .mach-table th:nth-child(6) { width: 14%; }   /* Service       */
 .mach-table th:nth-child(7) { width: 10%; }   /* On Site       */
 .mach-table th:nth-child(8) { width: 11%; }   /* Open Issues   */
+
+/* tooling page: same one-ruler-for-every-block reasoning as .mach-table above,
+   but its own widths — the tooling table is 6 columns, and borrowing the
+   machines ruler put Qty under a 17%-wide column and squeezed the remark,
+   which is the column people actually read. Grouping by item slots a Site
+   column in at 5, hence the .with-site variant. Both sum to 100. */
+.tool-table { table-layout: fixed; min-width: 0; }
+.tool-table th:nth-child(1) { width: 26%; }   /* Item          */
+.tool-table th:nth-child(2) { width: 13%; }   /* Size / model  */
+.tool-table th:nth-child(3) { width: 13%; }   /* Code          */
+.tool-table th:nth-child(4) { width:  7%; }   /* Qty           */
+.tool-table th:nth-child(5) { width: 15%; }   /* Last movement */
+.tool-table th:nth-child(6) { width: 26%; }   /* Remark        */
+
+/* NO min-width on this one. It carries all seven columns, and a min-width wider
+   than the page is exactly what put a sideways scrollbar under a table that
+   otherwise fits. Percentages sum to 100 and the columns share whatever the
+   window gives them; the cells below are padded tighter to buy the room back. */
+.tool-table.with-site { min-width: 0; }
+.tool-table.with-site th:nth-child(1) { width: 19%; }   /* Item          */
+.tool-table.with-site th:nth-child(2) { width: 13%; }   /* Size / model  */
+.tool-table.with-site th:nth-child(3) { width: 10%; }   /* Code          */
+.tool-table.with-site th:nth-child(4) { width:  5%; }   /* Qty           */
+.tool-table.with-site th:nth-child(5) { width: 16%; }   /* Site          */
+.tool-table.with-site th:nth-child(6) { width: 16%; }   /* Last movement */
+.tool-table.with-site th:nth-child(7) { width: 21%; }   /* Remark        */
+
+/* seven columns of controls do not fit at the standard 16px cell padding */
+.tool-table.with-site th, .tool-table.with-site td { padding: 9px 10px; }
+
+/* ---- the page's two halves ------------------------------------------------
+   Tooling (things you still own, and move) and Consumables (things that get
+   used up). A segmented switch, not two nav entries: it is one record of one
+   store, asked two ways. */
+/* the shared .page-caption caps at 78ch, which broke this one sentence over two
+   lines with half the row still empty beside it */
+#tool-sub, #tool-source { max-width: none; }
+
+.kind-switch {
+  display: inline-flex; gap: var(--sp-3);      /* the two are alternatives, not a pair */
+  margin: var(--sp-4) 0 var(--sp-5);           /* clear of the heading, above the caption */
+}
+.kind-switch button {
+  font: inherit; font-weight: 600; cursor: pointer;
+  padding: 8px 18px; border-radius: var(--r-pill);
+  border: 1px solid var(--line); background: var(--surface-solid); color: var(--ink-2);
+}
+.kind-switch button:hover { border-color: var(--brand); color: var(--brand); }
+.kind-switch button.active {
+  background: var(--brand); border-color: var(--brand); color: #fff;
+}
+
+/* The search sits in the control row now, where Download CSV used to be, and
+   takes whatever the row has left — so its right edge lands on the same line as
+   the last stat card above it and the table below. No max-width: capping it was
+   what left it stranded short of that edge. */
+.tool-search {
+  position: relative; display: flex; align-items: center;
+  flex: 1 1 260px; min-width: 240px;
+}
+.tool-search > .ric {
+  position: absolute; left: 14px; width: 16px; height: 16px;
+  color: var(--ink-3); pointer-events: none;
+}
+/* Selector is this long on purpose. `.mp-controls input[type="search"]` further
+   down the file caps every search box in a control row at max-width 240px and
+   pads it 12px — which is what kept this one short of the edge and let its
+   placeholder run under the icon. This has to outrank it. */
+.mp-controls .tool-search input[type="search"] {
+  width: 100%; max-width: none; margin-left: 0;
+  font-family: var(--font); font-size: 13.5px;
+  /* left: the icon. right: the "43 of 280 shown" counter that sits inside the
+     field, so a long search term slides under it instead of colliding. */
+  padding: 9px 100px 9px 38px;
+  border: 1px solid var(--line-strong); border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.75); color: var(--ink);
+}
+.mp-controls .tool-search input[type="search"]::placeholder { color: var(--ink-3); }
+.mp-controls .tool-search input[type="search"]:focus {
+  outline: none; background: var(--surface-solid); border-color: var(--brand);
+}
+
+/* the "43 of 280 shown" counter rides after the field instead of inside it */
+.tool-search #f-count { position: absolute; right: 16px; font-size: 11.5px; pointer-events: none; }
+
+/* ---- Tooling: the three editable columns ---------------------------------
+   Site, Last movement and Remark can be changed on the page and saved back to
+   the sheet. The controls stay invisible until you go near them, so the table
+   still reads as a table rather than as a wall of form fields — the same trick
+   the spreadsheet itself plays. */
+.cell-edit {
+  width: 100%; max-width: 100%; font: inherit; color: inherit;
+  background: transparent; border: 1px solid transparent;
+  border-radius: var(--r-sm); padding: 4px 6px; margin: -4px -6px;
+}
+.cell-edit:hover { border-color: var(--line-strong); background: var(--surface-solid); }
+.cell-edit:focus {
+  outline: none; border-color: var(--brand); background: var(--surface-solid);
+  box-shadow: 0 0 0 3px var(--brand-soft);
+}
+select.cell-edit { cursor: pointer; }
+
+/* a cell holding an unsaved change — tinted until it is written to the sheet */
+td.cell-changed { background: var(--warn-soft); }
+td.cell-changed .cell-edit { border-color: var(--amber-soft); }
+
+/* the editable table needs more room per column than the read-only one */
+.tool-table.tool-editable { min-width: 0; }
+.tool-editable .cell-edit { font-size: 12.5px; padding: 4px 6px; margin: -4px -6px; }
+.tool-editable td[data-label="Qty"] .cell-edit { margin-right: 0; }
+/* The date control is the widest thing in the row and it will NOT shrink below
+   what "dd/mm/yyyy" plus its calendar button needs — the one thing that can
+   still push a fixed-layout row sideways. Smaller type and a tighter button. */
+.tool-editable input[type="date"].cell-edit {
+  font-size: 12px; padding-right: 2px;
+  /* auto, not 100%: a full-width date box parks its calendar button against the
+     far edge of the column with a gap of dead space after the digits. Sized to
+     its content, the button sits right beside the date where it belongs. */
+  width: auto; max-width: 100%;
+}
+.tool-editable input[type="date"].cell-edit::-webkit-calendar-picker-indicator {
+  margin-left: 2px; padding: 0 2px; opacity: 0.55;
+}
+.tool-editable input[type="date"].cell-edit::-webkit-calendar-picker-indicator:hover { opacity: 1; }
+
+/* new items waiting to be appended: a plain auto-width table, since it carries
+   a Remove button the main ruler knows nothing about */
+.tool-new {
+  width: 100%; table-layout: fixed; border-collapse: collapse; margin: var(--sp-3) 0 0;
+}
+.tool-new th:nth-child(1) { width: 18%; }   /* Item          */
+.tool-new th:nth-child(2) { width: 12%; }   /* Size / model  */
+.tool-new th:nth-child(3) { width: 10%; }   /* Code          */
+.tool-new th:nth-child(4) { width:  6%; }   /* Qty           */
+.tool-new th:nth-child(5) { width: 15%; }   /* Site          */
+.tool-new th:nth-child(6) { width: 14%; }   /* Last movement */
+.tool-new th:nth-child(7) { width: 17%; }   /* Remark        */
+.tool-new th:nth-child(8) { width:  8%; }   /* Remove        */
+.tool-new th {
+  text-align: left; font-size: var(--fs-xs); text-transform: uppercase;
+  letter-spacing: 0.04em; color: var(--ink-3); padding: 6px 8px;
+}
+.tool-new td { padding: 4px 8px; border-top: 1px solid var(--line); }
+.tool-new input, .tool-new select {
+  width: 100%; font: inherit; font-size: 12.5px; padding: 6px 8px;
+  border: 1px solid var(--line-strong); border-radius: var(--r-sm);
+  background: var(--surface-solid);
+}
+.tool-new input:focus, .tool-new select:focus {
+  outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft);
+}
+
+.tool-edit-actions { display: flex; align-items: center; gap: var(--sp-3); margin: var(--sp-3) 0 0; }
+
+/* ---- consumables ----------------------------------------------------------
+   Same furniture as the tooling tables, different columns: a consumable is
+   asked "how many are left", not "where is it". */
+.cons-table th:nth-child(1) { width: 22%; }   /* Item       */
+.cons-table th:nth-child(2) { width: 11%; }   /* Size       */
+.cons-table th:nth-child(3) { width:  7%; }   /* Unit       */
+.cons-table th:nth-child(4) { width: 11%; }   /* In store   */
+.cons-table th:nth-child(5) { width: 11%; }   /* Requested  */
+.cons-table th:nth-child(6) { width:  9%; }   /* Left       */
+.cons-table th:nth-child(7) { width:  9%; }   /* Reorder at */
+.cons-table th:nth-child(8) { width: 20%; }   /* Remark     */
+
+/* by site: one line per request. The last column is the ✕ that takes a request
+   off, and it is only there when the page can save. */
+.cons-site-table th:nth-child(1) { width: 34%; }   /* Item      */
+.cons-site-table th:nth-child(2) { width: 16%; }   /* Size      */
+.cons-site-table th:nth-child(3) { width: 10%; }   /* Unit      */
+.cons-site-table th:nth-child(4) { width: 14%; }   /* Requested */
+.cons-site-table th:nth-child(5) { width: 26%; }   /* Note      */
+
+.cons-site-table.with-drop th:nth-child(1) { width: 30%; }
+.cons-site-table.with-drop th:nth-child(2) { width: 14%; }
+.cons-site-table.with-drop th:nth-child(3) { width:  9%; }
+.cons-site-table.with-drop th:nth-child(4) { width: 13%; }
+.cons-site-table.with-drop th:nth-child(5) { width: 26%; }
+.cons-site-table.with-drop th:nth-child(6) { width:  8%; }   /* ✕ */
+
+.cons-table th, .cons-table td,
+.cons-site-table th, .cons-site-table td { padding: 9px 10px; }
+
+/* the reorder chip sits in front of the free-text remark, in the one column
+   people actually read on a stock list */
+.cons-remark { display: flex; align-items: center; gap: var(--sp-2); }
+.cons-remark .chip { flex: none; }
+
+.cons-edit, .cons-stock, .cons-req {
+  width: 100%; max-width: 100%; font: inherit; font-size: 12.5px; color: inherit;
+  background: transparent; border: 1px solid transparent;
+  border-radius: var(--r-sm); padding: 4px 6px; margin: -4px -6px;
+}
+.cons-edit:hover, .cons-stock:hover, .cons-req:hover {
+  border-color: var(--line-strong); background: var(--surface-solid);
+}
+.cons-edit:focus, .cons-stock:focus, .cons-req:focus {
+  outline: none; border-color: var(--brand); background: var(--surface-solid);
+  box-shadow: 0 0 0 3px var(--brand-soft);
+}
+/* A quantity is read as a number, so it is typed as one — right-aligned. The
+   negative right margin goes with it: it pushed the digits 6px past the column
+   heading, which is exactly the kind of near-miss that reads as "not aligned". */
+.cons-site-table td[data-label="Requested"] .cons-stock,
+.cons-site-table td[data-label="Requested"] .cons-req,
+.cons-table td[data-label="In store"] .cons-edit,
+.cons-table td[data-label="Reorder at"] .cons-edit {
+  text-align: right; margin-right: 0;
+}
+
+/* ---- what the sum looks like ----------------------------------------------
+   In store is typed; Requested and Left are worked out from it. Only the typed
+   one looks like something you can type in — the other two read as figures, so
+   nobody hunts for a box that is not there. */
+.cons-out { color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.cons-over { color: var(--danger-ink); }        /* more promised than we hold */
+
+/* a request line still being typed — same amber the tooling page uses for a
+   cell that has not been saved yet */
+tr.cons-draft td { background: var(--warn-soft); }
+tr.cons-draft select.cons-req { background: var(--surface-solid); }
+
+/* the ✕ that takes a request off: the delivery page's control, same shape */
+.cons-row-act { text-align: center; }
+/* ---- Delivery Status ------------------------------------------------------
+   A delivery is a movement, not a holding: one line per lorry-load, and the
+   columns are the ones the delivery order already has. Same ruler discipline as
+   the tooling tables, and NO min-width: the columns share whatever the window
+   gives them instead of putting a sideways scrollbar under a page. The editable
+   table carries a tenth column (the ✕), hence the .with-remove variant. */
+.dlv-table { table-layout: fixed; min-width: 0; }
+
+/* WIDTHS MIX px AND calc(), AND THAT IS THE POINT. The date picker, the Qty
+   box, the tick and the ✕ have a size that does not depend on how wide the
+   window is: a date column set as a percentage collapses to "26/08/2…" the
+   moment the window narrows, which is the one thing this column must never do.
+   132px is what Chrome's own date control needs at 12px — under that it starts
+   eating its own digits rather than shrinking.
+   The six text columns share whatever is left over. Everything fits, so the
+   table never scrolls sideways — no hunting for a column that is off-screen. */
+
+/* read-only: nine columns, and Date is short formatted text ("26 Aug 2026") */
+.dlv-table th:nth-child(1) { width: 104px; }                        /* Date     */
+.dlv-table th:nth-child(5) { width:  48px; }                        /* Qty      */
+.dlv-table th:nth-child(9) { width:  96px; }                        /* Arrived  */
+.dlv-table th:nth-child(2) { width: calc((100% - 248px) * 0.26); }  /* Item     */
+.dlv-table th:nth-child(3) { width: calc((100% - 248px) * 0.17); }  /* From     */
+.dlv-table th:nth-child(4) { width: calc((100% - 248px) * 0.17); }  /* To       */
+.dlv-table th:nth-child(6) { width: calc((100% - 248px) * 0.16); }  /* Driver   */
+.dlv-table th:nth-child(7) { width: calc((100% - 248px) * 0.11); }  /* D.O. No. */
+.dlv-table th:nth-child(8) { width: calc((100% - 248px) * 0.13); }  /* Remark   */
+
+/* editable: ten columns, and Date is a real picker — 132px is what dd/mm/yyyy
+   plus its calendar button needs at 12px, with the cell padding counted in */
+.dlv-table.with-remove th:nth-child(1) { width: 132px; }
+.dlv-table.with-remove th:nth-child(5) { width:  46px; }
+.dlv-table.with-remove th:nth-child(9) { width:  72px; }
+.dlv-table.with-remove th:nth-child(10) { width: 34px; }            /* ✕        */
+.dlv-table.with-remove th:nth-child(2) { width: calc((100% - 284px) * 0.26); }
+.dlv-table.with-remove th:nth-child(3) { width: calc((100% - 284px) * 0.17); }
+.dlv-table.with-remove th:nth-child(4) { width: calc((100% - 284px) * 0.17); }
+.dlv-table.with-remove th:nth-child(6) { width: calc((100% - 284px) * 0.16); }
+.dlv-table.with-remove th:nth-child(7) { width: calc((100% - 284px) * 0.11); }
+.dlv-table.with-remove th:nth-child(8) { width: calc((100% - 284px) * 0.13); }
+
+/* ten columns do not fit at the standard 16px cell padding */
+.dlv-table th, .dlv-table td { padding: 8px 6px; }
+.dlv-table .cell-edit { font-size: 12px; padding: 4px 5px; margin: -4px -5px; }
+/* the date box fills its column instead of sizing to its content — the column
+   is already exactly as wide as the control needs, and "auto" left the calendar
+   button floating in dead space (see .tool-editable, which this outranks) */
+.dlv-table input[type="date"].cell-edit { width: 100%; font-size: 12px; padding: 4px 2px; }
+
+
+/* ---- the tick -------------------------------------------------------------
+   The last column is the whole point of the page: has it landed or not. A real
+   box you can hit, not a 13px browser default — the office ticks these off a
+   printed D.O. with a finger on a trackpad. It is an edit like any other, so it
+   goes amber and waits for Save: "arrived" is a claim about the real world, and
+   a stray click must be as undoable as a mis-typed number. */
+th.dlv-tick-head, td.dlv-tick-cell { text-align: center; }
+/* 11.5px uppercase Georgia: "ARRIVED" is ~55px, which is what set the column */
+th.dlv-tick-head { letter-spacing: 0.2px; }
+.dlv-tick { display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.dlv-tick input { position: absolute; width: 0; height: 0; opacity: 0; margin: 0; }
+.dlv-tick > span {
+  position: relative; display: inline-block; width: 20px; height: 20px;
+  border: 1.5px solid var(--line-strong); border-radius: 6px;
+  background: var(--surface-solid);
+  transition: background 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.dlv-tick > span::after {                     /* the tick itself */
+  content: ""; position: absolute; left: 6.5px; top: 2.6px; width: 5px; height: 10px;
+  border: solid #fff; border-width: 0 2px 2px 0;
+  transform: rotate(45deg) scale(0.5); opacity: 0;
+  transition: transform 0.12s ease, opacity 0.12s ease;
+}
+.dlv-tick:hover > span { border-color: var(--brand); }
+.dlv-tick input:checked + span { background: var(--ok); border-color: var(--ok); }
+.dlv-tick input:checked + span::after { opacity: 1; transform: rotate(45deg) scale(1); }
+.dlv-tick input:focus-visible + span {
+  border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft);
+}
+
+/* a delivered line, seen at a glance down the table. :not(.cell-changed) so an
+   unsaved edit still shows amber — pending beats arrived, because pending is
+   the thing you still have to do something about. */
+.dlv-table tr.row-done td:not(.cell-changed) { background: rgba(22, 163, 74, 0.045); }
+
+/* marked for removal: struck through and left on screen until Save, so it can
+   be put back without reloading the page. The button itself stays legible. */
+.dlv-table tr.row-deleted td { opacity: 0.45; text-decoration: line-through; }
+.dlv-table tr.row-deleted td.dlv-row-act { opacity: 1; text-decoration: none; }
+.dlv-row-act { text-align: right; }
+.dlv-row-act .btn-plain { padding: 3px 10px; font-size: 12px; }
+
+/* the remove control: an ✕, not the word "Remove" — the word needed a column
+   80px wide, and 80px of a table this busy is a column of real information */
+.dlv-row-act { text-align: center; }
+.dlv-x, .cons-x {
+  width: 26px; height: 26px; padding: 0; line-height: 1;
+  font: inherit; font-size: 15px; cursor: pointer;
+  border: 1px solid transparent; border-radius: 50%;
+  background: none; color: var(--ink-3);
+}
+.dlv-x:hover, .cons-x:hover {
+  background: var(--danger-soft); border-color: #fecaca; color: var(--danger-ink);
+}
+
+/* new deliveries waiting to be written — the .tool-new furniture, ten columns,
+   on the same ruler as the editable table above so the two line up */
+.dlv-new { table-layout: fixed; }
+.dlv-new th:nth-child(1) { width: 132px; }
+.dlv-new th:nth-child(5) { width:  46px; }
+.dlv-new th:nth-child(9) { width:  72px; }
+.dlv-new th:nth-child(10) { width: 34px; }
+.dlv-new th:nth-child(2) { width: calc((100% - 284px) * 0.26); }
+.dlv-new th:nth-child(3) { width: calc((100% - 284px) * 0.17); }
+.dlv-new th:nth-child(4) { width: calc((100% - 284px) * 0.17); }
+.dlv-new th:nth-child(6) { width: calc((100% - 284px) * 0.16); }
+.dlv-new th:nth-child(7) { width: calc((100% - 284px) * 0.11); }
+.dlv-new th:nth-child(8) { width: calc((100% - 284px) * 0.13); }
+.dlv-new th, .dlv-new td { padding: 5px 6px; }
+.dlv-new input, .dlv-new select { font-size: 12px; padding: 5px 6px; }
+.dlv-new input[type="date"] { padding: 5px 2px; }
+.dlv-new .dlv-tick-cell { text-align: center; }
+/* .tool-new input is width:100% — which would stretch the hidden checkbox and
+   drag the box it draws off-centre */
+.dlv-new .dlv-tick input { width: 0; }
+
+/* ---- the driver list ------------------------------------------------------
+   Who drives what, kept on the page because it changes: somebody joins, a lorry
+   driver leaves. Grouped by vehicle in the office's own order (loader, cargo,
+   lorry) so it reads as three short lists instead of one long one — that is the
+   order they are asked for in, and a dropdown that argues with how people talk
+   is a dropdown people mistype into. */
+.dlv-link {
+  background: none; border: none; padding: 0; margin-left: var(--sp-2);
+  font: inherit; font-size: var(--fs-sm); color: var(--brand); cursor: pointer;
+}
+.dlv-link:hover { text-decoration: underline; }
+
+.driver-panel {
+  background: var(--surface); border: 1px solid var(--line);
+  -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+  border-radius: var(--r-lg); box-shadow: var(--shadow-1);
+  padding: var(--sp-4) var(--sp-5); margin: 0 0 var(--sp-4);
+}
+.drv-group { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+.drv-kind {
+  flex: none; width: 62px; font-size: 11.5px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.4px; color: var(--ink-3);
+}
+.drv-chip {
+  display: inline-flex; align-items: center; gap: 2px;
+  padding: 3px 4px 3px 12px; font-size: 13px;
+  border: 1px solid var(--line-strong); border-radius: var(--r-pill);
+  background: var(--surface-solid);
+}
+.drv-chip .dlv-x { width: 20px; height: 20px; font-size: 13px; }
+
+.drv-add {
+  display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2);
+  margin-top: var(--sp-3); padding-top: var(--sp-3); border-top: 1px solid var(--rule);
+}
+.drv-add input, .drv-add select {
+  font: inherit; font-size: var(--fs-sm); padding: 6px 10px;
+  border: 1px solid var(--line-strong); border-radius: var(--r-sm);
+  background: var(--surface-solid); color: var(--ink);
+}
+.drv-add input:focus, .drv-add select:focus {
+  outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft);
+}
+.drv-add .muted { flex: 1 1 240px; font-size: 12px; }
+
+/* ---- Overall / by month / by year ----------------------------------------
+   The cards answer "how are we doing"; this decides what "we" covers. It sits
+   above them because it governs them — and the table under it too, so the
+   figures and the lines can never be describing different weeks. */
+.period-switch {
+  display: flex; align-items: center; flex-wrap: wrap;
+  gap: var(--sp-2); margin: 0 0 var(--sp-4);
+}
+.period-switch .ps-label { font-size: var(--fs-sm); color: var(--ink-2); margin-right: var(--sp-1); }
+.period-switch button {
+  font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+  padding: 6px 15px; border-radius: var(--r-pill);
+  border: 1px solid var(--line-strong); background: var(--surface-solid); color: var(--ink-2);
+}
+.period-switch button:hover { border-color: var(--brand); color: var(--brand); }
+.period-switch button.active {
+  background: var(--charcoal); border-color: var(--charcoal); color: #fff;
+}
+/* The chevron comes from the house rule further down this file (search for
+   "Own chevron"), which this selector joins — the native macOS arrow sits hard
+   against the right border and, on a pill, reads as sliding off the curve. */
+.period-switch select {
+  font: inherit; font-size: 13px; padding: 6px 15px; margin-left: var(--sp-2);
+  border: 1px solid var(--line-strong); border-radius: var(--r-pill);
+  background-color: var(--surface-solid); color: var(--ink); cursor: pointer;
+}
+.period-switch select:hover { border-color: var(--brand); }
+.period-switch select:focus {
+  outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft);
+}
+
+#pending-bar ul { margin: var(--sp-2) 0; padding-left: 1.2em; }
+#pending-bar button { margin-left: var(--sp-2); }
 .zone-tools { display: flex; gap: 14px; margin: var(--sp-4) 0 0; }
 .zone-tools button {
   background: none; border: none; padding: 0;
@@ -1217,7 +1646,7 @@ table.claim-lines input.qty {
    (no external file) placed well inside the curve fixes both. */
 .mp-controls select, .filters select, .ctx-switch, .move-ctl select,
 .claim-form select, .claim-actions select, .mach-tools select,
-.tq-toolbar select, .tq-pager select {
+.tq-toolbar select, .tq-pager select, .period-switch select {
   -webkit-appearance: none; appearance: none;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8' fill='none' stroke='%234b5b76' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M1.2 1.6 6 6.4 10.8 1.6'/></svg>");
   background-repeat: no-repeat;

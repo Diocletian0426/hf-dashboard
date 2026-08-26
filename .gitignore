@@ -5,3 +5,6 @@ Thumbs.db
 # local experiments — never commit scratch files
 *.local
 scratch/
+
+# python bytecode from tools/
+__pycache__/

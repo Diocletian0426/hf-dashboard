@@ -37,6 +37,13 @@
     issues:     '<path d="M12 4.6 20.6 19.5H3.4z"/><path d="M12 10v4.2"/><path d="M12 17.2v.4"/>',
     machines:   '<rect x="2.6" y="12.6" width="10" height="6" rx="1.5"/><path d="M12.6 15.2h3.6l3-5.6"/>' +
                 '<path d="M19.2 9.6h2.2"/><circle cx="6" cy="20.4" r="1.4"/><circle cx="15.6" cy="20.4" r="1.4"/>',
+    // a spanner — the tooling store (augers, buckets, casings), not the fleet
+    tooling:    '<path d="M15.2 3.6a5 5 0 0 0-4.4 7.3l-6.6 6.6a1.8 1.8 0 0 0 0 2.5 1.8 1.8 0 0 0 2.5 0' +
+                'l6.6-6.6a5 5 0 0 0 7.3-4.4c0-.6-.1-1.2-.3-1.8l-3.2 3.2-2.6-.7-.7-2.6 3.2-3.2' +
+                'c-.6-.2-1.2-.3-1.8-.3z"/>',
+    // a parcel — what is on its way to a site, not what is already parked there
+    delivery:   '<path d="M12 3.2 20.4 7.4v9.2L12 20.8 3.6 16.6V7.4z"/>' +
+                '<path d="M3.6 7.4 12 11.6l8.4-4.2"/><path d="M12 11.6v9.2"/>',
     manpower:   '<circle cx="9" cy="7.4" r="3"/><path d="M3.5 20c0-3 2.5-5.5 5.5-5.5s5.5 2.5 5.5 5.5"/>' +
                 '<circle cx="17.2" cy="9" r="2.2"/><path d="M17.2 13.4c2.3 0 4.2 1.9 4.2 4.2"/>',
     attendance: '<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 9.5h17"/>' +
@@ -59,18 +66,23 @@
   }
 
   var NAV_LINKS = [
-    { href: "index.html",      label: "Overview",   icon: "overview"   },
-    { href: "projects.html",   label: "Projects",   icon: "projects"   },
-    { href: "issues.html",     label: "Issues",     icon: "issues"     },
-    { href: "machines.html",   label: "Machines",   icon: "machines"   },
-    { href: "manpower.html",   label: "Manpower",   icon: "manpower"   },
-    { href: "attendance.html", label: "Attendance", icon: "attendance" },
+    { href: "index.html",           label: "Overview",        icon: "overview"   },
+    { href: "projects.html",        label: "Projects",        icon: "projects"   },
+    { href: "issues.html",          label: "Issues",          icon: "issues"     },
+    { href: "machines.html",        label: "Machines",        icon: "machines"   },
+    // the fleet's two neighbours: what tooling is where, and what is still
+    // on its way to site. They sit under Machines because that is where the
+    // office already goes to ask "what have we got, and where is it".
+    { href: "tooling.html",         label: "Tooling",         icon: "tooling"    },
+    { href: "delivery-status.html", label: "Delivery Status", icon: "delivery"   },
+    { href: "manpower.html",        label: "Manpower",        icon: "manpower"   },
+    { href: "attendance.html",      label: "Attendance",      icon: "attendance" },
     // leave.html stays in PAGE_ACCESS but is out of the nav until the page
     // is actually built (owner decision — leave UI deferred)
-    { href: "tests.html",      label: "Tests",      icon: "tests"      },
-    { href: "bore-logs.html",  label: "Bore Logs",  icon: "borelogs"   },
+    { href: "tests.html",           label: "Tests",           icon: "tests"      },
+    { href: "bore-logs.html",       label: "Bore Logs",       icon: "borelogs"   },
     // only appears for logins holding users.view (the allowed() filter below)
-    { href: "users.html",      label: "Users",      icon: "users"      }
+    { href: "users.html",           label: "Users",           icon: "users"      }
   ];
 
   // page -> the permission needed to open it.
@@ -89,6 +101,13 @@
     "piles.html":      "piles.view",
     "issues.html":     "issues.view",
     "machines.html":   "machines.view",
+    // Tooling and Delivery Status have no permission of their own in the
+    // database yet, so they ride on machines.view: whoever may see the fleet
+    // may see what tooling is where and what is still on its way. When
+    // hf-database adds tooling.view / deliveries.view, change these two lines
+    // — do NOT leave them unlisted, unlisted means refused (see above).
+    "tooling.html":         "machines.view",
+    "delivery-status.html": "machines.view",
     "manpower.html":   "manpower.view",
     "attendance.html": "attendance.view",
     "tests.html":      "tests.view",

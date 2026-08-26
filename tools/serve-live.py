@@ -41,6 +41,19 @@ CLIENT_JS = """
       }
       return;
     }
+    // A page can refuse a reload while it is holding something the user has
+    // not saved. It matters now that tooling-data.js is rewritten on its own
+    // whenever the spreadsheet moves: a reload arriving mid-edit would take
+    // twenty typed changes with it and leave nothing on screen to say so.
+    if (window.__hfHoldReload) {
+      try {
+        if (window.__hfHoldReload()) {
+          window.__hfReloadPending = true;    // the page can offer it later
+          if (window.__hfOnHeldReload) window.__hfOnHeldReload();
+          return;
+        }
+      } catch (err) { /* a page that throws here still gets its reload */ }
+    }
     window.location.reload();
   };
 })();

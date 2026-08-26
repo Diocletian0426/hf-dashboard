@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nexus — Tooling</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <header id="nav"></header>
+
+  <main id="main">
+    <!-- ================= TOOLING =================================
+         The office's own tooling record, on screen: the Google Sheet
+         "HF Bored Piles Malaysia" -> "Master List (Updated)", Tools
+         section (Machinery, the section above it, has its own page
+         fed by the database — this page deliberately does not touch
+         it, so the two never disagree about a machine).
+
+         The sheet's columns are kept in the sheet's own order, so
+         anyone who knows the sheet can read this without learning
+         anything new: Description, Size/Model, Code, Quantity, Site,
+         Last Movement Date, Remark.
+
+         DATA IS A SNAPSHOT, NOT A FEED. There is no tooling table in
+         the database yet; frontend/tooling-data.js is written by
+         tools/pull-tooling.py straight from the sheet. The pull date
+         is printed on the page — an inventory figure with no date on
+         it is a rumour, and the office must be able to see at a
+         glance whether they are looking at today or at last month.
+
+         Access rides on machines.view (see PAGE_ACCESS in shell.js).
+    -->
+    <div class="page-eyebrow">Machines</div>
+    <h1>Tooling &amp; Consumables</h1>
+
+    <!-- Two different questions live on this page, so they get a switch rather
+         than a shared table: tooling is a thing you still own and can find,
+         a consumable is a thing that gets used up. Mixing them would make
+         "how many have we got" mean two different things in one column. -->
+    <div class="kind-switch" id="kind-switch">
+      <button type="button" data-kind="tooling" class="active">Tooling</button>
+      <button type="button" data-kind="consumable">Consumable items</button>
+    </div>
+
+    <p id="tool-sub" class="page-caption">Loading…</p>
+
+    <div id="error"></div>
+
+    <!-- counts first: the four questions the office asks before it asks
+         anything else — how much is there, in how many places, how much is
+         sitting in a store, and how much has no movement date at all -->
+    <div class="istats" id="tool-stats"></div>
+
+    <div class="mp-controls" id="tool-controls">
+      <span>View:
+        <button type="button" data-mode="list" class="active">All rows</button>
+        <button type="button" data-mode="site">By site</button>
+      </span>
+      <span>Site: <select id="f-site"></select></span>
+      <span>Item: <select id="f-type"></select></span>
+      <!-- same shape as the shell's own search box at the top of the page:
+           icon inside the field on the left, pill outline, full width of the
+           row so its right edge lines up with the cards and the table -->
+      <span class="tool-search">
+        <svg class="ric" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="11" cy="11" r="6.5"/><path d="M15.8 15.8 20.5 20.5"/>
+        </svg>
+        <input type="search" id="f-text"
+               placeholder="Search item, code, size or remark…"
+               aria-label="Search tooling" />
+        <span class="muted" id="f-count"></span>
+      </span>
+    </div>
+
+    <div id="tool-body"></div>
+
+    <!-- Editing lives here, under the table, and only in the All rows view.
+         Nothing saves as you type: changes pile up until Save is pressed,
+         because the other end of that button is a live company spreadsheet
+         several people work from. -->
+    <div id="tool-edit" hidden>
+      <div id="pending-bar" class="banner banner-info" hidden></div>
+      <div id="new-rows"></div>
+      <p class="tool-edit-actions">
+        <button type="button" id="btn-add" class="btn">+ Add item</button>
+        <span class="muted" id="edit-note"></span>
+      </p>
+    </div>
+
+    <!-- The consumables half. Its own controls, its own two views and its own
+         save path — see consumable-ui.js. Kept in one page because it is one
+         store: the tools in it get moved, the consumables in it get used up. -->
+    <div id="consumable-body" hidden></div>
+
+    <p class="page-caption" id="tool-source"></p>
+  </main>
+
+  <script src="vendor/supabase.js"></script>
+  <script src="config.js"></script>
+  <script src="dashboard-client.js"></script>
+  <script src="ui.js"></script>
+  <script src="tooling-data.js"></script>
+  <script src="consumable-data.js"></script>
+  <script src="consumable-ui.js"></script>
+  <script src="shell.js"></script>
+
+  <script>
+    "use strict";
+
+    var esc = UI.esc, escHtml = UI.escHtml;
+
+    // one row of the sheet, named — the arrays in tooling-data.js are in the
+    // sheet's column order and nothing else should have to know that
+    function toRow(a) {
+      return { desc: a[0], spec: a[1], code: a[2], qty: a[3],
+               site: a[4], moved: a[5], remark: a[6], row: a[7] };
+    }
+
+    var META = window.TOOLING_DATA || {};
+    var SITE_OPTIONS = META.siteOptions || [];
+
+    // Edits waiting to be saved, keyed by the sheet row they belong to, and the
+    // brand-new items waiting to be appended. Both are cleared by a save (the
+    // page reloads onto a freshly pulled snapshot) or by Discard.
+    var EDITS = {};
+    var NEWROWS = [];
+    var CAN_SAVE = false;      // set by the health check — see onShellReady
+    var SYNC = null;          // ditto: is the sheet being watched, and how often
+    var SUB_TEXT = "";        // the tooling caption, kept for the switch back
+
+    // The caption has to be honest about which of two things this page is: a
+    // copy kept in step with the spreadsheet, or a snapshot with a date on it.
+    // tools/tooling-api.py answers that on /health, so the caption is only
+    // written once the answer is in.
+    function subText() {
+      if (SYNC && SYNC.on) {
+        var every = SYNC.every >= 60
+          ? Math.round(SYNC.every / 60) + " minute" + (SYNC.every >= 120 ? "s" : "")
+          : SYNC.every + " seconds";
+        return "Where every tool is — <strong>kept in step with the sheet</strong>, checked every " +
+               every + (SYNC.error
+                 ? '. <span class="muted">Last check failed: ' + escHtml(SYNC.error) + "</span>"
+                 : ". What you change here goes straight back into it.");
+      }
+      var age = UI.daysSince(META.pulled);
+      return "Where every tool is — snapshot of <strong>" + UI.dstr(META.pulled) + "</strong>" +
+             (age > 0 ? " (" + age + " day" + (age === 1 ? "" : "s") + " ago)" : "") +
+             ", it does not update itself.";
+    }
+
+    // The sheet is watched now, so tooling-data.js can be rewritten under an
+    // open page and the dev server will want to reload it. Never while there
+    // are unsaved changes on screen: a reload arriving mid-edit would take
+    // twenty typed lines with it and leave nothing behind to say so.
+    window.__hfHoldReload = function () {
+      var mine = pendingEdits().length + pendingAdds().length;
+      var cons = (window.Consumables && window.Consumables.pending)
+        ? window.Consumables.pending() : 0;
+      return mine + cons > 0;
+    };
+
+    window.__hfOnHeldReload = function () {
+      var bar = document.getElementById("pending-bar");
+      if (!bar || bar.hidden) bar = document.getElementById("cons-bar");
+      if (!bar || document.getElementById("sheet-moved")) return;
+      var note = document.createElement("div");
+      note.id = "sheet-moved";
+      note.className = "muted";
+      note.innerHTML = "The sheet has moved since you started typing. Save or Discard, " +
+                       "and the page will pick the new version up.";
+      bar.appendChild(note);
+    };
+
+    var ALL = (window.TOOLING_DATA && window.TOOLING_DATA.rows || []).map(toRow);
+
+    // "Rock Auger - 1800mm -Tungsten Teeth" -> "Rock Auger". The sheet has no
+    // category column; the office already writes the family first and puts the
+    // size after a dash, so the grouping falls out of what they type.
+    function family(desc) {
+      var s = String(desc || "").split(" - ")[0].split(/\s+-\s*/)[0];
+      return s.replace(/\s+/g, " ").trim() || "Other";
+    }
+    ALL.forEach(function (r) { r.family = family(r.desc); });
+
+    // A site whose name says "Store" is the yard, not a job — the difference
+    // between "we own it" and "it is out working" is the first thing anyone
+    // wants to know.
+    function isStore(site) { return /store/i.test(site || ""); }
+
+    // "list" — the sheet's own shape, one row per row, nothing folded away. The
+    // office reads this sheet every day; the page opening on anything else means
+    // learning a second way to look at the same list.
+    var F = { kind: "tooling", mode: "list", site: "", type: "", text: "" };
+
+    function match(r) {
+      if (F.site && r.site !== F.site) return false;
+      if (F.type && r.family !== F.type) return false;
+      if (F.text) {
+        var hay = (r.desc + " " + r.spec + " " + r.code + " " + r.site + " " + r.remark).toLowerCase();
+        if (hay.indexOf(F.text) === -1) return false;
+      }
+      return true;
+    }
+
+    function shown() { return ALL.filter(match); }
+
+    /* ------------------------------- counts -------------------------------- */
+
+    function renderStats() {
+      var rows = shown();
+      var sites = {};
+      rows.forEach(function (r) { if (r.site) sites[r.site] = 1; });
+      var inStore = rows.filter(function (r) { return isStore(r.site); }).length;
+      var undated = rows.filter(function (r) { return !r.moved; }).length;
+      var unplaced = rows.filter(function (r) { return !r.site; }).length;
+
+      var cards = [
+        { n: rows.length, label: "Items", sub: "rows in the Tools section", icon: "machine", tone: "brand" },
+        { n: Object.keys(sites).length, label: "Places", sub: "sites and stores holding tooling",
+          icon: "site", tone: "info" },
+        { n: inStore, label: "In a store", sub: "the rest is out at a site", icon: "check", tone: "ok" },
+        { n: undated, label: "No movement date", sub: "nobody recorded when it last moved",
+          icon: "question", tone: "grey" }
+      ];
+      if (unplaced) {
+        cards.push({ n: unplaced, label: "No site", sub: "the Site column is blank",
+                     icon: "alert", tone: "bad" });
+      }
+
+      document.getElementById("tool-stats").innerHTML = cards.map(function (c) {
+        return '<div class="istat tone-' + c.tone + '">' +
+                 '<span class="istat-ic">' + UI.icon(c.icon) + "</span>" +
+                 '<span class="istat-body">' +
+                   '<span class="istat-top"><b>' + c.n + "</b><i>" + escHtml(c.label) + "</i></span>" +
+                   '<span class="istat-sub">' + escHtml(c.sub) + "</span>" +
+                 "</span>" +
+               "</div>";
+      }).join("");
+    }
+
+    /* ------------------------------- tables -------------------------------- */
+
+    // Same column ruler for every group block, so the headings land on the same
+    // x in each one (the machines page learned this the hard way).
+    function thead(showSite, editable) {
+      // Qty's heading sits right over a bare number and left over a text box —
+      // whichever the cells below are, the heading has to match, or the column
+      // reads as two columns.
+      return "<thead><tr>" +
+               "<th>Item</th><th>Size / model</th><th>Code</th>" +
+               "<th" + (editable ? "" : ' class="num"') + ">Qty</th>" +
+               (showSite ? "<th>Site</th>" : "") +
+               "<th>Last movement</th><th>Remark</th>" +
+             "</tr></thead>";
+    }
+
+    // The sheet shows Site as a grey pill you can pick from. Here the pill picks
+    // too — clicking one filters the page to that site (and moves the Site
+    // dropdown with it). It does NOT edit: this page reads a snapshot, and a
+    // control that looks like it saves but doesn't is worse than no control.
+    function siteChip(site) {
+      if (!site) return "";
+      return '<button type="button" class="chip site-chip" data-site="' + esc(site) +
+             '" title="Show only ' + esc(site) + '">' + escHtml(site) + "</button>";
+    }
+
+    /* --------------------------- the editable cells ------------------------
+       All seven columns can be changed, the same seven the sheet has. (They
+       were read-only except for site/date/remark at first; the office asked for
+       the rest — and rightly: this sheet IS the record, there is no second copy
+       for a rename to disagree with.)
+
+       Each control carries the sheet row it writes to. A changed cell is tinted
+       until it is saved, so "did I actually change that" is answerable by
+       looking. Quantity stays a text box on purpose: one row's quantity reads
+       "22.4T", and a number input would throw that away. */
+    function textCell(r, field, ph) {
+      return '<input type="text" class="cell-edit" data-row="' + r.row + '" data-field="' + field +
+             '" value="' + esc(pending(r, field)) + '"' + (ph ? ' placeholder="' + esc(ph) + '"' : "") + ">";
+    }
+
+    function siteSelect(r) {
+      var val = pending(r, "site");
+      var opts = SITE_OPTIONS.slice();
+      if (val && opts.indexOf(val) === -1) opts.unshift(val);   // never drop what is there
+      return '<select class="cell-edit" data-row="' + r.row + '" data-field="site">' +
+               '<option value=""' + (val ? "" : " selected") + ">—</option>" +
+               opts.map(function (o) {
+                 return '<option value="' + esc(o) + '"' + (o === val ? " selected" : "") + ">" +
+                        escHtml(o) + "</option>";
+               }).join("") +
+             "</select>";
+    }
+
+    function dateInput(r) {
+      return '<input type="date" class="cell-edit" data-row="' + r.row + '" data-field="moved" ' +
+             'value="' + esc(pending(r, "moved")) + '">';
+    }
+
+    function remarkInput(r) {
+      return '<input type="text" class="cell-edit" data-row="' + r.row + '" data-field="remark" ' +
+             'value="' + esc(pending(r, "remark")) + '" placeholder="—">';
+    }
+
+    // what the cell should show: the unsaved edit if there is one, else the sheet
+    function pending(r, field) {
+      var e = EDITS[r.row];
+      return (e && e[field] !== undefined) ? e[field] : r[field];
+    }
+
+    function changed(r, field) {
+      var e = EDITS[r.row];
+      return !!(e && e[field] !== undefined && e[field] !== r[field]);
+    }
+
+    function rowHtml(r, showSite, editable) {
+      // an old movement date is worth seeing without doing the arithmetic
+      var days = UI.daysSince(r.moved);
+      var dateCell = r.moved
+        ? UI.dstr(r.moved) + (days > 120 ? ' <span class="muted">(' + Math.round(days / 30) + " mo)</span>" : "")
+        : '<span class="muted">not recorded</span>';
+
+      var cls = function (field) { return changed(r, field) ? "cell-changed" : ""; };
+
+      return '<tr data-row="' + r.row + '">' +
+        UI.td("Item", editable ? textCell(r, "desc") : "<strong>" + escHtml(r.desc) + "</strong>",
+              (editable ? "" : "wrap ") + cls("desc")) +
+        // wrap, not nowrap: "1950m x 2740m x 6.0m" was running out of its column
+        // and landing on top of the code beside it
+        UI.td("Size / model", editable ? textCell(r, "spec") : escHtml(r.spec),
+              (editable ? "" : "wrap ") + cls("spec")) +
+        UI.td("Code", editable ? textCell(r, "code")
+                               : (r.code ? "<code>" + escHtml(r.code) + "</code>" : ""), cls("code")) +
+        UI.td("Qty", editable ? textCell(r, "qty") : escHtml(r.qty),
+              (editable ? "" : "num ") + cls("qty")) +
+        (showSite ? UI.td("Site", editable ? siteSelect(r) : siteChip(r.site), cls("site")) : "") +
+        UI.td("Last movement", editable ? dateInput(r) : dateCell, cls("moved")) +
+        UI.td("Remark", editable ? remarkInput(r) : escHtml(r.remark),
+              (editable ? "" : "wrap ") + cls("remark")) +
+      "</tr>";
+    }
+
+    /* ------------------------------- all rows ------------------------------
+       The sheet, on screen: same seven columns in the same order, one row per
+       row, in the sheet's own order. Filters still apply, so this is also how
+       "just show me Umech - Rawang" reads — the sheet's own tab, without
+       leaving the page. Reuses the .with-site ruler: same seven columns. */
+    function listTable(rows) {
+      return '<div class="table-wrap table-stack"><table class="tool-table with-site' +
+               (CAN_SAVE ? " tool-editable" : "") + '">' +
+               thead(true, CAN_SAVE) + "<tbody>" + rows.map(function (r) {
+                 return rowHtml(r, true, CAN_SAVE);
+               }).join("") + "</tbody></table></div>";
+    }
+
+    function groupBlocks(rows) {
+      var bySite = F.mode === "site";
+      var groups = {};
+      rows.forEach(function (r) {
+        var k = (bySite ? r.site : r.family) || (bySite ? "No site recorded" : "Other");
+        (groups[k] = groups[k] || []).push(r);
+      });
+
+      // stores first when grouping by site (that is where the office looks
+      // first), then the biggest holdings; by item, plain alphabetical
+      var keys = Object.keys(groups).sort(function (a, b) {
+        if (bySite) {
+          if (isStore(a) !== isStore(b)) return isStore(a) ? -1 : 1;
+          if (groups[b].length !== groups[a].length) return groups[b].length - groups[a].length;
+        }
+        return a.localeCompare(b);
+      });
+
+      // Open every block while there are few of them, collapsed once there are
+      // many: by site that is 12 blocks and reads as one long list, but by item
+      // it is 40, and 40 open tables is a page nobody scrolls to the end of.
+      // Collapsed, the headings and their counts ARE the summary. A search that
+      // narrows the result set drops back under the threshold and opens again.
+      var openAll = keys.length <= 15;
+
+      return keys.map(function (k) {
+        var list = groups[k];
+        var chips = ['<span class="chip">' + list.length + " item" + (list.length === 1 ? "" : "s") + "</span>"];
+        if (bySite && isStore(k)) chips.push('<span class="chip chip-ok">store</span>');
+        var undated = list.filter(function (r) { return !r.moved; }).length;
+        if (undated) chips.push('<span class="chip">' + undated + " undated</span>");
+
+        return '<details class="zone"' + (openAll ? " open" : "") +
+                 ' data-group="' + esc(k) + '">' +
+                 '<summary><span class="zone-name">' + escHtml(k) + "</span>" +
+                 '<span class="group-head">' + chips.join(" ") + "</span></summary>" +
+                 '<div class="table-wrap zone-table table-stack"><table class="tool-table' +
+                   (bySite ? "" : " with-site") + '">' +
+                   thead(!bySite) + "<tbody>" + list.map(function (r) {
+                     return rowHtml(r, !bySite);
+                   }).join("") + "</tbody></table></div>" +
+               "</details>";
+      }).join("");
+    }
+
+    /* ------------------------- new items + saving --------------------------
+       "Add item" appends to the Tools section of the sheet, after the last
+       line. A new item is only sent if it has a description — an empty row
+       pressed by accident is not something to write into a company record. */
+    var ROW_BY_NUM = {};
+    ALL.forEach(function (r) { ROW_BY_NUM[r.row] = r; });
+
+    function blankItem() {
+      return { desc: "", spec: "", code: "", qty: "1", site: "", moved: Dash.todayKL(), remark: "" };
+    }
+
+    function newField(i, field, type, ph) {
+      if (field === "site") {
+        return '<select class="new-edit" data-i="' + i + '" data-field="site">' +
+                 '<option value="">—</option>' +
+                 SITE_OPTIONS.map(function (o) {
+                   return '<option value="' + esc(o) + '"' +
+                          (o === NEWROWS[i].site ? " selected" : "") + ">" + escHtml(o) + "</option>";
+                 }).join("") +
+               "</select>";
+      }
+      return '<input type="' + type + '" class="new-edit" data-i="' + i + '" data-field="' + field +
+             '" value="' + esc(NEWROWS[i][field]) + '"' + (ph ? ' placeholder="' + esc(ph) + '"' : "") + ">";
+    }
+
+    function newRowsHtml() {
+      if (!NEWROWS.length) return "";
+      return '<div class="table-wrap"><table class="tool-new">' +
+               "<thead><tr><th>Item</th><th>Size / model</th><th>Code</th><th>Qty</th>" +
+                 "<th>Site</th><th>Last movement</th><th>Remark</th><th></th></tr></thead><tbody>" +
+               NEWROWS.map(function (n, i) {
+                 return "<tr>" +
+                   "<td>" + newField(i, "desc", "text", "e.g. Rock Auger - 600mm") + "</td>" +
+                   "<td>" + newField(i, "spec", "text", "600mm") + "</td>" +
+                   "<td>" + newField(i, "code", "text", "RA/600-7") + "</td>" +
+                   "<td>" + newField(i, "qty", "text") + "</td>" +
+                   "<td>" + newField(i, "site", "select") + "</td>" +
+                   "<td>" + newField(i, "moved", "date") + "</td>" +
+                   "<td>" + newField(i, "remark", "text") + "</td>" +
+                   '<td><button type="button" class="btn-plain" data-remove="' + i + '">Remove</button></td>' +
+                 "</tr>";
+               }).join("") +
+             "</tbody></table></div>";
+    }
+
+    // every field that differs from the sheet, plus every new item worth sending
+    var FIELDS = ["desc", "spec", "code", "qty", "site", "moved", "remark"];
+
+    // "was" is how the endpoint checks it is still the same line — it holds the
+    // ORIGINAL description and code, not the edited ones, which is what makes
+    // renaming an item safe. "set" is what to write.
+    function pendingEdits() {
+      var out = [];
+      Object.keys(EDITS).forEach(function (rowNum) {
+        var base = ROW_BY_NUM[rowNum], e = EDITS[rowNum], set = null;
+        if (!base) return;
+        FIELDS.forEach(function (f) {
+          if (e[f] !== undefined && e[f] !== base[f]) {
+            set = set || {};
+            set[f] = e[f];
+          }
+        });
+        if (set) out.push({ row: Number(rowNum), was: { desc: base.desc, code: base.code }, set: set });
+      });
+      return out;
+    }
+
+    function pendingAdds() {
+      return NEWROWS.filter(function (n) { return String(n.desc).trim(); });
+    }
+
+    // Rebuilding #new-rows while someone is typing in it would take the caret
+    // with it, so the counter updates on its own.
+    function renderPendingBarOnly() {
+      var edits = pendingEdits(), adds = pendingAdds(), n = edits.length + adds.length;
+      var bar = document.getElementById("pending-bar");
+      bar.hidden = !n;
+      if (!n) return;
+      bar.innerHTML =
+        "<strong>" + n + " unsaved change" + (n === 1 ? "" : "s") + "</strong> — " +
+        edits.length + " line" + (edits.length === 1 ? "" : "s") + " edited, " +
+        adds.length + " new item" + (adds.length === 1 ? "" : "s") + ". " +
+        "Nothing has gone into the sheet yet. " +
+        '<button type="button" id="btn-save" class="btn btn-primary">Save to sheet</button> ' +
+        '<button type="button" id="btn-discard" class="btn">Discard</button>';
+    }
+
+    function renderEdit() {
+      var box = document.getElementById("tool-edit");
+      box.hidden = F.mode !== "list";
+
+      document.getElementById("new-rows").innerHTML = newRowsHtml();
+
+      renderPendingBarOnly();
+
+      document.getElementById("edit-note").innerHTML = CAN_SAVE
+        ? "Every column here saves straight into " + escHtml(META.sheet ? META.sheet.tab : "the sheet") + "."
+        : "Editing is off: the save endpoint is not running. Start it with " +
+          "<code>python3 tools/tooling-api.py</code>, then reload.";
+    }
+
+    function saveToSheet() {
+      var bar = document.getElementById("pending-bar");
+      var btn = document.getElementById("btn-save");
+      if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
+
+      fetch("http://127.0.0.1:8125/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ edits: pendingEdits(), adds: pendingAdds() })
+      }).then(function (res) { return res.json().then(function (j) { return { ok: res.ok, j: j }; }); })
+        .then(function (r) {
+          if (!r.ok || !r.j.ok) throw new Error(r.j.error || "the save endpoint refused it");
+          if (r.j.refused && r.j.refused.length) {
+            // some lines went in, some did not — say exactly which, and do not
+            // reload out from under the message
+            bar.className = "banner banner-amber";
+            bar.innerHTML = "<strong>Saved " + r.j.saved + " cell(s) and " + r.j.added +
+              " new item(s), but " + r.j.refused.length + " line(s) were refused:</strong><ul>" +
+              r.j.refused.map(function (x) {
+                return "<li>row " + x.row + " — " + escHtml(x.why) + "</li>";
+              }).join("") + "</ul>" +
+              '<button type="button" class="btn" onclick="window.location.reload()">Reload the page</button>';
+            return;
+          }
+          UI.saveScroll();
+          window.location.reload();       // the endpoint re-pulled; show what the sheet now says
+        })
+        .catch(function (e) {
+          bar.className = "banner banner-red";
+          bar.innerHTML = "Could not save: " + escHtml(e.message || e) +
+            '<br><span class="muted">Nothing was changed in the sheet. ' +
+            "Is tools/tooling-api.py still running?</span>";
+        });
+    }
+
+    function render() {
+      // the consumables half has no data yet — show the note and stop, rather
+      // than leaving the tooling controls sitting above an empty table
+      var consumable = F.kind === "consumable";
+      document.getElementById("consumable-body").hidden = !consumable;
+      document.getElementById("tool-body").hidden = consumable;
+      document.getElementById("tool-stats").hidden = consumable;
+      document.getElementById("tool-controls").hidden = consumable;
+      document.getElementById("tool-source").hidden = consumable;
+      if (consumable) {
+        document.getElementById("tool-edit").hidden = true;
+        document.getElementById("tool-sub").innerHTML =
+          "Things that get used up. <strong>All rows</strong> is what the store holds and what is " +
+          "left after the sites have taken theirs; <strong>By site</strong> is who asked for what.";
+        window.Consumables.render(CAN_SAVE);
+        return;
+      }
+      document.getElementById("tool-sub").innerHTML = SUB_TEXT;
+
+      var rows = shown();
+      renderStats();
+      document.getElementById("f-count").textContent =
+        rows.length === ALL.length ? "" : rows.length + " of " + ALL.length + " shown";
+      document.getElementById("tool-body").innerHTML = !rows.length
+        ? UI.empty("Nothing matches that.", "Clear the search or pick a different site.")
+        : F.mode === "list" ? listTable(rows)
+        : groupBlocks(rows);
+
+      renderEdit();
+    }
+
+    /* ------------------------------- controls ------------------------------ */
+
+    function fillSelect(id, label, values) {
+      var sel = document.getElementById(id);
+      sel.innerHTML = '<option value="">' + label + "</option>" +
+        values.map(function (v) {
+          return '<option value="' + esc(v.k) + '">' + escHtml(v.k) + " (" + v.n + ")</option>";
+        }).join("");
+    }
+
+    function counted(key) {
+      var m = {};
+      ALL.forEach(function (r) { var k = r[key] || ""; if (k) m[k] = (m[k] || 0) + 1; });
+      return Object.keys(m).sort().map(function (k) { return { k: k, n: m[k] }; });
+    }
+
+    function wire() {
+      fillSelect("f-site", "All sites", counted("site"));
+      fillSelect("f-type", "All items", counted("family"));
+
+      document.getElementById("kind-switch").addEventListener("click", function (ev) {
+        var b = ev.target.closest("button[data-kind]");
+        if (!b) return;
+        F.kind = b.getAttribute("data-kind");
+        b.parentElement.querySelectorAll("button").forEach(function (x) {
+          x.classList.toggle("active", x === b);
+        });
+        render();
+      });
+
+      document.getElementById("tool-controls").addEventListener("click", function (ev) {
+        var b = ev.target.closest("button");
+        if (!b) return;
+        if (!b.getAttribute("data-mode")) return;
+        F.mode = b.getAttribute("data-mode");
+        b.parentElement.querySelectorAll("button").forEach(function (x) {
+          x.classList.toggle("active", x === b);
+        });
+        render();
+      });
+
+      document.getElementById("f-site").addEventListener("change", function (e) {
+        F.site = e.target.value; render();
+      });
+
+      // typing in a cell records the change; it does not send it anywhere
+      document.getElementById("tool-body").addEventListener("change", function (ev) {
+        var el = ev.target.closest(".cell-edit");
+        if (!el) return;
+        var rowNum = el.getAttribute("data-row"), field = el.getAttribute("data-field");
+        var base = ROW_BY_NUM[rowNum];
+        if (!base) return;
+
+        var e = EDITS[rowNum] = EDITS[rowNum] || {};
+        if (el.value === base[field]) delete e[field];        // typed it back — not a change
+        else e[field] = el.value;
+        if (!Object.keys(e).length) delete EDITS[rowNum];
+
+        var cell = el.closest("td");
+        if (cell) cell.classList.toggle("cell-changed", e && e[field] !== undefined);
+        renderEdit();
+      });
+
+      // free text needs the same treatment on every keystroke, or the pending
+      // count only catches up when the field loses focus
+      document.getElementById("tool-body").addEventListener("input", function (ev) {
+        if (ev.target.closest('input[type="text"].cell-edit')) {
+          ev.target.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+      });
+
+      var newRows = document.getElementById("new-rows");
+      newRows.addEventListener("input", function (ev) {
+        var el = ev.target.closest(".new-edit");
+        if (!el) return;
+        NEWROWS[el.getAttribute("data-i")][el.getAttribute("data-field")] = el.value;
+        var edits = pendingEdits().length + pendingAdds().length;
+        if (edits) renderPendingBarOnly();      // do NOT re-render the inputs mid-typing
+      });
+      newRows.addEventListener("change", function (ev) {
+        var el = ev.target.closest("select.new-edit, input[type=date].new-edit");
+        if (!el) return;
+        NEWROWS[el.getAttribute("data-i")][el.getAttribute("data-field")] = el.value;
+        renderPendingBarOnly();
+      });
+      newRows.addEventListener("click", function (ev) {
+        var b = ev.target.closest("button[data-remove]");
+        if (!b) return;
+        NEWROWS.splice(Number(b.getAttribute("data-remove")), 1);
+        renderEdit();
+      });
+
+      document.getElementById("btn-add").addEventListener("click", function () {
+        NEWROWS.push(blankItem());
+        renderEdit();
+        var last = document.querySelector("#new-rows tbody tr:last-child input");
+        if (last) last.focus();
+      });
+
+      document.getElementById("pending-bar").addEventListener("click", function (ev) {
+        if (ev.target.id === "btn-save") return saveToSheet();
+        if (ev.target.id === "btn-discard") {
+          EDITS = {}; NEWROWS = [];
+          document.getElementById("pending-bar").className = "banner banner-info";
+          render();
+        }
+      });
+
+      // one filter, two ways in — the chip must move the dropdown too, or the
+      // page would be filtered while the control says "All sites"
+      document.getElementById("tool-body").addEventListener("click", function (ev) {
+        var chip = ev.target.closest("button.site-chip");
+        if (!chip) return;
+        var site = chip.getAttribute("data-site");
+        F.site = (F.site === site) ? "" : site;      // clicking the same one clears it
+        document.getElementById("f-site").value = F.site;
+        render();
+      });
+      document.getElementById("f-type").addEventListener("change", function (e) {
+        F.type = e.target.value; render();
+      });
+      document.getElementById("f-text").addEventListener("input", function (e) {
+        F.text = e.target.value.trim().toLowerCase(); render();
+      });
+    }
+
+    window.onShellReady = function () {
+      try {
+        var meta = window.TOOLING_DATA || {};
+        if (!ALL.length) {
+          document.getElementById("error").innerHTML =
+            UI.errorBanner("tooling-data.js has no rows — run tools/pull-tooling.py.");
+          return;
+        }
+
+        // one line — the shared .page-caption caps at 78ch, and this ran past it
+        document.getElementById("tool-source").innerHTML =
+          "Source: " + escHtml(meta.source || "") + " — machinery is on the Machines page.";
+
+        wire();
+        window.Consumables.init(document.getElementById("consumable-body"), false);
+
+        // Ask the save endpoint whether it is there BEFORE showing anything
+        // editable. Typing twenty changes and only then finding out they cannot
+        // be saved is the worst version of this page.
+        fetch("http://127.0.0.1:8125/health")
+          .then(function (r) { return r.json(); })
+          .then(function (j) { CAN_SAVE = !!j.ok; SYNC = j.sync || null; })
+          .catch(function () { CAN_SAVE = false; SYNC = null; })
+          .then(function () { SUB_TEXT = subText(); render(); });
+      } catch (e) {
+        document.getElementById("error").innerHTML = UI.errorBanner(e.message || e);
+      }
+    };
+  </script>
+</body>
+</html>
