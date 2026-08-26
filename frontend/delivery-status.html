@@ -142,6 +142,12 @@
     var NEWROWS = [];      // brand-new deliveries waiting to be written
     var DELETED = {};      // id -> true, lines marked for removal
     var CAN_SAVE = false;  // deliveries.edit — the database says, not the page
+    // Deleting is its own permission, and the Administrator profile does not
+    // have it (it mirrors machines.*, where only Super Admin, Management and
+    // Office may delete). So the ✕ is drawn for the logins that can use it and
+    // for nobody else — a button that is always refused teaches people to
+    // distrust every other button on the page.
+    var CAN_DROP = false;
 
     /* ---------------------------- where it lives ---------------------------
        The database, since the deliveries migration. It used to be a static
@@ -170,6 +176,7 @@
         }).filter(function (d) { return d.name; });
 
         CAN_SAVE = !!res.can_edit;
+        CAN_DROP = CAN_SAVE && !!res.can_delete;
       });
     }
 
@@ -425,9 +432,11 @@
         '<td data-label="Arrived" class="dlv-tick-cell ' + cls("received") + '">' +
           tickCell(r, editable) + "</td>" +
         (editable
-          ? '<td class="dlv-row-act"><button type="button" class="dlv-x" data-drop="' + esc(r.id) +
-            '" title="' + (gone ? "Put this line back" : "Remove this line") + '" aria-label="' +
-            (gone ? "Undo remove" : "Remove") + '">' + (gone ? "\u21ba" : "\u00d7") + "</button></td>"
+          ? '<td class="dlv-row-act">' + (CAN_DROP
+              ? '<button type="button" class="dlv-x" data-drop="' + esc(r.id) +
+                '" title="' + (gone ? "Put this line back" : "Remove this line") + '" aria-label="' +
+                (gone ? "Undo remove" : "Remove") + '">' + (gone ? "\u21ba" : "\u00d7") + "</button>"
+              : "") + "</td>"
           : "") +
       "</tr>";
     }

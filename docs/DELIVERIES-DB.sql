@@ -164,7 +164,11 @@ begin
    where dr.is_active;
 
   return jsonb_build_object('ok', true, 'deliveries', v_rows, 'drivers', v_drv,
-                            'can_edit', public.fn_has('deliveries.edit', null));
+                            'can_edit',   public.fn_has('deliveries.edit', null),
+                            -- the office profile may delete a line, the admin
+                            -- profile may not (it mirrors machines.*) — so the
+                            -- page is told, rather than offering a ✕ that fails
+                            'can_delete', public.fn_has('deliveries.delete', null));
 end;
 $function$;
 
