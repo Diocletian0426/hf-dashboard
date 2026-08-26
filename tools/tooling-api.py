@@ -262,8 +262,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path.startswith("/consumables"):
             return self._consumables()
-        if self.path.startswith("/deliveries"):
-            return self._deliveries()
         if not self.path.startswith("/save"):
             return self._json(404, {"ok": False, "error": "not found"})
         try:
@@ -319,79 +317,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._json(200, {"ok": True, "items": len(items), "stock": len(stock)})
         except Exception as e:
             print("CONSUMABLES SAVE FAILED:", e)
-            self._json(500, {"ok": False, "error": str(e)})
-
-    # Deliveries are a LOCAL record too — the spreadsheet has no delivery
-    # section and the database has no deliveries table. This writes
-    # frontend/delivery-data.js and nothing else. The page sends the whole
-    # document, same as consumables: one person editing one file.
-    def _deliveries(self):
-        try:
-            n = int(self.headers.get("Content-Length") or 0)
-            doc = json.loads(self.rfile.read(n) or b"{}")
-            rows = doc.get("rows") or []
-            drivers = doc.get("drivers") or []
-            if not isinstance(rows, list) or not isinstance(drivers, list):
-                raise ValueError("rows and drivers must both be lists")
-            if len(rows) > 5000:
-                raise ValueError("that is far more deliveries than this list should ever hold")
-            if len(drivers) > 200:
-                raise ValueError("that is far more drivers than this list should ever hold")
-
-            # Only the columns the page has. Anything else a stray client sends
-            # is dropped rather than written into the record.
-            fields = ("id", "date", "item", "from", "to", "qty",
-                      "driver", "doNum", "remark", "received")
-            clean = []
-            for r in rows:
-                if not isinstance(r, dict):
-                    raise ValueError("every delivery must be an object")
-                out = {}
-                for f in fields:
-                    v = r.get(f, "")
-                    out[f] = bool(v) if f == "received" else str(v if v is not None else "")
-                if not out["item"].strip() and not out["doNum"].strip():
-                    continue          # an empty line is not a delivery
-                clean.append(out)
-
-            # the page sends the drivers list in the order it shows it — loader,
-            # cargo, lorry — so it is written out in that same order, and the
-            # file reads the way the page does
-            crew = []
-            seen = set()
-            for d in drivers:
-                if not isinstance(d, dict):
-                    raise ValueError("every driver must be an object")
-                name = str(d.get("name", "")).strip()
-                if not name or name.lower() in seen:
-                    continue
-                seen.add(name.lower())
-                crew.append({"name": name, "vehicle": str(d.get("vehicle", "")).strip()})
-
-            path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                "..", "frontend", "delivery-data.js")
-            header = ""
-            if os.path.exists(path):
-                # keep the file's own explanation of itself at the top
-                with open(path, encoding="utf-8") as fh:
-                    for line in fh:
-                        if line.startswith("window.DELIVERY_DATA"):
-                            break
-                        header += line
-
-            body = header + "window.DELIVERY_DATA = {\n"
-            body += '  updated: "%s",\n' % datetime.date.today().isoformat()
-            body += "  drivers: [\n" + ",\n".join(
-                "    " + json.dumps(d, ensure_ascii=False) for d in crew) + "\n  ],\n"
-            body += "  rows: [\n" + ",\n".join(
-                "    " + json.dumps(r, ensure_ascii=False) for r in clean) + "\n  ]\n};\n"
-
-            with open(path, "w", encoding="utf-8") as fh:
-                fh.write(body)
-            print("deliveries saved — %d record(s), %d driver(s)" % (len(clean), len(crew)))
-            self._json(200, {"ok": True, "rows": len(clean), "drivers": len(crew)})
-        except Exception as e:
-            print("DELIVERIES SAVE FAILED:", e)
             self._json(500, {"ok": False, "error": str(e)})
 
     def log_message(self, *args):

@@ -101,13 +101,14 @@
     "piles.html":      "piles.view",
     "issues.html":     "issues.view",
     "machines.html":   "machines.view",
-    // Tooling and Delivery Status have no permission of their own in the
-    // database yet, so they ride on machines.view: whoever may see the fleet
-    // may see what tooling is where and what is still on its way. When
-    // hf-database adds tooling.view / deliveries.view, change these two lines
-    // — do NOT leave them unlisted, unlisted means refused (see above).
+    // Tooling still rides on machines.view — it reads a snapshot of the office
+    // spreadsheet, not a database table, so there is no permission of its own
+    // to check. Whoever may see the fleet may see what tooling is where.
     "tooling.html":         "machines.view",
-    "delivery-status.html": "machines.view",
+    // Deliveries has its own module now (deliveries.view / create / edit /
+    // delete), granted to exactly the profiles that already held the matching
+    // machines.* — so nobody gained or lost anything the day it moved.
+    "delivery-status.html": "deliveries.view",
     "manpower.html":   "manpower.view",
     "attendance.html": "attendance.view",
     "tests.html":      "tests.view",

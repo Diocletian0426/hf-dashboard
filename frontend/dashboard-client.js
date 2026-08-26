@@ -754,6 +754,58 @@
     return q(sb.from("v_machine_recent_activity").select("*"));
   }
 
+  // ---- deliveries ----------------------------------------------------------
+  // What went out, where it went, who drove it, and whether it landed. The
+  // page used to read a static file written on the office machine; it is a
+  // table now, so the published dashboard can add a line too and the record is
+  // no longer readable by anyone who guesses the URL.
+  //
+  // ONE CALL returns the lines, the driver list AND whether this login may
+  // change any of it — the page draws all three, and a second round trip is
+  // one more chance for it to render half of itself.
+  function getDeliveries(fromDate, toDate) {
+    return q(sb.rpc("get_deliveries", {
+      p_from: fromDate || null, p_to: toDate || null
+    }));
+  }
+
+  // Send the WHOLE line every time: this is an upsert of one delivery, not a
+  // merge into what is already there. No id = a new line (deliveries.create);
+  // an id = an edit (deliveries.edit). The database stamps arrived_at the
+  // first time the tick goes on and clears it if the tick comes off.
+  function saveDelivery(row) {
+    return q(sb.rpc("save_delivery", {
+      p_delivery_id: row.id || null,
+      p_date:    row.date   || null,
+      p_item:    row.item   || "",
+      p_from:    row.from   || "",
+      p_to:      row.to     || "",
+      p_qty:     row.qty    || "",
+      p_driver:  row.driver || "",
+      p_do:      row.doNum  || "",
+      p_remark:  row.remark || "",
+      p_arrived: !!row.received
+    }));
+  }
+
+  function deleteDelivery(deliveryId) {
+    return q(sb.rpc("delete_delivery", { p_delivery_id: deliveryId }));
+  }
+
+  // The driver list, grouped in the office's own order (loader, cargo, lorry).
+  // Adding a name that was taken off before puts it back rather than failing;
+  // removing one only deactivates it, so the deliveries that name already
+  // drove keep the name they were written with.
+  function saveDeliveryDriver(name, vehicle) {
+    return q(sb.rpc("save_delivery_driver", {
+      p_name: name, p_vehicle: vehicle || "Lorry"
+    }));
+  }
+
+  function deleteDeliveryDriver(name) {
+    return q(sb.rpc("delete_delivery_driver", { p_name: name }));
+  }
+
   function getShifts(date, projectId) {
     // ALWAYS pass a date — null would return every day ever recorded
     return q(sb.rpc("get_daily_shifts", {
@@ -1634,6 +1686,13 @@
     getMachines: getMachines,
     getMachineServiceHistory: getMachineServiceHistory,
     getMachineActivity: getMachineActivity,
+
+    getDeliveries: getDeliveries,
+    saveDelivery: saveDelivery,
+    deleteDelivery: deleteDelivery,
+    saveDeliveryDriver: saveDeliveryDriver,
+    deleteDeliveryDriver: deleteDeliveryDriver,
+
     getShifts: getShifts,
     getOpenShifts: getOpenShifts,
     closeShift: closeShift,

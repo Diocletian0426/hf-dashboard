@@ -17,17 +17,22 @@
          the D.O. number on the paperwork, and a tick once the
          receiving end confirms it arrived.
 
-         WHERE THE RECORD LIVES. frontend/delivery-data.js, on this
-         machine — the office's spreadsheet has no delivery section
-         and the database has no deliveries table. Saving goes to
-         tools/tooling-api.py, exactly as the consumables half of the
-         Tooling page does. Nothing is seeded: an invented delivery
-         in a delivery record is worse than an empty page.
+         WHERE THE RECORD LIVES. The database — tables deliveries and
+         delivery_drivers, read and written only through the RPCs
+         get_deliveries / save_delivery / delete_delivery (+ the two
+         driver ones), each of which checks a permission first. It
+         began as a static file on the office machine; that meant the
+         published dashboard could only ever look at it, and that the
+         whole record was readable by anyone who guessed the URL.
 
          NOTHING SAVES AS YOU TYPE. Changes pile up until Save is
          pressed, so a mis-typed row can be thrown away with Discard.
+         Save then makes one call per changed line — see save().
 
-         Access rides on machines.view (PAGE_ACCESS in shell.js).
+         Access: deliveries.view to open it, deliveries.edit to change
+         anything, .create to add, .delete to remove. The page asks
+         once (can_edit) to decide what to show; the database checks
+         every write regardless.
     -->
     <div class="page-eyebrow">Machines</div>
     <h1>Delivery Status</h1>
@@ -108,7 +113,6 @@
   <script src="dashboard-client.js"></script>
   <script src="ui.js"></script>
   <script src="tooling-data.js"></script>
-  <script src="delivery-data.js"></script>
   <script src="shell.js"></script>
 
   <script>
@@ -116,7 +120,6 @@
 
     var esc = UI.esc, escHtml = UI.escHtml;
 
-    var META = window.DELIVERY_DATA || {};
     // the site list the Tooling page already keeps — one list of sites for the
     // whole store, so "Tasek Store" is spelled the same on both pages
     var SITES = (window.TOOLING_DATA && window.TOOLING_DATA.siteOptions) || [];
@@ -125,30 +128,50 @@
     // loader, cargo, then the lorries. Anything else typed in lands after them.
     var VEHICLES = ["Loader", "Cargo", "Lorry"];
 
-    var DRIVERS = (META.drivers || []).map(function (d) {
-      return { name: String(d.name || ""), vehicle: String(d.vehicle || "") };
-    }).filter(function (d) { return d.name; });
-
+    var DRIVERS = [];          // the crew list, straight from get_deliveries
     var DRIVER_ADDS = [];      // new drivers waiting to be saved
     var DRIVER_DROPS = {};     // name -> true, drivers waiting to come off the list
 
     // the columns, in the order the table shows them
     var FIELDS = ["date", "item", "from", "to", "qty", "driver", "doNum", "remark", "received"];
 
-    var ALL = (META.rows || []).map(function (r, i) {
-      var o = {};
-      FIELDS.forEach(function (f) { o[f] = f === "received" ? !!r[f] : (r[f] || ""); });
-      o.id = r.id || ("d" + (i + 1));
-      return o;
-    });
-
+    var ALL = [];          // the record, filled by load()
     var BY_ID = {};
-    ALL.forEach(function (r) { BY_ID[r.id] = r; });
 
     var EDITS = {};        // id -> { field: value } waiting to be saved
     var NEWROWS = [];      // brand-new deliveries waiting to be written
     var DELETED = {};      // id -> true, lines marked for removal
-    var CAN_SAVE = false;  // set by the health check — see onShellReady
+    var CAN_SAVE = false;  // deliveries.edit — the database says, not the page
+
+    /* ---------------------------- where it lives ---------------------------
+       The database, since the deliveries migration. It used to be a static
+       delivery-data.js written by a program on the office machine, which meant
+       the published dashboard could only ever look at it — and that anyone who
+       guessed the file's URL could read the lot without signing in.
+
+       One call brings back the lines, the driver list, and whether this login
+       may change any of it. The permission is re-checked by the database on
+       every write regardless; can_edit only decides what is worth showing. */
+    function load() {
+      return Dash.getDeliveries().then(function (res) {
+        if (!res || res.ok === false) throw new Error((res && res.message) || "could not read the deliveries");
+        ALL = (res.deliveries || []).map(function (r) {
+          var o = { id: r.id };
+          FIELDS.forEach(function (f) {
+            o[f] = f === "received" ? !!r[f] : (r[f] === null || r[f] === undefined ? "" : String(r[f]));
+          });
+          return o;
+        });
+        BY_ID = {};
+        ALL.forEach(function (r) { BY_ID[r.id] = r; });
+
+        DRIVERS = (res.drivers || []).map(function (d) {
+          return { name: String(d.name || ""), vehicle: String(d.vehicle || "") };
+        }).filter(function (d) { return d.name; });
+
+        CAN_SAVE = !!res.can_edit;
+      });
+    }
 
     /* ------------------------- the current picture -------------------------- */
     // what the cell should show: the unsaved edit if there is one, else the file
@@ -491,22 +514,13 @@
 
     function pendingCrew() { return DRIVER_ADDS.length + Object.keys(DRIVER_DROPS).length; }
 
-    // the whole record as it would stand after a save — this is what gets sent
-    function docRows() {
-      var out = [];
-      ALL.forEach(function (r) {
-        if (DELETED[r.id]) return;
-        var o = { id: r.id };
-        FIELDS.forEach(function (f) { o[f] = val(r, f); });
-        out.push(o);
-      });
-      var n = ALL.length;
-      pendingAdds().forEach(function (a, i) {
-        var o = { id: "d" + (n + i + 1) + "-" + Date.now().toString(36) };
-        FIELDS.forEach(function (f) { o[f] = a[f]; });
-        out.push(o);
-      });
-      return out;
+    // one edited line, as the database wants it: the WHOLE line, unsaved edits
+    // folded in. save_delivery is an upsert of one delivery, not a merge, so a
+    // half-filled payload would blank the fields it left out.
+    function editedRow(id) {
+      var base = BY_ID[id], o = { id: id };
+      FIELDS.forEach(function (f) { o[f] = val(base, f); });
+      return o;
     }
 
     // Rebuilding #new-rows while somebody is typing in it would take the caret
@@ -534,33 +548,81 @@
       renderPendingBarOnly();
       document.getElementById("btn-add").disabled = !CAN_SAVE;
       document.getElementById("edit-note").innerHTML = CAN_SAVE
-        ? "Saved on this machine, in <code>frontend/delivery-data.js</code>."
-        : "Editing is off: the save endpoint is not running. Start it with " +
-          "<code>python3 tools/tooling-api.py</code>, then reload.";
+        ? "Saved straight into the company record — everyone signed in sees the same lines."
+        : "Your login can see deliveries but not change them. Ask an administrator " +
+          "for <code>deliveries.edit</code>.";
     }
 
+    /* -------------------------------- saving --------------------------------
+       One call per thing that changed, in an order that cannot contradict
+       itself: the driver list first (a line may point at a driver added in the
+       same breath), then edits, then new lines, then removals.
+
+       Sequential, not parallel — twelve simultaneous writes would report their
+       failures in a random order, and the office needs to be told WHICH line
+       the database refused, not that something somewhere went wrong. */
     function save() {
       var bar = document.getElementById("pending-bar");
       var btn = document.getElementById("btn-save");
       if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
 
-      fetch("http://127.0.0.1:8125/deliveries", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows: docRows(), drivers: driversNow() })
-      }).then(function (res) { return res.json().then(function (j) { return { ok: res.ok, j: j }; }); })
-        .then(function (r) {
-          if (!r.ok || !r.j.ok) throw new Error(r.j.error || "the save endpoint refused it");
-          UI.saveScroll();
-          window.location.reload();          // show what the record now says
-        })
-        .catch(function (e) {
-          if (btn) { btn.disabled = false; btn.textContent = "Save"; }
-          bar.className = "banner banner-red";
-          bar.innerHTML = "Could not save: " + escHtml(e.message || e) +
-            '<br><span class="muted">Nothing was changed. ' +
-            "Is tools/tooling-api.py still running?</span>";
+      var jobs = [];
+      DRIVER_ADDS.forEach(function (d) {
+        jobs.push({ what: "driver " + d.name,
+                    run: function () { return Dash.saveDeliveryDriver(d.name, d.vehicle); } });
+      });
+      Object.keys(DRIVER_DROPS).forEach(function (name) {
+        jobs.push({ what: "driver " + name,
+                    run: function () { return Dash.deleteDeliveryDriver(name); } });
+      });
+      pendingEdits().forEach(function (id) {
+        var row = editedRow(id);
+        jobs.push({ what: row.item || "line " + id,
+                    run: function () { return Dash.saveDelivery(row); } });
+      });
+      pendingAdds().forEach(function (n) {
+        jobs.push({ what: n.item || n.doNum,
+                    run: function () { return Dash.saveDelivery(n); } });
+      });
+      pendingDrops().forEach(function (id) {
+        var gone = BY_ID[id];
+        jobs.push({ what: (gone && gone.item) || "line " + id,
+                    run: function () { return Dash.deleteDelivery(id); } });
+      });
+
+      var refused = [];
+      var chain = Promise.resolve();
+      jobs.forEach(function (job) {
+        chain = chain.then(function () {
+          return job.run().then(function (res) {
+            // a database that says no says why — carry its own words through
+            if (res && res.ok === false) refused.push(job.what + " — " + (res.message || res.code));
+          });
         });
+      });
+
+      chain.then(function () {
+        if (refused.length) {
+          if (btn) { btn.disabled = false; btn.textContent = "Save"; }
+          bar.className = "banner banner-amber";
+          bar.innerHTML = "<strong>" + (jobs.length - refused.length) + " saved, " +
+            refused.length + " refused:</strong><ul>" +
+            refused.map(function (r) { return "<li>" + escHtml(r) + "</li>"; }).join("") + "</ul>" +
+            '<button type="button" class="btn" onclick="window.location.reload()">Reload the page</button>';
+          return;
+        }
+        UI.saveScroll();
+        window.location.reload();            // show what the record now says
+      }).catch(function (e) {
+        if (btn) { btn.disabled = false; btn.textContent = "Save"; }
+        var msg = String((e && e.message) || e);
+        bar.className = "banner banner-red";
+        bar.innerHTML = /not_authorised/.test(msg)
+          ? "Your login is not allowed to change deliveries. Nothing was written."
+          : "Could not save: " + escHtml(msg) +
+            '<br><span class="muted">Some earlier lines in this batch may already have gone in — ' +
+            "reload to see exactly where it stopped.</span>";
+      });
     }
 
     /* ------------------------------- render -------------------------------- */
@@ -574,7 +636,7 @@
       document.getElementById("dlv-body").innerHTML = !ALL.length
         ? UI.empty("No deliveries recorded yet.",
                    CAN_SAVE ? "Press “+ Add delivery record” below to write the first one."
-                            : "Start tools/tooling-api.py to add one.")
+                            : "Nobody has written one yet.")
         : !rows.length
           ? UI.empty("Nothing matches that.", "Clear the search or pick a different site.")
           : table(rows);
@@ -831,37 +893,38 @@
       });
     }
 
-    // delivery-data.js is written by the save endpoint, and the dev server
-    // reloads the page when it changes. Not while there is unsaved typing on
-    // screen — see tools/serve-live.py.
+    // The dev server reloads this page when a frontend file changes — never
+    // while there is unsaved typing on screen. See tools/serve-live.py.
     window.__hfHoldReload = function () {
       return pendingEdits().length + pendingAdds().length +
              pendingDrops().length + pendingCrew() > 0;
     };
 
     window.onShellReady = function () {
-      try {
-        document.getElementById("dlv-sub").innerHTML =
-          "What is on its way to site, what has arrived, and who is driving it" +
-          (META.updated ? " — last written <strong>" + UI.dstr(META.updated) + "</strong>." : ".");
+      document.getElementById("dlv-sub").innerHTML =
+        "What is on its way to site, what has arrived, and who is driving it.";
 
-        document.getElementById("dlv-source").innerHTML =
-          "Kept on this machine in <code>frontend/delivery-data.js</code> — not in the " +
-          "spreadsheet and not in the database, so it is only as current as what is typed here.";
+      document.getElementById("dlv-source").innerHTML =
+        "Kept in the company database — every signed-in office login sees the same " +
+        "lines, and every change is recorded against the name that made it.";
 
-        wire();
-
-        // Ask the save endpoint whether it is there BEFORE showing anything
-        // editable — twenty lines typed and only then finding out they cannot be
-        // saved is the worst version of this page.
-        fetch("http://127.0.0.1:8125/health")
-          .then(function (r) { return r.json(); })
-          .then(function (j) { CAN_SAVE = !!j.ok; })
-          .catch(function () { CAN_SAVE = false; })
-          .then(function () { render(); UI.restoreScroll(); });
-      } catch (e) {
-        document.getElementById("error").innerHTML = UI.errorBanner(e.message || e);
-      }
+      // Everything below waits for the record: a page that draws its controls
+      // before it knows whether this login may use them is a page that offers
+      // an Add button and then refuses the save.
+      load()
+        .then(function () {
+          wire();
+          render();
+          UI.restoreScroll();
+        })
+        .catch(function (e) {
+          var msg = String((e && e.message) || e);
+          document.getElementById("dlv-body").innerHTML = "";
+          document.getElementById("error").innerHTML = /not_authorised/.test(msg)
+            ? '<div class="banner banner-amber">Your login cannot see deliveries. ' +
+              "Ask an administrator for <code>deliveries.view</code>.</div>"
+            : UI.errorBanner(msg);
+        });
     };
   </script>
 </body>
