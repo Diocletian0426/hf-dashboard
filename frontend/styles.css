@@ -1167,47 +1167,38 @@ tr.cons-draft select.cons-req { background: var(--surface-solid); }
 /* the ✕ that takes a request off: the delivery page's control, same shape */
 .cons-row-act { text-align: center; }
 /* ---- Delivery Status ------------------------------------------------------
-   A delivery is a movement, not a holding: one line per lorry-load, and the
-   columns are the ones the delivery order already has. Same ruler discipline as
-   the tooling tables, and NO min-width: the columns share whatever the window
-   gives them instead of putting a sideways scrollbar under a page. The editable
-   table carries a tenth column (the ✕), hence the .with-remove variant. */
+   A delivery is a TRIP, not a thing: one row per lorry-load, and the items it
+   carried open underneath it. So the ruler here measures a journey — a date,
+   two site names, a driver, a D.O. number — and the item list is not in it at
+   all, because a list of cargo squeezed into one column of a seven-column
+   table is a gutter, not a list.
+
+   Same discipline as the tooling tables and NO min-width: fixed px for the
+   controls whose size does not depend on the window (date picker, tick, ✕),
+   calc() shares the rest, so the table never scrolls sideways. */
 .dlv-table { table-layout: fixed; min-width: 0; }
 
-/* WIDTHS MIX px AND calc(), AND THAT IS THE POINT. The date picker, the Qty
-   box, the tick and the ✕ have a size that does not depend on how wide the
-   window is: a date column set as a percentage collapses to "26/08/2…" the
-   moment the window narrows, which is the one thing this column must never do.
-   132px is what Chrome's own date control needs at 12px — under that it starts
-   eating its own digits rather than shrinking.
-   The six text columns share whatever is left over. Everything fits, so the
-   table never scrolls sideways — no hunting for a column that is off-screen. */
-
-/* read-only: nine columns, and Date is short formatted text ("26 Aug 2026") */
+/* read-only: 7 columns. Date is short formatted text ("28 Aug 2026"). */
 .dlv-table th:nth-child(1) { width: 104px; }                        /* Date     */
-.dlv-table th:nth-child(5) { width:  48px; }                        /* Qty      */
-.dlv-table th:nth-child(9) { width:  96px; }                        /* Arrived  */
-.dlv-table th:nth-child(2) { width: calc((100% - 248px) * 0.26); }  /* Item     */
-.dlv-table th:nth-child(3) { width: calc((100% - 248px) * 0.17); }  /* From     */
-.dlv-table th:nth-child(4) { width: calc((100% - 248px) * 0.17); }  /* To       */
-.dlv-table th:nth-child(6) { width: calc((100% - 248px) * 0.16); }  /* Driver   */
-.dlv-table th:nth-child(7) { width: calc((100% - 248px) * 0.11); }  /* D.O. No. */
-.dlv-table th:nth-child(8) { width: calc((100% - 248px) * 0.13); }  /* Remark   */
+.dlv-table th:nth-child(7) { width:  96px; }                        /* Arrived  */
+.dlv-table th:nth-child(2) { width: calc((100% - 200px) * 0.31); }  /* From→To  */
+.dlv-table th:nth-child(3) { width: calc((100% - 200px) * 0.15); }  /* Driver   */
+.dlv-table th:nth-child(4) { width: calc((100% - 200px) * 0.13); }  /* D.O. No. */
+.dlv-table th:nth-child(5) { width: calc((100% - 200px) * 0.13); }  /* Items    */
+.dlv-table th:nth-child(6) { width: calc((100% - 200px) * 0.28); }  /* Remark   */
 
-/* editable: ten columns, and Date is a real picker — 132px is what dd/mm/yyyy
-   plus its calendar button needs at 12px, with the cell padding counted in */
+/* editable: 8 columns. 132px is what Chrome's own date control needs at 12px —
+   under that it starts eating its own digits rather than shrinking. */
 .dlv-table.with-remove th:nth-child(1) { width: 132px; }
-.dlv-table.with-remove th:nth-child(5) { width:  46px; }
-.dlv-table.with-remove th:nth-child(9) { width:  72px; }
-.dlv-table.with-remove th:nth-child(10) { width: 34px; }            /* ✕        */
-.dlv-table.with-remove th:nth-child(2) { width: calc((100% - 284px) * 0.26); }
-.dlv-table.with-remove th:nth-child(3) { width: calc((100% - 284px) * 0.17); }
-.dlv-table.with-remove th:nth-child(4) { width: calc((100% - 284px) * 0.17); }
-.dlv-table.with-remove th:nth-child(6) { width: calc((100% - 284px) * 0.16); }
-.dlv-table.with-remove th:nth-child(7) { width: calc((100% - 284px) * 0.11); }
-.dlv-table.with-remove th:nth-child(8) { width: calc((100% - 284px) * 0.13); }
+.dlv-table.with-remove th:nth-child(7) { width:  72px; }
+.dlv-table.with-remove th:nth-child(8) { width:  34px; }            /* ✕        */
+.dlv-table.with-remove th:nth-child(2) { width: calc((100% - 238px) * 0.32); }
+.dlv-table.with-remove th:nth-child(3) { width: calc((100% - 238px) * 0.16); }
+.dlv-table.with-remove th:nth-child(4) { width: calc((100% - 238px) * 0.12); }
+.dlv-table.with-remove th:nth-child(5) { width: calc((100% - 238px) * 0.13); }
+.dlv-table.with-remove th:nth-child(6) { width: calc((100% - 238px) * 0.27); }
 
-/* ten columns do not fit at the standard 16px cell padding */
+/* eight columns do not fit at the standard 16px cell padding */
 .dlv-table th, .dlv-table td { padding: 8px 6px; }
 .dlv-table .cell-edit { font-size: 12px; padding: 4px 5px; margin: -4px -5px; }
 /* the date box fills its column instead of sizing to its content — the column
@@ -1215,6 +1206,69 @@ tr.cons-draft select.cons-req { background: var(--surface-solid); }
    button floating in dead space (see .tool-editable, which this outranks) */
 .dlv-table input[type="date"].cell-edit { width: 100%; font-size: 12px; padding: 4px 2px; }
 
+/* ---- from → to ------------------------------------------------------------
+   One column, because on screen a trip is one movement and not two unrelated
+   facts. Two inputs when editing, because they are two answers. */
+.dlv-route { display: inline-flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.dlv-route i, .dlv-route-edit i { font-style: normal; color: var(--ink-3); flex: none; }
+.dlv-route-edit { display: flex; align-items: center; gap: 4px; }
+.dlv-route-edit .cell-edit { min-width: 0; margin: -4px 0; }
+
+/* ---- the item list --------------------------------------------------------
+   The count IS the control: pressing it opens the list. A separate chevron
+   would be a second thing to aim at for one action. */
+.dlv-items-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  font: inherit; font-size: 12.5px; cursor: pointer;
+  padding: 3px 9px; border-radius: var(--r-pill);
+  border: 1px solid var(--line-strong); background: var(--surface-solid); color: var(--ink);
+}
+.dlv-items-btn:hover { border-color: var(--brand); color: var(--brand); }
+.dlv-items-btn i { font-style: normal; font-size: 10px; color: var(--ink-3); transition: transform 0.15s ease; }
+.dlv-items-btn.open { border-color: var(--brand); color: var(--brand); }
+.dlv-items-btn.open i { transform: rotate(180deg); color: var(--brand); }
+
+/* The list itself spans the whole table rather than taking columns of its own.
+   Indented under its trip and on a tinted ground, so it reads as belonging to
+   the row above and never as another trip. */
+tr.dlv-item-row > td {
+  padding: 0 6px 10px 0; background: rgba(47, 111, 220, 0.035); border-bottom: 1px solid var(--rule);
+}
+.dlv-items { list-style: none; margin: 0; padding: 0 0 0 clamp(16px, 9%, 132px); }
+.dlv-items li {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: 3px 0; font-size: 13px;
+}
+/* the dotted leader is what makes a name and a number six inches apart read as
+   one line — the same trick a printed delivery order uses */
+.dlv-items li .di-name { flex: 1 1 auto; min-width: 0; }
+li > span.di-name {
+  border-bottom: 1px dotted var(--line-strong); align-self: stretch;
+  display: flex; align-items: flex-end; padding-bottom: 2px;
+}
+.dlv-items li .di-qty {
+  flex: none; width: 72px; text-align: right;
+  font-variant-numeric: tabular-nums; font-weight: 600;
+}
+.dlv-items input.di-edit {
+  font: inherit; font-size: 12.5px; padding: 5px 8px;
+  border: 1px solid var(--line-strong); border-radius: var(--r-sm);
+  background: var(--surface-solid); color: var(--ink);
+}
+.dlv-items input.di-edit:focus {
+  outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft);
+}
+.dlv-items input.di-qty { font-weight: 400; }
+.dlv-add-item {
+  margin-left: clamp(16px, 9%, 132px);
+  background: none; border: none; padding: 2px 0;
+  font: inherit; font-size: 12.5px; color: var(--brand); cursor: pointer;
+}
+.dlv-add-item:hover { text-decoration: underline; }
+
+/* a trip being typed, not yet in the database */
+.dlv-table tr.row-new > td { background: var(--warn-soft); }
+.dlv-table tr.row-new + tr.dlv-item-row > td { background: rgba(254, 243, 199, 0.55); }
 
 /* ---- the tick -------------------------------------------------------------
    The last column is the whole point of the page: has it landed or not. A real
@@ -1270,27 +1324,6 @@ th.dlv-tick-head { letter-spacing: 0.2px; }
 .dlv-x:hover, .cons-x:hover {
   background: var(--danger-soft); border-color: #fecaca; color: var(--danger-ink);
 }
-
-/* new deliveries waiting to be written — the .tool-new furniture, ten columns,
-   on the same ruler as the editable table above so the two line up */
-.dlv-new { table-layout: fixed; }
-.dlv-new th:nth-child(1) { width: 132px; }
-.dlv-new th:nth-child(5) { width:  46px; }
-.dlv-new th:nth-child(9) { width:  72px; }
-.dlv-new th:nth-child(10) { width: 34px; }
-.dlv-new th:nth-child(2) { width: calc((100% - 284px) * 0.26); }
-.dlv-new th:nth-child(3) { width: calc((100% - 284px) * 0.17); }
-.dlv-new th:nth-child(4) { width: calc((100% - 284px) * 0.17); }
-.dlv-new th:nth-child(6) { width: calc((100% - 284px) * 0.16); }
-.dlv-new th:nth-child(7) { width: calc((100% - 284px) * 0.11); }
-.dlv-new th:nth-child(8) { width: calc((100% - 284px) * 0.13); }
-.dlv-new th, .dlv-new td { padding: 5px 6px; }
-.dlv-new input, .dlv-new select { font-size: 12px; padding: 5px 6px; }
-.dlv-new input[type="date"] { padding: 5px 2px; }
-.dlv-new .dlv-tick-cell { text-align: center; }
-/* .tool-new input is width:100% — which would stretch the hidden checkbox and
-   drag the box it draws off-centre */
-.dlv-new .dlv-tick input { width: 0; }
 
 /* ---- the driver list ------------------------------------------------------
    Who drives what, kept on the page because it changes: somebody joins, a lorry

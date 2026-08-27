@@ -755,10 +755,12 @@
   }
 
   // ---- deliveries ----------------------------------------------------------
-  // What went out, where it went, who drove it, and whether it landed. The
-  // page used to read a static file written on the office machine; it is a
-  // table now, so the published dashboard can add a line too and the record is
-  // no longer readable by anyone who guesses the URL.
+  // What went out, where it went, who drove it, and whether it landed. A
+  // delivery is a TRIP — one lorry-load, one D.O., a LIST of items — so each
+  // row comes back with its items nested. The page used to read a static file
+  // written on the office machine; it is a table now, so the published
+  // dashboard can add a trip too and the record is no longer readable by
+  // anyone who guesses the URL.
   //
   // ONE CALL returns the lines, the driver list AND whether this login may
   // change any of it — the page draws all three, and a second round trip is
@@ -769,22 +771,27 @@
     }));
   }
 
-  // Send the WHOLE line every time: this is an upsert of one delivery, not a
-  // merge into what is already there. No id = a new line (deliveries.create);
-  // an id = an edit (deliveries.edit). The database stamps arrived_at the
-  // first time the tick goes on and clears it if the tick comes off.
+  // Send the WHOLE trip every time — header AND the full item list. This is an
+  // upsert of one delivery, not a merge: the items are REPLACED, because the
+  // list on screen is the list that was on the lorry, and an item the office
+  // deleted must not survive because the payload forgot to mention it.
+  //
+  // No id = a new trip (deliveries.create); an id = an edit (deliveries.edit).
+  // The database stamps arrived_at the first time the tick goes on and clears
+  // it if the tick comes off.
   function saveDelivery(row) {
     return q(sb.rpc("save_delivery", {
       p_delivery_id: row.id || null,
       p_date:    row.date   || null,
-      p_item:    row.item   || "",
       p_from:    row.from   || "",
       p_to:      row.to     || "",
-      p_qty:     row.qty    || "",
       p_driver:  row.driver || "",
       p_do:      row.doNum  || "",
       p_remark:  row.remark || "",
-      p_arrived: !!row.received
+      p_arrived: !!row.received,
+      p_items:  (row.items || []).map(function (i) {
+        return { item: String(i.item || ""), qty: String(i.qty || "") };
+      })
     }));
   }
 

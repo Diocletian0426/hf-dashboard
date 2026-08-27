@@ -12,13 +12,20 @@
 
   <main id="main">
     <!-- ================= DELIVERY STATUS =========================
-         One line per lorry-load: the date, what was on it, which site
-         it left, which site it is going to, how many, who drove it,
-         the D.O. number on the paperwork, and a tick once the
+         One row per lorry-load: the date, which site it left, which
+         site it is going to, who drove it, the D.O. number on the
+         paperwork, the list of what was on it, and a tick once the
          receiving end confirms it arrived.
 
-         WHERE THE RECORD LIVES. The database — tables deliveries and
-         delivery_drivers, read and written only through the RPCs
+         A DELIVERY IS A TRIP, NOT A THING. One lorry-load is one
+         D.O. with a list on it, so the table shows one row per trip
+         and the items open underneath it. Recording five items as
+         five rows would answer "five loads went to Rawang" when the
+         truth is one.
+
+         WHERE THE RECORD LIVES. The database — tables deliveries,
+         delivery_items and delivery_drivers, read and written only
+         through the RPCs
          get_deliveries / save_delivery / delete_delivery (+ the two
          driver ones), each of which checks a permission first. It
          began as a static file on the office machine; that meant the
@@ -88,11 +95,12 @@
 
     <div id="dlv-body"></div>
 
-    <!-- Adding lives under the table. A new line is only written if it has
-         something on it — an empty row pressed by accident is not a delivery. -->
+    <!-- A new delivery appears AS A ROW at the top of the table, open, with
+         its own item list — the same shape it will have once it is saved.
+         It used to be typed into a separate little table down here, which
+         cannot hold a list, and taught the wrong shape besides. -->
     <div id="dlv-edit">
       <div id="pending-bar" class="banner banner-info" hidden></div>
-      <div id="new-rows"></div>
       <p class="tool-edit-actions">
         <button type="button" id="btn-add" class="btn">+ Add delivery record</button>
         <span class="muted" id="edit-note"></span>
@@ -132,39 +140,40 @@
     var DRIVER_ADDS = [];      // new drivers waiting to be saved
     var DRIVER_DROPS = {};     // name -> true, drivers waiting to come off the list
 
-    // the columns, in the order the table shows them
-    var FIELDS = ["date", "item", "from", "to", "qty", "driver", "doNum", "remark", "received"];
+    // the trip's own columns. The items are a list of their own — see itemsOf.
+    var FIELDS = ["date", "from", "to", "driver", "doNum", "remark", "received"];
 
     var ALL = [];          // the record, filled by load()
     var BY_ID = {};
 
     var EDITS = {};        // id -> { field: value } waiting to be saved
-    var NEWROWS = [];      // brand-new deliveries waiting to be written
-    var DELETED = {};      // id -> true, lines marked for removal
+    var ITEM_EDITS = {};   // id -> the WHOLE item list, once it has been touched
+    var NEWROWS = [];      // deliveries being typed, not yet in the database
+    var DELETED = {};      // id -> true, trips marked for removal
+    var OPEN = {};         // id -> true, whose item list is showing
+    var NEWSEQ = 0;
+
     var CAN_SAVE = false;  // deliveries.edit — the database says, not the page
-    // Deleting is its own permission, and the Administrator profile does not
-    // have it (it mirrors machines.*, where only Super Admin, Management and
-    // Office may delete). So the ✕ is drawn for the logins that can use it and
-    // for nobody else — a button that is always refused teaches people to
-    // distrust every other button on the page.
+    // Deleting is its own permission. The page draws the ✕ only for logins that
+    // hold it: a button that is always refused teaches people to distrust every
+    // other button beside it.
     var CAN_DROP = false;
 
     /* ---------------------------- where it lives ---------------------------
-       The database, since the deliveries migration. It used to be a static
-       delivery-data.js written by a program on the office machine, which meant
-       the published dashboard could only ever look at it — and that anyone who
-       guessed the file's URL could read the lot without signing in.
-
-       One call brings back the lines, the driver list, and whether this login
-       may change any of it. The permission is re-checked by the database on
-       every write regardless; can_edit only decides what is worth showing. */
+       The database. One call brings back the trips (each with its item list),
+       the driver list, and what this login may do. The permissions are
+       re-checked by the database on every write regardless; can_edit and
+       can_delete only decide what is worth showing. */
     function load() {
       return Dash.getDeliveries().then(function (res) {
         if (!res || res.ok === false) throw new Error((res && res.message) || "could not read the deliveries");
         ALL = (res.deliveries || []).map(function (r) {
-          var o = { id: r.id };
+          var o = { id: r.id, items: [] };
           FIELDS.forEach(function (f) {
             o[f] = f === "received" ? !!r[f] : (r[f] === null || r[f] === undefined ? "" : String(r[f]));
+          });
+          (r.items || []).forEach(function (it) {
+            o.items.push({ item: String(it.item || ""), qty: String(it.qty || "") });
           });
           return o;
         });
@@ -180,25 +189,56 @@
       });
     }
 
-    /* ------------------------- the current picture -------------------------- */
-    // what the cell should show: the unsaved edit if there is one, else the file
+    /* ------------------------- the current picture --------------------------
+       What a cell should show: the unsaved edit if there is one, else the
+       record. A row being typed has no saved version to fall back to, so it
+       carries its own values. */
 
     function val(r, field) {
+      if (r.isNew) return r[field];
       var e = EDITS[r.id];
       return (e && e[field] !== undefined) ? e[field] : r[field];
     }
 
     function changed(r, field) {
+      if (r.isNew) return false;                 // the whole row is new
       var e = EDITS[r.id];
       return !!(e && e[field] !== undefined && e[field] !== r[field]);
     }
 
-    // period: "all" | "month" | "year", with the picked month ("2026-08") or
-    // year ("2026") beside it — see the switch above the cards
+    // the item list as it stands now — the edited one once it has been touched
+    function itemsOf(r) {
+      if (r.isNew) return r.items;
+      return ITEM_EDITS[r.id] || r.items;
+    }
+
+    // Take a working copy before the first change, so the saved list is still
+    // there to compare against (and to put back on Discard).
+    function editableItems(r) {
+      if (r.isNew) return r.items;
+      if (!ITEM_EDITS[r.id]) {
+        ITEM_EDITS[r.id] = r.items.map(function (i) { return { item: i.item, qty: i.qty }; });
+      }
+      return ITEM_EDITS[r.id];
+    }
+
+    function itemsChanged(r) {
+      if (r.isNew || !ITEM_EDITS[r.id]) return false;
+      return JSON.stringify(ITEM_EDITS[r.id]) !== JSON.stringify(r.items);
+    }
+
+    // an item line is worth keeping once it says what it is; the quantity can
+    // follow later, the name cannot
+    function realItems(list) {
+      return (list || []).filter(function (i) { return String(i.item).trim(); });
+    }
+
+    /* -------------------------------- filters ------------------------------ */
+
     var F = { period: "all", month: "", year: "", status: "", site: "", driver: "", text: "" };
 
-    // A line with no date cannot be in August, so a chosen period drops it. That
-    // is the honest answer: an undated delivery belongs to no month.
+    // A trip with no date cannot be in August, so a chosen period drops it.
+    // That is the honest answer: an undated delivery belongs to no month.
     function inPeriod(r) {
       if (F.period === "all") return true;
       var d = val(r, "date");
@@ -221,16 +261,20 @@
       if (F.site && val(r, "from") !== F.site && val(r, "to") !== F.site) return false;
       if (F.driver && val(r, "driver") !== F.driver) return false;
       if (F.text) {
-        var hay = [val(r, "item"), val(r, "from"), val(r, "to"), val(r, "driver"),
-                   val(r, "doNum"), val(r, "remark")].join(" ").toLowerCase();
+        // the items are searched too — "where did the 600mm auger go" is the
+        // question this page exists to answer
+        var hay = [val(r, "from"), val(r, "to"), val(r, "driver"),
+                   val(r, "doNum"), val(r, "remark")]
+                  .concat(itemsOf(r).map(function (i) { return i.item; }))
+                  .join(" ").toLowerCase();
         if (hay.indexOf(F.text) === -1) return false;
       }
       return true;
     }
 
-    // Newest first — a delivery book is read from today backwards. Lines with no
-    // date yet sit at the top, because a line with no date is one somebody is
-    // still filling in, not one from 1970.
+    // Newest first — a delivery book is read from today backwards. Trips with
+    // no date yet sit at the top, because a line with no date is one somebody
+    // is still filling in, not one from 1970.
     function shown() {
       return ALL.filter(match).sort(function (a, b) {
         var da = val(a, "date"), db = val(b, "date");
@@ -241,10 +285,42 @@
       });
     }
 
+    /* ------------------------------- counts -------------------------------- */
+
+    function renderStats() {
+      var rows = shown();
+      var done = rows.filter(function (r) { return !!val(r, "received"); }).length;
+      var noDo = rows.filter(function (r) { return !String(val(r, "doNum")).trim(); }).length;
+      var items = 0;
+      rows.forEach(function (r) { items += realItems(itemsOf(r)).length; });
+
+      var where = periodLabel();
+      var cards = [
+        { n: rows.length, label: "Deliveries",
+          sub: items ? items + " item" + (items === 1 ? "" : "s") + (where ? " in " + where : " in all")
+                     : (where ? "trips in " + where : "trips on the book"),
+          icon: "delivery", tone: "brand" },
+        { n: rows.length - done, label: "On the way", sub: "not ticked as arrived",
+          icon: "clock", tone: rows.length - done ? "info" : "grey" },
+        { n: done, label: "Delivered", sub: "the receiving end confirmed it",
+          icon: "check", tone: done ? "ok" : "grey" },
+        { n: noDo, label: "No D.O. number", sub: "nothing to match the paperwork to",
+          icon: "question", tone: "grey" }
+      ];
+
+      document.getElementById("dlv-stats").innerHTML = cards.map(function (c) {
+        return '<div class="istat tone-' + c.tone + '">' +
+                 '<span class="istat-ic">' + UI.icon(c.icon) + "</span>" +
+                 '<span class="istat-body">' +
+                   '<span class="istat-top"><b>' + c.n + "</b><i>" + escHtml(c.label) + "</i></span>" +
+                   '<span class="istat-sub">' + escHtml(c.sub) + "</span>" +
+                 "</span>" +
+               "</div>";
+      }).join("");
+    }
+
     /* ---------------------------- the driver list --------------------------- */
 
-    // the list as it stands right now, unsaved changes included, in the office's
-    // own order — loader, cargo, lorry, then anything else
     function driversNow() {
       return DRIVERS.concat(DRIVER_ADDS)
         .filter(function (d) { return !DRIVER_DROPS[d.name]; })
@@ -254,9 +330,9 @@
         });
     }
 
-    // Grouped by what they drive, so a dropdown reads as three short lists rather
-    // than one long one. A name already on a delivery but no longer on the list
-    // is kept at the top: a record must never quietly lose its driver.
+    // Grouped by what they drive, so a dropdown reads as three short lists
+    // rather than one long one. A name already on a delivery but no longer on
+    // the list is kept at the top: a record must never quietly lose its driver.
     function driverOptions(current, opt) {
       opt = opt || {};
       var list = driversNow(), groups = {}, order = [], html = "";
@@ -279,7 +355,6 @@
           }).join("") + "</optgroup>";
       }).join("");
 
-      // names that appear on a delivery but are not on the list any more
       var strays = (opt.extra || []).filter(function (n) {
         return n && !list.some(function (d) { return d.name === n; }) && n !== current;
       });
@@ -304,7 +379,7 @@
             return '<span class="drv-chip">' + escHtml(d.name) +
                    '<button type="button" class="dlv-x" data-drv-drop="' + esc(d.name) +
                    '" title="Take ' + esc(d.name) + ' off the list" aria-label="Remove ' +
-                   esc(d.name) + '">\u00d7</button></span>';
+                   esc(d.name) + '">×</button></span>';
           }).join("") + "</div>";
       }).join("");
       if (!list.length) body = '<p class="muted">Nobody on the list yet.</p>';
@@ -327,45 +402,16 @@
       document.getElementById("driver-panel").innerHTML = driverPanelHtml();
     }
 
-    /* ------------------------------- counts -------------------------------- */
-
-    function renderStats() {
-      var rows = shown();
-      var done = rows.filter(function (r) { return !!val(r, "received"); }).length;
-      var noDo = rows.filter(function (r) { return !String(val(r, "doNum")).trim(); }).length;
-
-      var where = periodLabel();
-      var cards = [
-        { n: rows.length, label: "Deliveries", sub: where ? "lines in " + where : "lines on the book",
-          icon: "delivery", tone: "brand" },
-        { n: rows.length - done, label: "On the way", sub: "not ticked as arrived",
-          icon: "clock", tone: rows.length - done ? "info" : "grey" },
-        { n: done, label: "Delivered", sub: "the receiving end confirmed it",
-          icon: "check", tone: done ? "ok" : "grey" },
-        { n: noDo, label: "No D.O. number", sub: "nothing to match the paperwork to",
-          icon: "question", tone: noDo ? "grey" : "grey" }
-      ];
-
-      document.getElementById("dlv-stats").innerHTML = cards.map(function (c) {
-        return '<div class="istat tone-' + c.tone + '">' +
-                 '<span class="istat-ic">' + UI.icon(c.icon) + "</span>" +
-                 '<span class="istat-body">' +
-                   '<span class="istat-top"><b>' + c.n + "</b><i>" + escHtml(c.label) + "</i></span>" +
-                   '<span class="istat-sub">' + escHtml(c.sub) + "</span>" +
-                 "</span>" +
-               "</div>";
-      }).join("");
-    }
-
     /* ------------------------------- the table ------------------------------ */
 
-    function thead(editable) {
+    function colCount() { return CAN_SAVE ? 8 : 7; }
+
+    function thead() {
       return "<thead><tr>" +
-               "<th>Date</th><th>Item</th><th>From</th><th>To</th>" +
-               "<th" + (editable ? "" : ' class="num"') + ">Qty</th>" +
-               "<th>Driver</th><th>D.O. No.</th><th>Remark</th>" +
+               "<th>Date</th><th>From → To</th><th>Driver</th><th>D.O. No.</th>" +
+               "<th>Items</th><th>Remark</th>" +
                '<th class="dlv-tick-head" title="Tick it when the site confirms it landed">Arrived</th>' +
-               (editable ? "<th></th>" : "") +
+               (CAN_SAVE ? "<th></th>" : "") +
              "</tr></thead>";
     }
 
@@ -374,26 +420,43 @@
              '" value="' + esc(val(r, field)) + '"' + (ph ? ' placeholder="' + esc(ph) + '"' : "") + ">";
     }
 
-    // a site box, not a site dropdown: most deliveries move between our own
-    // sites (offered as you type) but some come from a supplier that is not one
-    function siteCell(r, field) {
-      return '<input type="text" list="dlv-sites" class="cell-edit" data-id="' + esc(r.id) +
-             '" data-field="' + field + '" value="' + esc(val(r, field)) + '" placeholder="—">';
+    // From and To share one column: on screen a trip reads as one movement,
+    // "Tasek Store → Umech - Rawang", not as two unrelated facts. They stay two
+    // inputs when editing, because they are two answers.
+    function routeCell(r, editable) {
+      if (!editable) {
+        var a = val(r, "from"), b = val(r, "to");
+        if (!a && !b) return "";
+        return '<span class="dlv-route">' + escHtml(a || "—") +
+               '<i aria-label="to">→</i>' + escHtml(b || "—") + "</span>";
+      }
+      return '<span class="dlv-route-edit">' +
+               '<input type="text" list="dlv-sites" class="cell-edit" data-id="' + esc(r.id) +
+                 '" data-field="from" value="' + esc(val(r, "from")) + '" placeholder="from">' +
+               "<i>→</i>" +
+               '<input type="text" list="dlv-sites" class="cell-edit" data-id="' + esc(r.id) +
+                 '" data-field="to" value="' + esc(val(r, "to")) + '" placeholder="to">' +
+             "</span>";
     }
 
-    function driverCell(r) {
+    function driverCell(r, editable) {
+      if (!editable) return escHtml(val(r, "driver"));
       return '<select class="cell-edit" data-id="' + esc(r.id) + '" data-field="driver">' +
                driverOptions(val(r, "driver")) + "</select>";
     }
 
-    function dateCell(r) {
+    function dateCell(r, editable) {
+      if (!editable) {
+        var d = val(r, "date");
+        return d ? UI.dstr(d) : '<span class="muted">no date</span>';
+      }
       return '<input type="date" class="cell-edit" data-id="' + esc(r.id) +
              '" data-field="date" value="' + esc(val(r, "date")) + '">';
     }
 
-    // The tick. It is an edit like any other — it goes amber and waits for Save,
-    // because "arrived" is a claim about the real world and a stray click on a
-    // trackpad should be as undoable as a mis-typed number.
+    // The tick. It is an edit like any other — it goes amber and waits for
+    // Save, because "arrived" is a claim about the real world and a stray click
+    // on a trackpad should be as undoable as a mis-typed number.
     function tickCell(r, editable) {
       var on = !!val(r, "received");
       if (!editable) {
@@ -402,118 +465,120 @@
       }
       return '<label class="dlv-tick"><input type="checkbox" class="dlv-check" data-id="' + esc(r.id) +
              '" data-field="received"' + (on ? " checked" : "") +
-             ' aria-label="Received"><span></span></label>';
+             ' aria-label="Arrived"><span></span></label>';
+    }
+
+    // The count IS the control: pressing it opens the list underneath.
+    function itemsCell(r) {
+      var n = realItems(itemsOf(r)).length;
+      var open = !!OPEN[r.id];
+      return '<button type="button" class="dlv-items-btn' + (open ? " open" : "") +
+               '" data-toggle="' + esc(r.id) + '" aria-expanded="' + (open ? "true" : "false") + '">' +
+               (n ? n + " item" + (n === 1 ? "" : "s") : '<span class="muted">no items</span>') +
+               '<i aria-hidden="true">▾</i></button>';
+    }
+
+    // The item list, as rows under its trip. One cell spanning the table rather
+    // than columns of its own: the trip's ruler is set by dates and site names,
+    // and an item list forced through it would be squeezed into a gutter.
+    function itemRowsHtml(r, editable) {
+      var list = itemsOf(r), lines;
+
+      if (!editable) {
+        if (!realItems(list).length) return "";
+        lines = realItems(list).map(function (i) {
+          return '<li><span class="di-name">' + escHtml(i.item) + "</span>" +
+                 '<span class="di-qty">' + escHtml(i.qty || "—") + "</span></li>";
+        }).join("");
+        return '<tr class="dlv-item-row"><td colspan="' + colCount() + '">' +
+                 '<ul class="dlv-items">' + lines + "</ul></td></tr>";
+      }
+
+      lines = list.map(function (i, k) {
+        return '<li><input type="text" class="di-edit di-name" data-id="' + esc(r.id) +
+                 '" data-i="' + k + '" data-field="item" value="' + esc(i.item) +
+                 '" placeholder="what was sent">' +
+               '<input type="text" class="di-edit di-qty" data-id="' + esc(r.id) +
+                 '" data-i="' + k + '" data-field="qty" value="' + esc(i.qty) +
+                 '" placeholder="qty" aria-label="Quantity">' +
+               '<button type="button" class="dlv-x" data-drop-item="' + esc(r.id) + "|" + k +
+                 '" title="Take this item off" aria-label="Remove item">×</button></li>';
+      }).join("");
+
+      return '<tr class="dlv-item-row"><td colspan="' + colCount() + '">' +
+               '<ul class="dlv-items">' + lines + "</ul>" +
+               '<button type="button" class="dlv-add-item" data-add-item="' + esc(r.id) +
+                 '">+ Add item</button>' +
+             "</td></tr>";
     }
 
     function rowHtml(r, editable) {
       var gone = !!DELETED[r.id];
       var cls = function (field) { return changed(r, field) ? "cell-changed" : ""; };
-      var d = val(r, "date");
+      var route = changed(r, "from") || changed(r, "to") ? "cell-changed" : "";
 
-      return '<tr data-id="' + esc(r.id) + '" class="' +
-               (gone ? "row-deleted " : "") + (val(r, "received") ? "row-done" : "") + '">' +
-        UI.td("Date", editable ? dateCell(r)
-                               : (d ? UI.dstr(d) : '<span class="muted">no date</span>'), cls("date")) +
-        UI.td("Item", editable ? textCell(r, "item", "what was sent")
-                               : "<strong>" + escHtml(val(r, "item")) + "</strong>",
-              (editable ? "" : "wrap ") + cls("item")) +
-        UI.td("From", editable ? siteCell(r, "from") : escHtml(val(r, "from")),
-              (editable ? "" : "wrap ") + cls("from")) +
-        UI.td("To", editable ? siteCell(r, "to") : escHtml(val(r, "to")),
-              (editable ? "" : "wrap ") + cls("to")) +
-        UI.td("Qty", editable ? textCell(r, "qty") : escHtml(val(r, "qty")),
-              (editable ? "" : "num ") + cls("qty")) +
-        UI.td("Driver", editable ? driverCell(r) : escHtml(val(r, "driver")), cls("driver")) +
+      var tr = '<tr data-id="' + esc(r.id) + '" class="' +
+                 (gone ? "row-deleted " : "") + (r.isNew ? "row-new " : "") +
+                 (val(r, "received") ? "row-done" : "") + '">' +
+        UI.td("Date", dateCell(r, editable), cls("date")) +
+        UI.td("From → To", routeCell(r, editable), (editable ? "" : "wrap ") + route) +
+        UI.td("Driver", driverCell(r, editable), cls("driver")) +
         UI.td("D.O. No.", editable ? textCell(r, "doNum", "D.O.")
                                    : (val(r, "doNum") ? "<code>" + escHtml(val(r, "doNum")) + "</code>" : ""),
               cls("doNum")) +
+        UI.td("Items", itemsCell(r), itemsChanged(r) ? "cell-changed" : "") +
         UI.td("Remark", editable ? textCell(r, "remark", "—") : escHtml(val(r, "remark")),
               (editable ? "" : "wrap ") + cls("remark")) +
         '<td data-label="Arrived" class="dlv-tick-cell ' + cls("received") + '">' +
           tickCell(r, editable) + "</td>" +
         (editable
-          ? '<td class="dlv-row-act">' + (CAN_DROP
+          ? '<td class="dlv-row-act">' + ((CAN_DROP || r.isNew)
               ? '<button type="button" class="dlv-x" data-drop="' + esc(r.id) +
-                '" title="' + (gone ? "Put this line back" : "Remove this line") + '" aria-label="' +
-                (gone ? "Undo remove" : "Remove") + '">' + (gone ? "\u21ba" : "\u00d7") + "</button>"
+                '" title="' + (gone ? "Put this trip back" : "Remove this trip") + '" aria-label="' +
+                (gone ? "Undo remove" : "Remove") + '">' + (gone ? "↺" : "×") + "</button>"
               : "") + "</td>"
           : "") +
       "</tr>";
+
+      return tr + (OPEN[r.id] ? itemRowsHtml(r, editable) : "");
     }
 
     function table(rows) {
       return '<div class="table-wrap table-stack"><table class="tool-table dlv-table' +
                (CAN_SAVE ? " dlv-editable tool-editable with-remove" : "") + '">' +
-               thead(CAN_SAVE) + "<tbody>" +
+               thead() + "<tbody>" +
                rows.map(function (r) { return rowHtml(r, CAN_SAVE); }).join("") +
              "</tbody></table></div>";
     }
 
-    /* ------------------------- new deliveries + saving ---------------------- */
+    /* --------------------------- new deliveries ----------------------------- */
 
     function blankRow() {
-      return { date: Dash.todayKL(), item: "", from: "", to: "", qty: "1",
-               driver: "", doNum: "", remark: "", received: false };
+      NEWSEQ += 1;
+      return { id: "new-" + NEWSEQ, isNew: true, date: Dash.todayKL(),
+               from: "", to: "", driver: "", doNum: "", remark: "", received: false,
+               items: [{ item: "", qty: "1" }] };
     }
 
-    function newField(i, field, type, ph, list) {
-      if (type === "driver") {
-        return '<select class="new-edit" data-i="' + i + '" data-field="driver">' +
-                 driverOptions(NEWROWS[i].driver) + "</select>";
-      }
-      if (type === "checkbox") {
-        return '<label class="dlv-tick"><input type="checkbox" class="new-edit" data-i="' + i +
-               '" data-field="' + field + '"' + (NEWROWS[i][field] ? " checked" : "") +
-               ' aria-label="Received"><span></span></label>';
-      }
-      return '<input type="' + type + '" class="new-edit" data-i="' + i + '" data-field="' + field +
-             '" value="' + esc(NEWROWS[i][field]) + '"' +
-             (list ? ' list="' + list + '"' : "") +
-             (ph ? ' placeholder="' + esc(ph) + '"' : "") + ">";
-    }
+    /* ------------------------------- pending -------------------------------- */
 
-    function newRowsHtml() {
-      if (!NEWROWS.length) return "";
-      return '<div class="table-wrap"><table class="tool-new dlv-new">' +
-               "<thead><tr><th>Date</th><th>Item</th><th>From</th><th>To</th><th>Qty</th>" +
-                 "<th>Driver</th><th>D.O. No.</th><th>Remark</th>" +
-                 '<th class="dlv-tick-head">Arrived</th><th></th>' +
-               "</tr></thead><tbody>" +
-               NEWROWS.map(function (n, i) {
-                 return "<tr>" +
-                   "<td>" + newField(i, "date", "date") + "</td>" +
-                   "<td>" + newField(i, "item", "text", "what was sent") + "</td>" +
-                   "<td>" + newField(i, "from", "text", "from", "dlv-sites") + "</td>" +
-                   "<td>" + newField(i, "to", "text", "to", "dlv-sites") + "</td>" +
-                   "<td>" + newField(i, "qty", "text") + "</td>" +
-                   "<td>" + newField(i, "driver", "driver") + "</td>" +
-                   "<td>" + newField(i, "doNum", "text", "D.O.") + "</td>" +
-                   "<td>" + newField(i, "remark", "text") + "</td>" +
-                   '<td class="dlv-tick-cell">' + newField(i, "received", "checkbox") + "</td>" +
-                   '<td class="dlv-row-act"><button type="button" class="dlv-x" data-remove="' + i +
-                     '" title="Remove this line" aria-label="Remove">\u00d7</button></td>' +
-                 "</tr>";
-               }).join("") +
-             "</tbody></table></div>";
-    }
-
-    // a new line is worth writing once it says what was delivered, or carries a
-    // D.O. number to match against
+    // a trip is worth writing once it carries an item, or a D.O. to match
     function pendingAdds() {
       return NEWROWS.filter(function (n) {
-        return String(n.item).trim() || String(n.doNum).trim();
+        return realItems(n.items).length || String(n.doNum).trim();
       });
     }
 
     function pendingEdits() {
       var out = [];
-      Object.keys(EDITS).forEach(function (id) {
-        if (DELETED[id]) return;                       // a removed line's edits are moot
-        var base = BY_ID[id], e = EDITS[id];
-        if (!base) return;
+      ALL.forEach(function (r) {
+        if (DELETED[r.id]) return;                    // a removed trip's edits are moot
+        if (itemsChanged(r)) { out.push(r.id); return; }
+        var e = EDITS[r.id];
+        if (!e) return;
         for (var i = 0; i < FIELDS.length; i++) {
           var f = FIELDS[i];
-          if (e[f] !== undefined && e[f] !== base[f]) { out.push(id); return; }
+          if (e[f] !== undefined && e[f] !== r[f]) { out.push(r.id); return; }
         }
       });
       return out;
@@ -523,17 +588,18 @@
 
     function pendingCrew() { return DRIVER_ADDS.length + Object.keys(DRIVER_DROPS).length; }
 
-    // one edited line, as the database wants it: the WHOLE line, unsaved edits
-    // folded in. save_delivery is an upsert of one delivery, not a merge, so a
-    // half-filled payload would blank the fields it left out.
-    function editedRow(id) {
-      var base = BY_ID[id], o = { id: id };
-      FIELDS.forEach(function (f) { o[f] = val(base, f); });
-      return o;
+    // one trip, as the database wants it: the header AND the whole item list.
+    // save_delivery replaces the items rather than merging, so a half-filled
+    // payload would drop the lines it forgot to mention.
+    function payload(r) {
+      return { id: r.isNew ? null : r.id,
+               date: val(r, "date") || null,
+               from: val(r, "from"), to: val(r, "to"),
+               driver: val(r, "driver"), doNum: val(r, "doNum"),
+               remark: val(r, "remark"), received: !!val(r, "received"),
+               items: realItems(itemsOf(r)) };
     }
 
-    // Rebuilding #new-rows while somebody is typing in it would take the caret
-    // with it, so the counter updates on its own.
     function renderPendingBarOnly() {
       var edits = pendingEdits(), adds = pendingAdds(), drops = pendingDrops();
       var crew = pendingCrew();
@@ -544,16 +610,15 @@
       bar.className = "banner banner-info";
       bar.innerHTML =
         "<strong>" + n + " unsaved change" + (n === 1 ? "" : "s") + "</strong> — " +
-        edits.length + " line" + (edits.length === 1 ? "" : "s") + " edited, " +
-        adds.length + " new" + (drops.length ? ", " + drops.length + " removed" : "") +
-        (crew ? ", " + crew + " change" + (crew === 1 ? "" : "s") + " to the driver list" : "") + ". " +
+        edits.length + " edited, " + adds.length + " new" +
+        (drops.length ? ", " + drops.length + " removed" : "") +
+        (crew ? ", " + crew + " to the driver list" : "") + ". " +
         "Nothing has been written to the record yet. " +
         '<button type="button" id="btn-save" class="btn btn-primary">Save</button> ' +
         '<button type="button" id="btn-discard" class="btn">Discard</button>';
     }
 
     function renderEdit() {
-      document.getElementById("new-rows").innerHTML = newRowsHtml();
       renderPendingBarOnly();
       document.getElementById("btn-add").disabled = !CAN_SAVE;
       document.getElementById("edit-note").innerHTML = CAN_SAVE
@@ -564,39 +629,43 @@
 
     /* -------------------------------- saving --------------------------------
        One call per thing that changed, in an order that cannot contradict
-       itself: the driver list first (a line may point at a driver added in the
-       same breath), then edits, then new lines, then removals.
+       itself: the driver list first (a trip may point at a driver added in the
+       same breath), then edits, then new trips, then removals.
 
-       Sequential, not parallel — twelve simultaneous writes would report their
-       failures in a random order, and the office needs to be told WHICH line
+       Sequential, not parallel — twelve simultaneous writes report their
+       failures in a random order, and the office needs to be told WHICH trip
        the database refused, not that something somewhere went wrong. */
     function save() {
       var bar = document.getElementById("pending-bar");
       var btn = document.getElementById("btn-save");
       if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
 
+      function name(r) {
+        var items = realItems(itemsOf(r));
+        return val(r, "doNum") || (items.length ? items[0].item : "") ||
+               (val(r, "date") ? UI.dstr(val(r, "date")) : "a trip");
+      }
+
       var jobs = [];
       DRIVER_ADDS.forEach(function (d) {
         jobs.push({ what: "driver " + d.name,
                     run: function () { return Dash.saveDeliveryDriver(d.name, d.vehicle); } });
       });
-      Object.keys(DRIVER_DROPS).forEach(function (name) {
-        jobs.push({ what: "driver " + name,
-                    run: function () { return Dash.deleteDeliveryDriver(name); } });
+      Object.keys(DRIVER_DROPS).forEach(function (n) {
+        jobs.push({ what: "driver " + n,
+                    run: function () { return Dash.deleteDeliveryDriver(n); } });
       });
       pendingEdits().forEach(function (id) {
-        var row = editedRow(id);
-        jobs.push({ what: row.item || "line " + id,
-                    run: function () { return Dash.saveDelivery(row); } });
+        var body = payload(BY_ID[id]), what = name(BY_ID[id]);
+        jobs.push({ what: what, run: function () { return Dash.saveDelivery(body); } });
       });
-      pendingAdds().forEach(function (n) {
-        jobs.push({ what: n.item || n.doNum,
-                    run: function () { return Dash.saveDelivery(n); } });
+      pendingAdds().forEach(function (r) {
+        var body = payload(r), what = name(r);
+        jobs.push({ what: what, run: function () { return Dash.saveDelivery(body); } });
       });
       pendingDrops().forEach(function (id) {
-        var gone = BY_ID[id];
-        jobs.push({ what: (gone && gone.item) || "line " + id,
-                    run: function () { return Dash.deleteDelivery(id); } });
+        var what = BY_ID[id] ? name(BY_ID[id]) : "a trip";
+        jobs.push({ what: what, run: function () { return Dash.deleteDelivery(id); } });
       });
 
       var refused = [];
@@ -616,7 +685,7 @@
           bar.className = "banner banner-amber";
           bar.innerHTML = "<strong>" + (jobs.length - refused.length) + " saved, " +
             refused.length + " refused:</strong><ul>" +
-            refused.map(function (r) { return "<li>" + escHtml(r) + "</li>"; }).join("") + "</ul>" +
+            refused.map(function (x) { return "<li>" + escHtml(x) + "</li>"; }).join("") + "</ul>" +
             '<button type="button" class="btn" onclick="window.location.reload()">Reload the page</button>';
           return;
         }
@@ -629,7 +698,7 @@
         bar.innerHTML = /not_authorised/.test(msg)
           ? "Your login is not allowed to change deliveries. Nothing was written."
           : "Could not save: " + escHtml(msg) +
-            '<br><span class="muted">Some earlier lines in this batch may already have gone in — ' +
+            '<br><span class="muted">Some earlier trips in this batch may already have gone in — ' +
             "reload to see exactly where it stopped.</span>";
       });
     }
@@ -642,20 +711,26 @@
       document.getElementById("f-count").textContent =
         rows.length === ALL.length ? "" : rows.length + " of " + ALL.length + " shown";
 
-      document.getElementById("dlv-body").innerHTML = !ALL.length
-        ? UI.empty("No deliveries recorded yet.",
-                   CAN_SAVE ? "Press “+ Add delivery record” below to write the first one."
-                            : "Nobody has written one yet.")
-        : !rows.length
-          ? UI.empty("Nothing matches that.", "Clear the search or pick a different site.")
-          : table(rows);
+      // deliveries being typed sit at the top, whatever the filters say — a row
+      // that vanishes because it does not match the search yet is a row the
+      // office will type again
+      var body = document.getElementById("dlv-body");
+      if (!ALL.length && !NEWROWS.length) {
+        body.innerHTML = UI.empty("No deliveries recorded yet.",
+          CAN_SAVE ? "Press “+ Add delivery record” below to write the first one."
+                   : "Nobody has written one yet.");
+      } else if (!rows.length && !NEWROWS.length) {
+        body.innerHTML = UI.empty("Nothing matches that.",
+                                  "Clear the search or pick a different site.");
+      } else {
+        body.innerHTML = table(NEWROWS.concat(rows));
+      }
 
       renderEdit();
     }
 
     /* ------------------------------- controls ------------------------------ */
 
-    // every site and driver the record has ever seen, plus the standing site list
     function usedValues(field) {
       var m = {};
       ALL.forEach(function (r) { var v = val(r, field); if (v) m[v] = (m[v] || 0) + 1; });
@@ -675,15 +750,12 @@
       var sites = {};
       Object.keys(usedValues("from")).forEach(function (s) { sites[s] = 1; });
       Object.keys(usedValues("to")).forEach(function (s) { sites[s] = 1; });
-      var siteSel = document.getElementById("f-site");
-      siteSel.innerHTML = '<option value="">All sites</option>' +
+      document.getElementById("f-site").innerHTML = '<option value="">All sites</option>' +
         Object.keys(sites).sort().map(function (s) {
           return '<option value="' + esc(s) + '"' + (s === F.site ? " selected" : "") + ">" +
                  escHtml(s) + "</option>";
         }).join("");
 
-      // the standing list, grouped by what they drive, plus anyone who appears
-      // on a delivery but is no longer on it
       document.getElementById("f-driver").innerHTML =
         '<option value=""' + (F.driver ? "" : " selected") + ">All drivers</option>" +
         driverOptions(F.driver, { blank: false, extra: Object.keys(usedValues("driver")) });
@@ -718,14 +790,19 @@
       }).join("");
     }
 
-    function noteEdit(id, field, value) {
-      var base = BY_ID[id];
-      if (!base) return null;
-      var e = EDITS[id] = EDITS[id] || {};
-      if (value === base[field]) delete e[field];        // typed it back — not a change
+    function rowById(id) {
+      if (BY_ID[id]) return BY_ID[id];
+      for (var i = 0; i < NEWROWS.length; i++) if (NEWROWS[i].id === id) return NEWROWS[i];
+      return null;
+    }
+
+    function noteEdit(r, field, value) {
+      if (r.isNew) { r[field] = value; return true; }
+      var e = EDITS[r.id] = EDITS[r.id] || {};
+      if (value === r[field]) delete e[field];        // typed it back — not a change
       else e[field] = value;
-      if (!Object.keys(e).length) delete EDITS[id];
-      return e;
+      if (!Object.keys(e).length) delete EDITS[r.id];
+      return !!(EDITS[r.id] && EDITS[r.id][field] !== undefined);
     }
 
     function wire() {
@@ -766,6 +843,9 @@
       document.getElementById("f-driver").addEventListener("change", function (e) {
         F.driver = e.target.value; render();
       });
+      document.getElementById("f-text").addEventListener("input", function (e) {
+        F.text = e.target.value.trim().toLowerCase(); render();
+      });
 
       document.getElementById("btn-drivers").addEventListener("click", function (ev) {
         var panel = document.getElementById("driver-panel");
@@ -774,68 +854,76 @@
         if (!panel.hidden) { renderDrivers(); document.getElementById("drv-name").focus(); }
       });
 
-      // Adding or dropping a driver changes every dropdown on the page, so the
-      // table is rebuilt with it — unsaved cell edits ride along untouched,
-      // because the cells are drawn from the edits, not from the DOM.
-      function afterCrewChange() {
-        renderDrivers();
-        fillFilters();
-        render();
-      }
+      function afterCrewChange() { renderDrivers(); fillFilters(); render(); }
 
       document.getElementById("driver-panel").addEventListener("click", function (ev) {
         var drop = ev.target.closest("button[data-drv-drop]");
         if (drop) {
-          var name = drop.getAttribute("data-drv-drop"), at = -1;
-          DRIVER_ADDS.forEach(function (d, k) { if (d.name === name) at = k; });
+          var nm = drop.getAttribute("data-drv-drop"), at = -1;
+          DRIVER_ADDS.forEach(function (d, k) { if (d.name === nm) at = k; });
           if (at !== -1) DRIVER_ADDS.splice(at, 1);   // never saved — just forget it
-          else DRIVER_DROPS[name] = true;
+          else DRIVER_DROPS[nm] = true;
           afterCrewChange();
           return;
         }
         if (ev.target.id !== "btn-drv-add") return;
         var box = document.getElementById("drv-name");
-        var name2 = box.value.trim();
-        if (!name2) { box.focus(); return; }
-        delete DRIVER_DROPS[name2];                   // re-adding puts them back
+        var nm2 = box.value.trim();
+        if (!nm2) { box.focus(); return; }
+        delete DRIVER_DROPS[nm2];                     // re-adding puts them back
         var known = driversNow().some(function (d) {
-          return d.name.toLowerCase() === name2.toLowerCase();
+          return d.name.toLowerCase() === nm2.toLowerCase();
         });
         if (!known) {
-          DRIVER_ADDS.push({ name: name2, vehicle: document.getElementById("drv-vehicle").value });
+          DRIVER_ADDS.push({ name: nm2, vehicle: document.getElementById("drv-vehicle").value });
         }
         afterCrewChange();
         document.getElementById("drv-name").focus();
       });
 
-      // Enter in the name box adds, the way it would in any other one-line form
       document.getElementById("driver-panel").addEventListener("keydown", function (ev) {
         if (ev.key === "Enter" && ev.target.id === "drv-name") {
           ev.preventDefault();
           document.getElementById("btn-drv-add").click();
         }
       });
-      document.getElementById("f-text").addEventListener("input", function (e) {
-        F.text = e.target.value.trim().toLowerCase(); render();
-      });
 
       var body = document.getElementById("dlv-body");
 
       // typing in a cell records the change; it does not send it anywhere
       body.addEventListener("change", function (ev) {
-        var el = ev.target.closest(".cell-edit, .dlv-check");
+        var el = ev.target.closest(".cell-edit, .dlv-check, .di-edit");
         if (!el) return;
-        var id = el.getAttribute("data-id"), field = el.getAttribute("data-field");
-        var isTick = el.classList.contains("dlv-check");
-        var e = noteEdit(id, field, isTick ? el.checked : el.value);
-        if (e === null) return;
+        var r = rowById(el.getAttribute("data-id"));
+        if (!r) return;
 
-        var cell = el.closest("td");
-        if (cell) cell.classList.toggle("cell-changed", !!(e && e[field] !== undefined));
+        if (el.classList.contains("di-edit")) {
+          editableItems(r)[Number(el.getAttribute("data-i"))][el.getAttribute("data-field")] = el.value;
+          var ic = el.closest("tr").previousElementSibling;
+          if (ic) {
+            var cell = ic.querySelector('td[data-label="Items"]');
+            if (cell) {
+              cell.classList.toggle("cell-changed", itemsChanged(r));
+              cell.innerHTML = itemsCell(r);          // the count follows the list
+            }
+          }
+          renderStats();
+          return renderPendingBarOnly();
+        }
+
+        var field = el.getAttribute("data-field");
+        var isTick = el.classList.contains("dlv-check");
+        var dirty = noteEdit(r, field, isTick ? el.checked : el.value);
+
+        var td = el.closest("td");
+        if (td) td.classList.toggle("cell-changed", dirty);
+        if (field === "from" || field === "to") {
+          if (td) td.classList.toggle("cell-changed", changed(r, "from") || changed(r, "to"));
+        }
         if (isTick) {
           var tr = el.closest("tr");
           if (tr) tr.classList.toggle("row-done", el.checked);
-          renderStats();                  // the tick moves the counts above
+          renderStats();                              // the tick moves the counts above
         }
         renderPendingBarOnly();
       });
@@ -843,58 +931,68 @@
       // free text needs the same treatment on every keystroke, or the pending
       // count only catches up when the field loses focus
       body.addEventListener("input", function (ev) {
-        if (ev.target.closest('input[type="text"].cell-edit')) {
+        if (ev.target.closest('input[type="text"].cell-edit, input.di-edit')) {
           ev.target.dispatchEvent(new Event("change", { bubbles: true }));
         }
       });
 
-      // Remove marks the line and leaves it on screen, struck through, until
-      // Save — so it can be put back without reloading the page.
       body.addEventListener("click", function (ev) {
-        var b = ev.target.closest("button[data-drop]");
-        if (!b) return;
-        var id = b.getAttribute("data-drop");
-        if (DELETED[id]) delete DELETED[id];
-        else DELETED[id] = true;
-        var tr = b.closest("tr");
-        if (tr) tr.classList.toggle("row-deleted", !!DELETED[id]);
-        b.innerHTML = DELETED[id] ? "\u21ba" : "\u00d7";
-        b.title = DELETED[id] ? "Put this line back" : "Remove this line";
-        renderPendingBarOnly();
-      });
+        var t = ev.target.closest("button");
+        if (!t) return;
 
-      var newRows = document.getElementById("new-rows");
-      newRows.addEventListener("input", function (ev) {
-        var el = ev.target.closest(".new-edit");
-        if (!el || el.type === "checkbox") return;   // the tick is handled on change
-        NEWROWS[el.getAttribute("data-i")][el.getAttribute("data-field")] = el.value;
-        renderPendingBarOnly();           // do NOT re-render the inputs mid-typing
-      });
-      newRows.addEventListener("change", function (ev) {
-        var el = ev.target.closest(".new-edit");
-        if (!el) return;
-        var rec = NEWROWS[el.getAttribute("data-i")], field = el.getAttribute("data-field");
-        rec[field] = el.type === "checkbox" ? el.checked : el.value;
-        renderPendingBarOnly();
-      });
-      newRows.addEventListener("click", function (ev) {
-        var b = ev.target.closest("button[data-remove]");
-        if (!b) return;
-        NEWROWS.splice(Number(b.getAttribute("data-remove")), 1);
-        renderEdit();
+        var open = t.getAttribute("data-toggle");
+        if (open) {
+          if (OPEN[open]) delete OPEN[open]; else OPEN[open] = true;
+          return render();
+        }
+
+        var add = t.getAttribute("data-add-item");
+        if (add) {
+          var ra = rowById(add);
+          if (ra) { editableItems(ra).push({ item: "", qty: "1" }); OPEN[add] = true; render();
+            var last = document.querySelector('tr[data-id="' + add + '"] + .dlv-item-row li:last-child .di-name');
+            if (last) last.focus();
+          }
+          return;
+        }
+
+        var di = t.getAttribute("data-drop-item");
+        if (di) {
+          var pi = di.split("|"), rd = rowById(pi[0]);
+          if (rd) { editableItems(rd).splice(Number(pi[1]), 1); render(); }
+          return;
+        }
+
+        // Remove marks the trip and leaves it on screen, struck through, until
+        // Save — so it can be put back without reloading the page. A trip that
+        // was never saved is simply forgotten.
+        var drop = t.getAttribute("data-drop");
+        if (drop) {
+          var rr = rowById(drop);
+          if (rr && rr.isNew) {
+            NEWROWS = NEWROWS.filter(function (x) { return x.id !== drop; });
+            delete OPEN[drop];
+            return render();
+          }
+          if (DELETED[drop]) delete DELETED[drop]; else DELETED[drop] = true;
+          return render();
+        }
       });
 
       document.getElementById("btn-add").addEventListener("click", function () {
-        NEWROWS.push(blankRow());
-        renderEdit();
-        var last = document.querySelector("#new-rows tbody tr:last-child input[data-field='item']");
-        if (last) last.focus();
+        var r = blankRow();
+        NEWROWS.unshift(r);
+        OPEN[r.id] = true;                            // a new trip needs its item list open
+        render();
+        var first = document.querySelector('tr[data-id="' + r.id + '"] input[data-field="from"]');
+        if (first) first.focus();
       });
 
       document.getElementById("pending-bar").addEventListener("click", function (ev) {
         if (ev.target.id === "btn-save") return save();
         if (ev.target.id === "btn-discard") {
-          EDITS = {}; NEWROWS = []; DELETED = {}; DRIVER_ADDS = []; DRIVER_DROPS = {};
+          EDITS = {}; ITEM_EDITS = {}; NEWROWS = []; DELETED = {};
+          DRIVER_ADDS = []; DRIVER_DROPS = {};
           renderDrivers();
           fillFilters();
           render();
@@ -911,11 +1009,11 @@
 
     window.onShellReady = function () {
       document.getElementById("dlv-sub").innerHTML =
-        "What is on its way to site, what has arrived, and who is driving it.";
+        "One row per trip — press the item count to see what was on the lorry.";
 
       document.getElementById("dlv-source").innerHTML =
         "Kept in the company database — every signed-in office login sees the same " +
-        "lines, and every change is recorded against the name that made it.";
+        "trips, and every change is recorded against the name that made it.";
 
       // Everything below waits for the record: a page that draws its controls
       // before it knows whether this login may use them is a page that offers

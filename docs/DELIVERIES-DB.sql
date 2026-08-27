@@ -8,6 +8,11 @@
 -- Everything below is additive and re-runnable: if not exists / on conflict do
 -- nothing throughout, wrapped in one transaction.
 --
+-- RUN DELIVERIES-DB-02-items.sql AFTER THIS ONE. It splits the item off the
+-- delivery into delivery_items (a trip carries a list, not one thing) and
+-- replaces get_deliveries / save_delivery accordingly. This file alone leaves a
+-- schema the current page cannot talk to.
+--
 -- =============================================================================
 -- DELIVERIES — what went out, where it went, who drove it, and whether it
 -- landed. Moves the Delivery Status page off the static delivery-data.js file
