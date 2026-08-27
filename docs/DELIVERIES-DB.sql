@@ -59,6 +59,17 @@ select app.access_profile_id, replace(app.permission_code, 'machines.', 'deliver
                                'machines.edit', 'machines.delete')
 on conflict do nothing;
 
+-- One deliberate departure from that mirror (added the same day, once it met a
+-- real desk): Administrator has no machines.delete, so it inherited no way to
+-- remove a delivery — while still being able to add and change one. The office
+-- that types a line is the office that must be able to unpick a mis-typed one,
+-- and a delivery is a note about a lorry, not a machine on the asset register.
+insert into public.access_profile_permissions (access_profile_id, permission_code)
+select ap.access_profile_id, 'deliveries.delete'
+  from public.access_profiles ap
+ where ap.profile_code = 'admin'
+on conflict do nothing;
+
 -- --------------------------------------------------------------- 3. tables
 create table if not exists public.delivery_drivers (
   driver_id   uuid primary key default gen_random_uuid(),
