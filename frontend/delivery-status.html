@@ -12,10 +12,12 @@
 
   <main id="main">
     <!-- ================= DELIVERY STATUS =========================
-         One row per lorry-load: the date, which site it left, which
-         site it is going to, who drove it, the D.O. number on the
-         paperwork, the list of what was on it, and a tick once the
-         receiving end confirms it arrived.
+         One row per lorry-load: the date, what was on it, which site
+         it left, which site it is going to, who drove it, the D.O.
+         number on the paperwork, and a tick once the receiving end
+         confirms it arrived. The load sits second, beside the date,
+         because "what went out on the 28th" is the question this page
+         is opened with.
 
          A DELIVERY IS A TRIP, NOT A THING. One lorry-load is one
          D.O. with a list on it, so the table shows one row per trip
@@ -408,8 +410,8 @@
 
     function thead() {
       return "<thead><tr>" +
-               "<th>Date</th><th>From → To</th><th>Driver</th><th>D.O. No.</th>" +
-               "<th>Items</th><th>Remark</th>" +
+               "<th>Date</th><th>Items</th><th>From → To</th><th>Driver</th>" +
+               "<th>D.O. No.</th><th>Remark</th>" +
                '<th class="dlv-tick-head" title="Tick it when the site confirms it landed">Arrived</th>' +
                (CAN_SAVE ? "<th></th>" : "") +
              "</tr></thead>";
@@ -468,14 +470,44 @@
              ' aria-label="Arrived"><span></span></label>';
     }
 
-    // The count IS the control: pressing it opens the list underneath.
+    // How many lines of the load the row shows before it stops counting. Three
+    // covers the ordinary lorry; past that the cell would be taller than the
+    // trip it belongs to, and the full list is one press away regardless.
+    var ITEMS_SHOWN = 3;
+
+    // The names ARE the control: pressing them opens the list underneath to
+    // edit. It used to read "2 items", which answers how many went — but the
+    // question the office opens this page with is WHAT went, and an answer that
+    // needs a click is an answer the page does not give.
     function itemsCell(r) {
-      var n = realItems(itemsOf(r)).length;
+      var list = realItems(itemsOf(r));
       var open = !!OPEN[r.id];
+      var body, title = "";
+
+      if (!list.length) {
+        body = '<span class="muted">no items</span>';
+      } else {
+        body = '<span class="di-names">' +
+          list.slice(0, ITEMS_SHOWN).map(function (i) {
+            var q = String(i.qty == null ? "" : i.qty).trim();
+            return '<span class="di-line"><span class="di-n">' + escHtml(i.item) + "</span>" +
+                   (q ? '<span class="di-q">×' + escHtml(q) + "</span>" : "") + "</span>";
+          }).join("") +
+          (list.length > ITEMS_SHOWN
+            ? '<span class="di-more">+' + (list.length - ITEMS_SHOWN) + " more</span>"
+            : "") +
+          "</span>";
+        // the whole load on hover, for the row that had to be trimmed
+        title = list.map(function (i) {
+          var q = String(i.qty == null ? "" : i.qty).trim();
+          return i.item + (q ? " ×" + q : "");
+        }).join(", ");
+      }
+
       return '<button type="button" class="dlv-items-btn' + (open ? " open" : "") +
-               '" data-toggle="' + esc(r.id) + '" aria-expanded="' + (open ? "true" : "false") + '">' +
-               (n ? n + " item" + (n === 1 ? "" : "s") : '<span class="muted">no items</span>') +
-               '<i aria-hidden="true">▾</i></button>';
+               '" data-toggle="' + esc(r.id) + '" aria-expanded="' + (open ? "true" : "false") + '"' +
+               (title ? ' title="' + esc(title) + '"' : "") + ">" +
+               body + '<i aria-hidden="true">▾</i></button>';
     }
 
     // The item list, as rows under its trip. One cell spanning the table rather
@@ -521,12 +553,12 @@
                  (gone ? "row-deleted " : "") + (r.isNew ? "row-new " : "") +
                  (val(r, "received") ? "row-done" : "") + '">' +
         UI.td("Date", dateCell(r, editable), cls("date")) +
+        UI.td("Items", itemsCell(r), itemsChanged(r) ? "cell-changed" : "") +
         UI.td("From → To", routeCell(r, editable), (editable ? "" : "wrap ") + route) +
         UI.td("Driver", driverCell(r, editable), cls("driver")) +
         UI.td("D.O. No.", editable ? textCell(r, "doNum", "D.O.")
                                    : (val(r, "doNum") ? "<code>" + escHtml(val(r, "doNum")) + "</code>" : ""),
               cls("doNum")) +
-        UI.td("Items", itemsCell(r), itemsChanged(r) ? "cell-changed" : "") +
         UI.td("Remark", editable ? textCell(r, "remark", "—") : escHtml(val(r, "remark")),
               (editable ? "" : "wrap ") + cls("remark")) +
         '<td data-label="Arrived" class="dlv-tick-cell ' + cls("received") + '">' +
@@ -904,7 +936,7 @@
             var cell = ic.querySelector('td[data-label="Items"]');
             if (cell) {
               cell.classList.toggle("cell-changed", itemsChanged(r));
-              cell.innerHTML = itemsCell(r);          // the count follows the list
+              cell.innerHTML = itemsCell(r);          // the names follow the list
             }
           }
           renderStats();
@@ -1009,7 +1041,8 @@
 
     window.onShellReady = function () {
       document.getElementById("dlv-sub").innerHTML =
-        "One row per trip — press the item count to see what was on the lorry.";
+        "One row per trip, with what was on the lorry beside the date — press " +
+        "the list to change it.";
 
       document.getElementById("dlv-source").innerHTML =
         "Kept in the company database — every signed-in office login sees the same " +

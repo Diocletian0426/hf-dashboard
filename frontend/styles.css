@@ -1178,25 +1178,28 @@ tr.cons-draft select.cons-req { background: var(--surface-solid); }
    calc() shares the rest, so the table never scrolls sideways. */
 .dlv-table { table-layout: fixed; min-width: 0; }
 
-/* read-only: 7 columns. Date is short formatted text ("28 Aug 2026"). */
+/* read-only: 7 columns. Date is short formatted text ("28 Aug 2026").
+   Items sits second, straight after the date, and gets the widest share: it
+   now carries names rather than a count, and "what went out on the 28th" is
+   the question this page is opened to answer. */
 .dlv-table th:nth-child(1) { width: 104px; }                        /* Date     */
 .dlv-table th:nth-child(7) { width:  96px; }                        /* Arrived  */
-.dlv-table th:nth-child(2) { width: calc((100% - 200px) * 0.31); }  /* From→To  */
-.dlv-table th:nth-child(3) { width: calc((100% - 200px) * 0.15); }  /* Driver   */
-.dlv-table th:nth-child(4) { width: calc((100% - 200px) * 0.13); }  /* D.O. No. */
-.dlv-table th:nth-child(5) { width: calc((100% - 200px) * 0.13); }  /* Items    */
-.dlv-table th:nth-child(6) { width: calc((100% - 200px) * 0.28); }  /* Remark   */
+.dlv-table th:nth-child(2) { width: calc((100% - 200px) * 0.30); }  /* Items    */
+.dlv-table th:nth-child(3) { width: calc((100% - 200px) * 0.26); }  /* From→To  */
+.dlv-table th:nth-child(4) { width: calc((100% - 200px) * 0.13); }  /* Driver   */
+.dlv-table th:nth-child(5) { width: calc((100% - 200px) * 0.12); }  /* D.O. No. */
+.dlv-table th:nth-child(6) { width: calc((100% - 200px) * 0.19); }  /* Remark   */
 
 /* editable: 8 columns. 132px is what Chrome's own date control needs at 12px —
    under that it starts eating its own digits rather than shrinking. */
 .dlv-table.with-remove th:nth-child(1) { width: 132px; }
 .dlv-table.with-remove th:nth-child(7) { width:  72px; }
 .dlv-table.with-remove th:nth-child(8) { width:  34px; }            /* ✕        */
-.dlv-table.with-remove th:nth-child(2) { width: calc((100% - 238px) * 0.32); }
-.dlv-table.with-remove th:nth-child(3) { width: calc((100% - 238px) * 0.16); }
-.dlv-table.with-remove th:nth-child(4) { width: calc((100% - 238px) * 0.12); }
-.dlv-table.with-remove th:nth-child(5) { width: calc((100% - 238px) * 0.13); }
-.dlv-table.with-remove th:nth-child(6) { width: calc((100% - 238px) * 0.27); }
+.dlv-table.with-remove th:nth-child(2) { width: calc((100% - 238px) * 0.30); }  /* Items    */
+.dlv-table.with-remove th:nth-child(3) { width: calc((100% - 238px) * 0.27); }  /* From→To  */
+.dlv-table.with-remove th:nth-child(4) { width: calc((100% - 238px) * 0.14); }  /* Driver   */
+.dlv-table.with-remove th:nth-child(5) { width: calc((100% - 238px) * 0.11); }  /* D.O. No. */
+.dlv-table.with-remove th:nth-child(6) { width: calc((100% - 238px) * 0.18); }  /* Remark   */
 
 /* eight columns do not fit at the standard 16px cell padding */
 .dlv-table th, .dlv-table td { padding: 8px 6px; }
@@ -1215,17 +1218,33 @@ tr.cons-draft select.cons-req { background: var(--surface-solid); }
 .dlv-route-edit .cell-edit { min-width: 0; margin: -4px 0; }
 
 /* ---- the item list --------------------------------------------------------
-   The count IS the control: pressing it opens the list. A separate chevron
-   would be a second thing to aim at for one action. */
+   The names ARE the control: pressing them opens the list to edit. "2 items"
+   answered how many went; what the office opens this page to ask is WHAT went,
+   so the answer is in the row and the count is gone. No pill any more either —
+   a border drawn around three stacked names reads as a button holding a list,
+   which is one box too many for a table this busy. */
 .dlv-items-btn {
-  display: inline-flex; align-items: center; gap: 5px;
-  font: inherit; font-size: 12.5px; cursor: pointer;
-  padding: 3px 9px; border-radius: var(--r-pill);
-  border: 1px solid var(--line-strong); background: var(--surface-solid); color: var(--ink);
+  display: flex; align-items: flex-start; gap: 6px; width: 100%;
+  font: inherit; font-size: 12.5px; text-align: left; cursor: pointer;
+  padding: 2px 0; border: none; background: none; color: var(--ink);
 }
-.dlv-items-btn:hover { border-color: var(--brand); color: var(--brand); }
-.dlv-items-btn i { font-style: normal; font-size: 10px; color: var(--ink-3); transition: transform 0.15s ease; }
-.dlv-items-btn.open { border-color: var(--brand); color: var(--brand); }
+.dlv-items-btn .di-names { flex: 1 1 auto; min-width: 0; display: grid; gap: 1px; }
+/* one line per item: the name takes the room, the quantity stays out of the
+   way at the end of it — same reading order as the list underneath */
+.di-line { display: flex; align-items: baseline; gap: 5px; min-width: 0; }
+.di-line .di-n { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.di-line .di-q { flex: none; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+/* a long load stops at three lines. The rest is one press away, and a
+   twelve-line cell would make every other trip on screen unreadable. */
+.dlv-items-btn .di-more { color: var(--ink-3); font-size: 11.5px; }
+.dlv-items-btn:hover { color: var(--brand); }
+.dlv-items-btn:hover .di-q, .dlv-items-btn:hover .di-more { color: var(--brand); }
+.dlv-items-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: var(--r-sm); }
+.dlv-items-btn i {
+  font-style: normal; font-size: 10px; line-height: 1.6; color: var(--ink-3);
+  flex: none; transition: transform 0.15s ease;
+}
+.dlv-items-btn.open { color: var(--brand); }
 .dlv-items-btn.open i { transform: rotate(180deg); color: var(--brand); }
 
 /* The list itself spans the whole table rather than taking columns of its own.
@@ -1266,9 +1285,13 @@ li > span.di-name {
 }
 .dlv-add-item:hover { text-decoration: underline; }
 
-/* a trip being typed, not yet in the database */
-.dlv-table tr.row-new > td { background: var(--warn-soft); }
-.dlv-table tr.row-new + tr.dlv-item-row > td { background: rgba(254, 243, 199, 0.55); }
+/* a trip being typed, not yet in the database. No amber wash: a new row is
+   eight mostly-empty boxes, and a tint across all of them read as a warning
+   about the page rather than "this line is not saved yet". The signal moves to
+   a rule down the left edge — same message, none of the flood — and Save /
+   Discard above the table say the rest. */
+.dlv-table tr.row-new > td { background: transparent; }
+.dlv-table tr.row-new > td:first-child { box-shadow: inset 3px 0 0 var(--brand); }
 
 /* ---- the tick -------------------------------------------------------------
    The last column is the whole point of the page: has it landed or not. A real
