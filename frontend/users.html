@@ -205,17 +205,26 @@
 
     /* --------------------------- write forms --------------------------- */
 
-    // "Set up a login": console-created login -> active account in one step
+    // "Set up a login": console-created login -> active account in one step.
+    //
+    // THREE QUESTIONS, NOT SIX. A login here is a member of staff, so who they
+    // are is one pick from the staff list — the name and the company come off
+    // that record instead of being typed a second time (a second copy is a copy
+    // that drifts: a name corrected on the staff row stayed wrong on the login).
+    // Department and job title are facts about the person, not the login, and
+    // change nothing a login may do, so this form no longer asks for them.
+    // The rare outsider (consultant, auditor) has no staff record: ticking the
+    // box swaps the staff pick for the two fields that record would have filled.
     function setupForm(login) {
       return '<div class="claim-form" data-form="1">' +
         "<strong>Set Up " + escHtml(login.email) + "</strong>" +
-        '<label>Full Name <input type="text" id="su-name" size="24"></label>' +
-        '<label>Company <select id="su-company">' + companyOptions(null) + "</select></label>" +
+        '<label id="su-staff-wrap">Staff Record <select id="su-staff">' +
+          staffOptions(null).replace("— Not Linked —", "choose…") + "</select></label>" +
         '<label>Access Profile <select id="su-profile"><option value="">choose…</option>' +
           profileOptions(null) + "</select></label>" +
-        '<label>Department <select id="su-dept">' + departmentOptions(null) + "</select></label>" +
-        '<label>Job Title <select id="su-desig">' + designationOptions(null) + "</select></label>" +
-        '<label>Staff Record <select id="su-staff">' + staffOptions(null) + "</select></label>" +
+        '<label class="muted-line"><input type="checkbox" id="su-outsider"> Not a Staff Member</label>' +
+        '<label id="su-name-wrap" hidden>Full Name <input type="text" id="su-name" size="24"></label>' +
+        '<label id="su-company-wrap" hidden>Company <select id="su-company">' + companyOptions(null) + "</select></label>" +
         '<button type="button" data-action="setup-save" data-login="' + login.user_id + '">Set Up Login</button>' +
         '<button type="button" data-action="form-cancel">Cancel</button>' +
         '<span class="muted-line">the account switches on immediately — they can sign in once this is saved</span>' +
@@ -784,18 +793,37 @@
       /* ---- saves ---- */
       if (actName === "setup-save") {
         var loginId = btn.getAttribute("data-login");
-        var name = document.getElementById("su-name").value.trim();
         var profile = document.getElementById("su-profile").value;
-        if (!name)    { UA.err = "The full name is required."; render(); return; }
+        var outsider = document.getElementById("su-outsider").checked;
+        var name, companyId, staffId = null;
+        if (outsider) {
+          name = document.getElementById("su-name").value.trim();
+          companyId = document.getElementById("su-company").value;
+          if (!name) { UA.err = "The full name is required."; render(); return; }
+        } else {
+          // who they are comes off the staff record — never typed twice
+          staffId = document.getElementById("su-staff").value;
+          var person = UA.staffPool.find(function (s) { return s.staff_id === staffId; });
+          if (!person) { UA.err = "Choose the staff record this login belongs to."; render(); return; }
+          var firm = ((UA.ref && UA.ref.companies) || []).find(function (c) {
+            return c.company_code === person.company;
+          });
+          if (!firm) {
+            UA.err = "That staff record has no company the login can use — fix it on the Manpower page first.";
+            render(); return;
+          }
+          name = person.full_name;
+          companyId = firm.company_id;
+        }
         if (!profile) { UA.err = "Choose an access profile."; render(); return; }
         try {
           await Dash.createUserAccount(loginId, {
             fullName: name,
-            companyId: document.getElementById("su-company").value,
+            companyId: companyId,
             accessProfileId: profile,
-            departmentId: document.getElementById("su-dept").value || null,
-            designationId: document.getElementById("su-desig").value || null,
-            staffId: document.getElementById("su-staff").value || null
+            departmentId: null,
+            designationId: null,
+            staffId: staffId
           });
           await refreshAfterWrite(null, "Login set up — " + name + " can sign in now.");
         } catch (e) { UA.err = friendly(e); render(); }
@@ -972,6 +1000,15 @@
           if (ev.target.id === "perm-codes") {
             UA.showCodes = ev.target.checked;
             render();
+          }
+          // set-up form: an outsider has no staff record, so swap the staff
+          // pick for the name + company it would have filled. Toggled in place —
+          // a re-render here would throw away what is already chosen.
+          if (ev.target.id === "su-outsider") {
+            var out = ev.target.checked;
+            document.getElementById("su-staff-wrap").hidden = out;
+            document.getElementById("su-name-wrap").hidden = !out;
+            document.getElementById("su-company-wrap").hidden = !out;
           }
         });
 
