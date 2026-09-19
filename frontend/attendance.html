@@ -29,6 +29,10 @@
       <label>Site
         <select id="f-site"><option value="">All sites</option></select>
       </label>
+      <label>Find
+        <input type="search" id="f-find" class="filter-box" autocomplete="off"
+               placeholder="Name, employee code or site…">
+      </label>
       <a id="punch-toggle" href="#">Show raw punches</a>
     </div>
 
@@ -102,60 +106,45 @@
 
   <script>
     /* =====================================================================
-       HOW A DAY IS COUNTED — the company rule (owner-confirmed 2026-08-14)
+       HOW A DAY IS COUNTED — THE DATABASE COUNTS IT, THIS PAGE PRINTS IT
        ---------------------------------------------------------------------
-       ONE shift, 08:30–17:00. Working Hours = time inside that window minus
-       the 1 h unpaid lunch (a day with 6 h or less inside the window keeps
-       its lunch); Over Time = everything AFTER 17:00, in full, to the
-       punch-out. Time before 08:30 never counts, and there are no night
-       starts. The worker's phone computes the SAME rule (splitMinutes in
-       hf-punch-system/frontend/index.html): a worker who sees one figure on
-       the phone and another on the office screen will bring the phone to
-       the office. Change both together, or neither.
-       ===================================================================== */
-    var SHIFT_START_MIN = 8 * 60 + 30;   // 08:30 — the working day starts here
-    var SHIFT_END_MIN   = 17 * 60;       // 17:00 — anything after this is OT
-    var LUNCH_MIN       = 60;            // unpaid, out of the normal window
-    var LUNCH_AFTER_MIN = 6 * 60;        // short days keep their lunch hour
+       The company hours rule lives in ONE place: fn_shift_minutes (database
+       migration 0091). Every day-row arrives already priced, as
+       working_minutes and ot_minutes, and this page shows those numbers and
+       does no arithmetic of its own.
 
-    // minutes-of-day in Malaysia for a timestamptz string (KL = UTC+8, no DST)
-    function klMinutes(ts) {
-      if (!ts) return null;
-      var d = new Date(ts);
-      if (isNaN(d)) return null;
-      return (d.getUTCHours() * 60 + d.getUTCMinutes() + 8 * 60) % 1440;
-    }
+       It used to. This page carried its own copy of the rule (splitShift,
+       with the shift start, shift end and lunch written out as constants),
+       and so did the worker's phone. Three copies of one rule means a rule
+       change is three edits, and the day one is forgotten a worker sees one
+       figure on the phone and another on the office screen. The copy was
+       deleted only after it was checked against the server on every day-row
+       on record — all 26 agreed to the minute — so nobody's hours moved.
+
+       A day the database declines to price comes back as null: the shift is
+       still open, or it ran past the 16-hour limit (nearly always a missing
+       punch-out). Null prints as a dash and is left OUT of every total —
+       never treated as zero, and never guessed at here.
+       ===================================================================== */
 
     // The times the day is PAID from: the office's ruling where it made one,
     // the worker's own taps everywhere else. Never use these to print "when he
     // punched" — that is first_in_at/last_out_at and the two must stay tellable
-    // apart (0092). These are for arithmetic and for the Working Hours column.
+    // apart (0092). These feed the In / Out columns only; the hours beside them
+    // come from the database, which priced them from these same two times.
     function effIn(s)  { return s.effective_in_at  || s.corrected_in_at  || s.first_in_at; }
     function effOut(s) { return s.effective_out_at || s.corrected_out_at || s.last_out_at; }
 
-    // The work/OT split for one day-row, from its effective times (duration
-    // alone cannot express a clock-boundary rule). Null while still on shift.
-    //
-    // 0091 added server-computed working_minutes/ot_minutes and they are meant
-    // to replace this function outright, so a rule change becomes one migration
-    // instead of an edit in every client. Until that swap is done here and in
-    // the month view, this stays — but it now reads the corrected times, so an
-    // amended day pays what the office ruled, not what the phone recorded.
-    function splitShift(s) {
-      var start = klMinutes(effIn(s)), end = klMinutes(effOut(s));
-      if (start === null || end === null) return null;
-      if (end < start) end += 1440;                      // crossed midnight
-      var normal = Math.max(0, Math.min(end, SHIFT_END_MIN) - Math.max(start, SHIFT_START_MIN));
-      if (normal > LUNCH_AFTER_MIN) normal -= LUNCH_MIN;
-      var ot = Math.max(0, end - Math.max(start, SHIFT_END_MIN));
+    // One day-row's official hours, straight off the row. Null = not priced
+    // (open, or over the limit) — callers print a dash and skip it in totals.
+    function hoursOf(s) {
+      if (s.working_minutes === null || s.working_minutes === undefined) return null;
       return {
-        // "on site" must match the pair above it, or the drawer's summary
-        // argues with its own numbers on an amended day
-        gross:  (function (g) { return (g === null || g === undefined) ? 0 : Number(g); })(
-                  s.has_correction ? s.effective_hours : s.hours_on_site),
-        normal: normal / 60,
-        ot:     ot / 60,
-        worked: (normal + ot) / 60
+        // "on site" must match the times shown above it, or the drawer's
+        // summary argues with its own numbers on an amended day
+        gross:  Number((s.has_correction ? s.effective_hours : s.hours_on_site) || 0),
+        normal: Number(s.working_minutes) / 60,
+        ot:     Number(s.ot_minutes || 0) / 60
       };
     }
 
@@ -195,6 +184,70 @@
     // ...and back again. Malaysia is UTC+8 with no daylight saving, so the
     // offset can be written flat rather than computed.
     function klInputToISO(v) { return v ? v + ":00+08:00" : null; }
+
+    /* ---- who is who: the employee code, and the Find box ------------------
+       A day-row identifies its worker by staff_id — the one key that is unique
+       for everybody; names repeat, and plenty of workers have no employee code
+       at all. The code is not on the attendance rows, so it is looked up ONCE
+       from the manpower list this login can already read, purely for display
+       and for the Find box. If that read is refused, the page still works:
+       rows simply show no code and Find matches on name and site. */
+    var CODES = {};                       // staff_id -> employee_code
+
+    async function loadCodes() {
+      try {
+        ((await Dash.getManpowerBySite()) || []).forEach(function (m) {
+          if (m.staff_id && m.employee_code) CODES[m.staff_id] = m.employee_code;
+        });
+      } catch (e) { /* no codes — see above */ }
+    }
+
+    function codeTag(staffId) {
+      var c = CODES[staffId];
+      return c ? ' <span class="muted">' + esc(c) + "</span>" : "";
+    }
+
+    // the text one row answers to in the Find box
+    function findKey(r, sites) {
+      return [r.full_name || r.name, CODES[r.staff_id] || "", sites || r.project_name || ""]
+        .join(" ").toLowerCase();
+    }
+
+    // Filters what is already on screen — no reload, so it is instant and the
+    // open drawers stay open. A hidden worker's drawer hides with him.
+    function applyFind(tbodyId, cols) {
+      var q = document.getElementById("f-find").value.trim().toLowerCase();
+      var words = q ? q.split(/\s+/) : [];
+      var body = document.getElementById(tbodyId), shown = 0, total = 0;
+      Array.prototype.forEach.call(body.querySelectorAll("tr.shift-row"), function (tr) {
+        total++;
+        var key = tr.getAttribute("data-find") || "";
+        var hit = words.every(function (w) { return key.indexOf(w) !== -1; });
+        tr.hidden = !hit;
+        var drawer = tr.nextElementSibling;
+        if (drawer && drawer.classList.contains("detail-row")) {
+          drawer.hidden = !hit || !tr.classList.contains("open");
+        }
+        if (hit) shown++;
+      });
+      var none = body.querySelector("tr.no-match");
+      if (total && !shown) {
+        if (!none) {
+          none = document.createElement("tr");
+          none.className = "no-match";
+          none.innerHTML = '<td colspan="' + cols + '" class="empty"></td>';
+          body.appendChild(none);
+        }
+        none.firstChild.textContent = "No worker here matches \u201C" + q + "\u201D.";
+        none.hidden = false;
+      } else if (none) {
+        none.hidden = true;
+      }
+      // keep the search across a date or site change, without a reload
+      var p = new URLSearchParams(location.search);
+      if (q) p.set("find", q); else p.delete("find");
+      history.replaceState(null, "", location.pathname + (p.toString() ? "?" + p : ""));
+    }
 
     function setParam(name, value) {
       var p = new URLSearchParams(location.search);
@@ -454,13 +507,20 @@
         e.preventDefault(); setParam("punches", showRaw ? "" : "1");
       });
 
+      var findEl = document.getElementById("f-find");
+      findEl.value = params.get("find") || "";
+      findEl.addEventListener("input", function () {
+        applyFind(view === "month" ? "month-rows" : "rows", view === "month" ? 6 : 7);
+      });
+
       var tbody = document.getElementById("rows");
       try {
         var results = await Promise.all([
           Dash.getShifts(date, site || null),
           Dash.getSitesMissingGeofence(),
           Dash.getProjectPulse(),
-          showRaw ? Dash.getRecentPunches(date, site || null) : Promise.resolve(null)
+          showRaw ? Dash.getRecentPunches(date, site || null) : Promise.resolve(null),
+          loadCodes()
         ]);
         var shifts = results[0], missing = results[1], projects = results[2], punches = results[3];
 
@@ -518,12 +578,12 @@
                     ". Open the worker for the tapped times and the reason.") +
                 '">amended</span>');
             }
-            var h = splitShift(s);
-            return '<tr class="shift-row" data-i="' + i + '">' +
+            var h = hoursOf(s);
+            return '<tr class="shift-row" data-i="' + i + '" data-find="' + esc(findKey(s)) + '">' +
               '<td><button type="button" class="worker-btn" data-i="' + i + '" ' +
                    'aria-expanded="false" aria-controls="d' + i + '">' +
                  '<span class="caret" aria-hidden="true"></span>' +
-                 "<strong>" + esc(s.full_name) + "</strong></button></td>" +
+                 "<strong>" + esc(s.full_name) + "</strong>" + codeTag(s.staff_id) + "</button></td>" +
               "<td>" + esc(s.project_name || "—") + "</td>" +
               // The IN/OUT columns show the time the day is PAID from, which on
               // an amended day is the office's, not the worker's. It is marked
@@ -532,11 +592,11 @@
               "<td>" + timeCell(effIn(s),  s.corrected_in_at)  + "</td>" +
               "<td>" + timeCell(effOut(s), s.corrected_out_at) + "</td>" +
               // An overlong shift is a BROKEN shift — nearly always a missing
-              // punch-out. Printing "1011 Hours 8 Mins" of overtime next to a
-              // worker's name on the screen the office pays from is worse than
-              // printing nothing: someone will believe it. Fix the punch first.
-              '<td class="num">' + (h && !s.overlong_shift ? hm(h.normal) : "—") + "</td>" +
-              '<td class="num">' + (h && !s.overlong_shift
+              // punch-out. The database refuses to price it (null), so it prints
+              // as a dash: "1011 Hours 8 Mins" of overtime on the screen the
+              // office pays from is worse than nothing. Fix the punch first.
+              '<td class="num">' + (h ? hm(h.normal) : "—") + "</td>" +
+              '<td class="num">' + (h
                   ? (h.ot > 0 ? '<span class="ot-on">' + hm(h.ot) + "</span>" : hm(0))
                   : "—") + "</td>" +
               "<td>" + (flags.join(" ") || "—") + "</td>" +
@@ -544,6 +604,7 @@
             '<tr class="detail-row" id="d' + i + '" hidden><td colspan="7"></td></tr>';
           }).join("");
           document.getElementById("legend").hidden = false;
+          if (findEl.value) applyFind("rows", 7);
         }
 
         /* ---- the detail drawer ---------------------------------------------
@@ -553,14 +614,47 @@
            the same list. */
         var punchCache = null;
 
-        async function punchesFor(name) {
+        async function punchesFor(s) {
           if (punchCache === null) {
             punchCache = await Dash.getRecentPunches(date, site || null, 1000);
           }
-          // Matched on the name the two functions share. There is no staff_id
-          // in either payload today — when the read layer grows one, key on
-          // that instead: two workers can be called the same thing.
-          return (punchCache || []).filter(function (p) { return p.full_name === name; });
+          // Matched on staff_id — the one key unique to a worker. This used to
+          // match on the NAME, on the belief that neither payload carried an
+          // id; both always did. Two workers can be called the same thing, and
+          // on a payroll screen that is one man's punches under another's name.
+          return (punchCache || []).filter(function (p) {
+            return s.staff_id ? p.staff_id === s.staff_id : p.full_name === s.full_name;
+          });
+        }
+
+        // WHO MADE THIS PUNCH (0092), and what else the office should know
+        // about it. A time the worker tapped and a time somebody typed in for
+        // him must never look alike — when hours are disputed, this line is
+        // the difference between his own record and an entry made on his behalf.
+        function provenance(p) {
+          var out = [];
+          if (p.punched_by === "office") {
+            out.push('<span class="badge badge-amended" title="' +
+              esc("Entered by the office" + (p.entered_by_name ? " (" + p.entered_by_name + ")" : "") +
+                  ", not tapped by the worker.") + '">Office' +
+              (p.entered_by_name ? " · " + esc(p.entered_by_name) : "") + "</span>");
+          } else if (p.punched_by === "system") {
+            out.push('<span class="badge badge-gray" title="No punch-out by the next morning, so the ' +
+              'system closed the shift. Not tapped by the worker.">Auto Closed</span>');
+          } else if (p.punched_by === "worker") {
+            out.push('<span class="badge badge-verified" title="Tapped by the worker on their own ' +
+              'phone.">Worker</span>');
+          }
+          if (p.synced_late) {
+            out.push('<span class="badge badge-gray" title="The phone was offline when this was ' +
+              'tapped and sent it later. The time shown is when it was really tapped.">Synced Late</span>');
+          }
+          if (p.wrong_site) {
+            var at = p.detected_project_code || p.detected_project_name;
+            out.push('<span class="badge badge-anomaly" title="Tapped nearer a different site than ' +
+              'the one this worker is assigned to.">Wrong Site' + (at ? " · " + esc(at) : "") + "</span>");
+          }
+          return out.join(" ");
         }
 
         function punchLine(p) {
@@ -575,8 +669,10 @@
             ? "" : " · " + Math.round(p.distance_m) + " m from the site";
           return '<li><span class="pl-type">' + esc((p.punch_type || "").toUpperCase()) + "</span>" +
                  '<span class="pl-time">' + Dash.klTime(p.punched_at) + "</span>" +
-                 '<span class="badge badge-' + vCls + '">' + esc(v.replace(/_/g, " ")) + "</span>" +
-                 '<span class="pl-where">' + esc(where) + esc(dist) + "</span></li>";
+                 '<span class="badge badge-' + vCls + '">' + esc(v.replace(/_/g, " ")) + "</span> " +
+                 provenance(p) +
+                 '<span class="pl-where">' + esc(where) + esc(dist) +
+                   (p.entry_note ? " · note: " + esc(p.entry_note) : "") + "</span></li>";
         }
 
         /* ---- Edit Hours (DB 0090–0092) -------------------------------------
@@ -619,12 +715,6 @@
         function amendForm(s, i) {
           // Reading the day is one permission, ruling on it is another.
           if (!Dash.can("attendance.edit")) return "";
-          // set_day_correction is keyed on the worker, and this row has no id
-          // to key on. Better a plain explanation than a button that throws.
-          if (!s.staff_id) {
-            return '<p class="detail-note">Hours cannot be amended from this screen: the day ' +
-                   'row came back without a worker id, which the correction is keyed on.</p>';
-          }
           // WHICH DAYS MAY BE AMENDED IS THE DATABASE'S RULE, NOT THIS PAGE'S.
           // set_day_correction refuses a day that is not over yet and answers
           // with the reason in words the office can read, so the button stays
@@ -665,13 +755,13 @@
         }
 
         function detailHtml(s, punches, i) {
-          var h = splitShift(s);
+          var h = hoursOf(s);
           var sum = s.overlong_shift
-            ? "This shift is longer than the system allows (" + hm(h ? h.gross : 0) +
+            ? "This shift is longer than the system allows (" + hm(Number(s.hours_on_site || 0)) +
               " on site), so its hours are not counted. Almost always a missing punch-out — " +
               "check the punches below, then have the office correct the record."
             : h
-            ? "On site " + hm(h.gross) + " · by the company rule (08:30–17:00 less the 1 h lunch; OT only after 17:00): " +
+            ? "On site " + hm(h.gross) + " · counted by the company hours rule: " +
               hm(h.normal) + " Working Hours" +
               (h.ot > 0 ? " + " + hm(h.ot) + " overtime" : ", no overtime")
             : "Still on site — no punch out yet, so the day is not counted.";
@@ -704,7 +794,7 @@
           cell.innerHTML = '<div class="detail-box"><p class="detail-note">Loading…</p></div>';
           try {
             var s = shifts[Number(i)];
-            var list = await punchesFor(s.full_name);
+            var list = await punchesFor(s);
             // the RPC hands them back newest first; a day reads forwards
             list.sort(function (a, b) { return a.punched_at < b.punched_at ? -1 : 1; });
             cell.innerHTML = detailHtml(s, list, i);
@@ -836,10 +926,10 @@
        (get_shifts_range); when it lands, only daysOfMonth()/fetchMonth()
        below change, and nothing else on this page moves.
 
-       ⚠ Workers are grouped BY NAME, because neither function returns a
-       staff_id yet. Two workers with the same name would merge into one
-       payroll row. The same migration fixes this. Until it is applied, a
-       duplicate name is a real risk on this screen — check the roster.
+       Workers are grouped by staff_id — the one key unique to a worker — and
+       the name is only what gets printed. This used to group BY NAME, on the
+       belief that the rows carried no id (they always did): two workers with
+       the same name would have merged into one payroll row, silently.
        ======================================================================= */
     function daysOfMonth(month) {
       var parts = month.split("-");
@@ -878,36 +968,48 @@
     function byWorker(rows) {
       var map = {};
       rows.forEach(function (r) {
-        var key = r.full_name || "(unnamed)";
+        // a row with no id (demo data, or a very old cache) falls back to the
+        // name, prefixed so it can never collide with a real id
+        var key = r.staff_id || ("name:" + (r.full_name || "(unnamed)"));
         var w = map[key] || (map[key] = {
-          name: key, sites: {}, days: 0, normal: 0, ot: 0, broken: 0, open: 0, rows: []
+          staff_id: r.staff_id || null, name: r.full_name || "(unnamed)",
+          sites: {}, days: 0, normal: 0, ot: 0, broken: 0, open: 0, rows: []
         });
         if (r.project_name) w.sites[r.project_name] = true;
-        var h = splitShift(r);
+        // the database's price for the day, or null — never re-worked-out here
+        var h = hoursOf(r);
         if (r.overlong_shift) w.broken++;
-        else if (!r.last_out_at || !h) w.open++;
+        else if (!h) w.open++;
         else { w.days++; w.normal += h.normal; w.ot += h.ot; }
         w.rows.push(r);
       });
-      return Object.keys(map).sort().map(function (k) { return map[k]; });
+      return Object.keys(map).map(function (k) { return map[k]; })
+        .sort(function (a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; });
     }
 
     function monthDetail(w) {
       var lines = w.rows.slice().sort(function (a, b) {
         return a.work_date < b.work_date ? -1 : 1;
       }).map(function (r) {
-        var h = splitShift(r);
-        var counted = !r.overlong_shift && r.last_out_at && h;
+        var h = hoursOf(r);
+        var counted = !r.overlong_shift && h;
         return "<tr>" +
           "<td>" + esc(r.work_date) + "</td>" +
-          "<td>" + (r.first_in_at ? Dash.klTime(r.first_in_at) : "—") + "</td>" +
-          "<td>" + (r.last_out_at ? Dash.klTime(r.last_out_at) : "—") + "</td>" +
+          // the times the day is PAID from, marked when the office set them —
+          // the same two the day view shows, so the month never argues with it
+          "<td>" + timeCell(effIn(r),  r.corrected_in_at)  + "</td>" +
+          "<td>" + timeCell(effOut(r), r.corrected_out_at) + "</td>" +
           '<td class="num">' + (counted ? hm(h.normal) : "—") + "</td>" +
           '<td class="num">' + (counted ? (h.ot > 0 ? '<span class="ot-on">' + hm(h.ot) + "</span>" : hm(0)) : "—") + "</td>" +
-          "<td>" + (r.overlong_shift
-              ? '<span class="badge badge-anomaly">overlong</span>'
-              : (!r.last_out_at ? '<span class="badge badge-gray">no punch out</span>'
-                                : (r.has_anomaly ? '<span class="badge badge-anomaly">check</span>' : "—"))) + "</td>" +
+          "<td>" + ([
+              r.overlong_shift ? '<span class="badge badge-anomaly">overlong</span>'
+                : (!effOut(r) ? '<span class="badge badge-gray">no punch out</span>'
+                : (r.has_anomaly ? '<span class="badge badge-anomaly">check</span>' : "")),
+              r.has_correction ? '<span class="badge badge-amended" title="' +
+                esc("The office corrected this day" +
+                    (r.correction_reason ? " — " + r.correction_reason : "") + ".") +
+                '">amended</span>' : ""
+            ].filter(Boolean).join(" ") || "—") + "</td>" +
         "</tr>";
       }).join("");
       return '<div class="detail-box"><table class="att-table month-days"><thead><tr>' +
@@ -941,9 +1043,11 @@
           'in this worker\'s totals until corrected.">' + w.broken + " to fix</span>");
         if (w.open) att.push('<span class="badge badge-gray" title="Day(s) with a punch in and ' +
           'no punch out. No hours to count yet.">' + w.open + " open</span>");
-        return '<tr class="shift-row" data-i="' + i + '">' +
+        return '<tr class="shift-row" data-i="' + i + '" data-find="' +
+                 esc(findKey(w, Object.keys(w.sites).join(" "))) + '">' +
           '<td><button type="button" class="worker-btn" data-i="' + i + '" aria-expanded="false">' +
-            '<span class="caret" aria-hidden="true"></span><strong>' + esc(w.name) + "</strong></button></td>" +
+            '<span class="caret" aria-hidden="true"></span><strong>' + esc(w.name) + "</strong>" +
+            codeTag(w.staff_id) + "</button></td>" +
           "<td>" + esc(Object.keys(w.sites).join(", ") || "—") + "</td>" +
           '<td class="num">' + w.days + "</td>" +
           '<td class="num">' + hm(w.normal) + "</td>" +
@@ -954,9 +1058,11 @@
 
       note.hidden = false;
       note.innerHTML = "<span>Days a worker was on site with a completed punch out. " +
-        "Overtime is counted per day (time after 17:00 that day), never from the " +
+        "Overtime is counted per day, by the company hours rule, never from the " +
         "monthly total — a 12-hour Monday and a 4-hour Tuesday is 4 hours of overtime, not none. " +
         "Days marked <em>to fix</em> or <em>open</em> are left out of the totals.</span>";
+
+      if (document.getElementById("f-find").value) applyFind("month-rows", 6);
 
       tbody.addEventListener("click", function (ev) {
         var btn = ev.target.closest ? ev.target.closest(".worker-btn") : null;
