@@ -919,12 +919,12 @@
        One row per worker: HIS days, HIS hours, HIS overtime. Not the site's
        and not the company's — this is the sheet wages are worked out from.
 
-       ⚠ STOPGAP: the read layer has no date-range function yet, only
-       get_daily_shifts(ONE date), so this asks for the month one day at a
-       time, six days at once. It is correct but chatty — 26 calls for a
-       month. The migration that replaces it with a single call is drafted
-       (get_shifts_range); when it lands, only daysOfMonth()/fetchMonth()
-       below change, and nothing else on this page moves.
+       The month is read in ONE call (get_shifts_range, DB 0101) — the same
+       rows get_daily_shifts returns, over a date range. Against a database
+       that does not have that function yet, fetchMonth() falls back to the
+       old way: one call per day, six at a time. Correct either way; the
+       fallback is just ~30 round trips slower. Nothing else on the page
+       knows which path ran.
 
        Workers are grouped by staff_id — the one key unique to a worker — and
        the name is only what gets printed. This used to group BY NAME, on the
@@ -947,6 +947,13 @@
 
     async function fetchMonth(month, site, onProgress) {
       var dates = daysOfMonth(month), all = [], i = 0;
+      if (!dates.length) return all;            // a month that has not started
+
+      // one call for the whole month, when the database offers it
+      var ranged = await Dash.getShiftsRange(dates[0], dates[dates.length - 1], site || null);
+      if (ranged) return ranged;
+
+      // fallback: the database predates 0101 — ask day by day
       while (i < dates.length) {
         var batch = dates.slice(i, i + 6);
         var got = await Promise.all(batch.map(function (d) {

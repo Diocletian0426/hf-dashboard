@@ -174,6 +174,18 @@
   Dash.getShifts = async function (date, projectId) {
     return shiftsOn(date, projectId || null);
   };
+  // The month view reads a whole range in one call when it can. Left alone,
+  // that call would go to the REAL database and the demo month would show real
+  // workers. Answer it from the same fake crew instead, day by day.
+  Dash.getShiftsRange = async function (from, to, projectId) {
+    var out = [], d = new Date(from + "T00:00:00Z"), end = new Date(to + "T00:00:00Z");
+    for (; d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
+      out = out.concat(shiftsOn(d.toISOString().slice(0, 10), projectId || null));
+    }
+    return out;
+  };
+  // the codes lookup is a real read too — the demo crew has no codes
+  Dash.getManpowerBySite = async function () { return []; };
   Dash.getRecentPunches = async function (date, projectId) {
     var out = [];
     shiftsOn(date, projectId || null).forEach(function (r) { out = out.concat(punchesFor(r)); });

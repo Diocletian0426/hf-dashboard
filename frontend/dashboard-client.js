@@ -47,6 +47,9 @@
    await Dash.getMachineServiceHistory()          -> all servicing records (newest first)
    await Dash.getMachineActivity()                -> last 14 days of daily machine reports
    await Dash.getShifts(dateYYYYMMDD, projectId?) -> who worked that day (punch data)
+   await Dash.getShiftsRange(from, to, projectId?) -> the same rows over a date range (max 62
+                                                     days) in ONE call; resolves to null when the
+                                                     database has no such function yet (pre-0101)
    await Dash.getSitesMissingGeofence()           -> active sites with workers but no GPS set
    await Dash.getRecentPunches(dateYYYYMMDD, projectId?, limit?) -> raw punch list
    await Dash.getLeaveBalances(year)              -> per-worker leave balance rows
@@ -818,6 +821,22 @@
     return q(sb.rpc("get_daily_shifts", {
       p_work_date: date, p_project_id: projectId || null
     }));
+  }
+
+  // The same rows as getShifts, over a date range, in one round trip (DB 0101).
+  // Resolves to NULL — not an error — when the database does not have the
+  // function yet, so the caller can fall back to asking day by day and this
+  // frontend can ship before or after the migration. Every other failure
+  // (not authorised, range too long, expired login) still throws as usual.
+  async function getShiftsRange(from, to, projectId) {
+    try {
+      return await q(sb.rpc("get_shifts_range", {
+        p_from: from, p_to: to, p_project_id: projectId || null
+      }));
+    } catch (e) {
+      if (isMissingFunction(e)) return null;
+      throw e;
+    }
   }
 
   // ---- forgotten punch-outs (0084) ---------------------------------------
@@ -1701,6 +1720,7 @@
     deleteDeliveryDriver: deleteDeliveryDriver,
 
     getShifts: getShifts,
+    getShiftsRange: getShiftsRange,
     getOpenShifts: getOpenShifts,
     closeShift: closeShift,
     reopenShift: reopenShift,
