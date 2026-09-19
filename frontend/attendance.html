@@ -6,7 +6,7 @@
   <title>Nexus — Attendance</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
-<body>
+<body class="att-readable">
 
   <header id="nav"></header>
 
@@ -20,20 +20,49 @@
     <!-- Two questions, two views. DAY answers "who is on site today"; MONTH
          answers "what do I pay this man" — one row per worker, his own days,
          his own hours, his own overtime. -->
-    <div class="filters">
+    <!-- THE BAR ANSWERS TWO QUESTIONS, ONE PER ROW.
+         Row 1 — WHEN am I looking at? Day or Month, and big arrows to step one
+         day (or month) at a time, because "the day before" is the move HR makes
+         all day and it used to mean opening a calendar every time. The date is
+         written out in the page's own type. "Today" is always one press away.
+         The browser's pop-up calendar is still here, behind "Pick A Date", for
+         the rare jump to somewhere far away — it is drawn by the browser in the
+         system font and no stylesheet can reach it, so it is the exception now,
+         not the way in.
+         Row 2 — NARROW IT DOWN: which site, which worker. -->
+    <div class="att-when">
       <span class="view-switch" id="view-switch">
         <a href="#" data-view="day">Day</a><a href="#" data-view="month">Month</a>
       </span>
-      <label id="lbl-date">Date <input type="date" id="f-date" /></label>
-      <label id="lbl-month" hidden>Month <input type="month" id="f-month" /></label>
+      <span class="stepper">
+        <button type="button" class="step-btn" id="step-prev" aria-label="Previous Day">&lsaquo;</button>
+        <span class="step-label" id="step-label" aria-live="polite"></span>
+        <button type="button" class="step-btn" id="step-next" aria-label="Next Day">&rsaquo;</button>
+      </span>
+      <button type="button" class="btn att-btn" id="step-today">Today</button>
+      <span class="pick-wrap">
+        <button type="button" class="btn att-btn" id="pick-btn">
+          <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none"
+               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="5" width="18" height="16" rx="2"></rect>
+            <path d="M3 10h18M8 3v4M16 3v4"></path>
+          </svg>
+          <span id="pick-word">Pick A Date</span>
+        </button>
+        <!-- the real inputs: still the source of the pop-up, no longer on show -->
+        <input type="date"  id="f-date"  class="pick-input" tabindex="-1" aria-hidden="true" />
+        <input type="month" id="f-month" class="pick-input" tabindex="-1" aria-hidden="true" />
+      </span>
+    </div>
+    <div class="filters att-narrow">
       <label>Site
-        <select id="f-site"><option value="">All sites</option></select>
+        <select id="f-site"><option value="">All Sites</option></select>
       </label>
       <label>Find
         <input type="search" id="f-find" class="filter-box" autocomplete="off"
                placeholder="Name, employee code or site…">
       </label>
-      <a id="punch-toggle" href="#">Show raw punches</a>
+      <a id="punch-toggle" href="#" class="btn att-btn att-push-right">Show Every Punch</a>
     </div>
 
     <div class="table-wrap">
@@ -51,18 +80,21 @@
     <!-- The badges in the last column used to be called "flags", which told
          nobody anything. They are spelled out here, and each badge repeats its
          line as a tooltip. Hidden until there are rows to explain. -->
-    <p class="table-legend" id="legend" hidden>
-      <span><span class="badge badge-anomaly">overlong</span> the shift ran longer than the
-        system's limit — usually a worker who forgot to punch out</span>
-      <span><span class="badge badge-anomaly">check</span> at least one punch that day could not
-        be location-verified — outside the site fence, weak GPS, or the site has no fence set</span>
-      <span><span class="badge badge-gray">on site</span> punched in, no punch out yet</span>
-      <span><span class="badge badge-anomaly">Closed By Office</span> in the raw punches: the
-        office entered this punch-out (Close Shift) — Remove retracts it</span>
-      <span><span class="badge badge-anomaly">Auto Closed</span> in the raw punches: no punch-out
-        by 6 AM next day, so the system closed the shift at 17:00 with no overtime — Remove it and
-        use Close Shift if real overtime was worked</span>
-    </p>
+    <div class="table-legend legend-list" id="legend" hidden>
+      <div class="legend-title">What The Labels Mean</div>
+      <span><span class="badge badge-anomaly">Forgot To Punch Out</span> the shift ran far too long
+        to be real, so its hours are not counted until the office corrects it</span>
+      <span><span class="badge badge-anomaly">Location Not Confirmed</span> at least one punch that
+        day could not be matched to the site — taken outside the site area, a weak GPS signal, or
+        the site has no GPS area set yet</span>
+      <span><span class="badge badge-gray">Still Working</span> punched in, no punch out yet</span>
+      <span><span class="badge badge-amended">Corrected By Office</span> the office set this day's
+        hours — click the worker's row to see their own times and the reason</span>
+      <span><span class="badge badge-anomaly">Closed By Office</span> the office entered this
+        punch-out for the worker</span>
+      <span><span class="badge badge-anomaly">Auto Closed</span> no punch-out by 6 AM the next day,
+        so the system closed the shift at 5:00 PM with no overtime</span>
+    </div>
 
     <div class="table-wrap" id="month-wrap" hidden>
       <table class="att-table">
@@ -80,12 +112,12 @@
     <p class="table-legend" id="month-note" hidden></p>
 
     <div id="punches-section" style="display:none">
-      <h2 class="section-title">Raw punches</h2>
+      <h2 class="section-title">Every Punch</h2>
       <div class="table-wrap">
         <table>
           <thead>
             <tr><th>Time</th><th>Worker</th><th>Type</th><th>Site</th>
-                <th class="num">Distance (m)</th><th>Verification</th></tr>
+                <th class="num">Distance From Site</th><th>Location Check</th></tr>
           </thead>
           <tbody id="punch-rows"></tbody>
         </table>
@@ -158,15 +190,72 @@
       return h + (h === 1 ? " Hour " : " Hours ") + m + (m === 1 ? " Min" : " Mins");
     }
 
+    // "2026-08-17" -> "Mon, 17 Aug 2026". HR reads dates this way, and the day
+    // of the week is a fact about the day they need (a Sunday is not a Tuesday).
+    var FULL_MONTHS = ["January", "February", "March", "April", "May", "June", "July",
+                       "August", "September", "October", "November", "December"];
+    // "2026-08" -> "August 2026"
+    function friendlyMonth(ym) {
+      var p = String(ym || "").split("-");
+      return (FULL_MONTHS[Number(p[1]) - 1] || "") + " " + (p[0] || "");
+    }
+    // one day / one month either way, done on the calendar, not on the clock
+    function shiftDay(iso, by) {
+      var d = new Date(iso + "T00:00:00Z");
+      d.setUTCDate(d.getUTCDate() + by);
+      return d.toISOString().slice(0, 10);
+    }
+    function shiftMonth(ym, by) {
+      var p = ym.split("-"), d = new Date(Date.UTC(Number(p[0]), Number(p[1]) - 1 + by, 1));
+      return d.toISOString().slice(0, 7);
+    }
+    var DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    var MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    function friendlyDate(iso) {
+      var d = new Date(String(iso).slice(0, 10) + "T00:00:00Z");
+      if (isNaN(d)) return String(iso || "");
+      return DAY_NAMES[d.getUTCDay()] + ", " + d.getUTCDate() + " " +
+             MONTH_NAMES[d.getUTCMonth()] + " " + d.getUTCFullYear();
+    }
+    function isSunday(iso) {
+      var d = new Date(String(iso).slice(0, 10) + "T00:00:00Z");
+      return !isNaN(d) && d.getUTCDay() === 0;
+    }
+
+    // 296868 -> "297 km", 84 -> "84 m". Nobody needs the metres of a 300 km miss.
+    function plainDistance(m) {
+      if (m === null || m === undefined || isNaN(Number(m))) return "";
+      m = Number(m);
+      if (m < 1000) return Math.round(m) + " m";
+      return (m < 10000 ? (m / 1000).toFixed(1) : Math.round(m / 1000)) + " km";
+    }
+
+    // The database's location-check codes, in words the office uses. The code
+    // stays the code everywhere it is COMPARED; this is only what gets printed.
+    var CHECK_WORDS = {
+      verified:         "Location Confirmed",
+      outside_geofence: "Outside Site Area",
+      low_accuracy:     "Weak GPS Signal",
+      no_gps:           "No GPS",
+      no_geofence:      "Site Area Not Set",
+      no_site:          "No Site Matched",
+      office_closed:    "Closed By Office",
+      auto_closed:      "Auto Closed"
+    };
+    function checkWords(v) { return CHECK_WORDS[v] || String(v || "").replace(/_/g, " "); }
+
     // One time in the day table. A time the office ruled carries a mark, so
     // this column can never be misread as "this is when he tapped" — the whole
     // point of 0092. The tap itself is one click away, in the drawer.
     function timeCell(ts, correctedTs) {
       if (!ts) return "—";
       var t = esc(Dash.klTime(ts));
+      // The tag is VISIBLE. It used to be a dotted underline explained only on
+      // hover — and the people reading this column do not hover, and a tablet
+      // cannot.
       return correctedTs
-        ? '<span class="t-office" title="Set by the office — the worker tapped a ' +
-          'different time. Open the worker to see both.">' + t + "</span>"
+        ? '<span class="t-office">' + t + '</span> <span class="t-office-tag" title="Set by the ' +
+          'office — the worker tapped a different time. Click the row to see both.">Office</span>'
         : t;
     }
 
@@ -202,6 +291,19 @@
       } catch (e) { /* no codes — see above */ }
     }
 
+    // THE WHOLE ROW IS THE BUTTON (owner decision 2026-09-20: a separate
+    // "Details" button was one thing too many on the row). Pressing anywhere on
+    // a worker's row opens what is behind it; a chevron at the start of the row
+    // and a hover tint are the hint that it opens. A control inside the row
+    // that has its own job (the Amend buttons, inputs) keeps that job.
+    function rowButton(ev) {
+      if (!ev.target.closest) return null;
+      var btn = ev.target.closest(".worker-btn");
+      if (btn) return btn;
+      if (ev.target.closest("button, a, input, select, textarea, label")) return null;
+      var tr = ev.target.closest("tr.shift-row");
+      return tr ? tr.querySelector(".worker-btn") : null;
+    }
     function codeTag(staffId) {
       var c = CODES[staffId];
       return c ? ' <span class="muted">' + esc(c) + "</span>" : "";
@@ -483,11 +585,42 @@
       var dateEl  = document.getElementById("f-date");
       var monthEl = document.getElementById("f-month");
       var siteEl  = document.getElementById("f-site");
-      dateEl.value = date;
-      monthEl.value = month;
-      dateEl.addEventListener("change", function () { setParam("date", this.value); });
-      monthEl.addEventListener("change", function () { setParam("month", this.value); });
+      var today = Dash.todayKL(), thisMonth = today.slice(0, 7);
+      dateEl.value = date;   dateEl.max = today;        // tomorrow has no attendance
+      monthEl.value = month; monthEl.max = thisMonth;
+      dateEl.addEventListener("change", function () { if (this.value) setParam("date", this.value); });
+      monthEl.addEventListener("change", function () { if (this.value) setParam("month", this.value); });
       siteEl.addEventListener("change", function () { setParam("site", this.value); });
+
+      // ---- the stepper: one day (or month) either way, and the way home ----
+      var isMonth = (view === "month");
+      var atEnd   = isMonth ? (month >= thisMonth) : (date >= today);
+      var unit    = isMonth ? "Month" : "Day";
+      document.getElementById("step-label").textContent = isMonth ? friendlyMonth(month) : friendlyDate(date);
+      var prevBtn = document.getElementById("step-prev"), nextBtn = document.getElementById("step-next");
+      prevBtn.setAttribute("aria-label", "Previous " + unit); prevBtn.title = "Previous " + unit;
+      nextBtn.setAttribute("aria-label", "Next " + unit);     nextBtn.title = "Next " + unit;
+      nextBtn.disabled = atEnd;                           // nothing to see in the future
+      prevBtn.addEventListener("click", function () {
+        if (isMonth) setParam("month", shiftMonth(month, -1)); else setParam("date", shiftDay(date, -1));
+      });
+      nextBtn.addEventListener("click", function () {
+        if (atEnd) return;
+        if (isMonth) setParam("month", shiftMonth(month, 1)); else setParam("date", shiftDay(date, 1));
+      });
+      var todayBtn = document.getElementById("step-today");
+      todayBtn.textContent = isMonth ? "This Month" : "Today";
+      todayBtn.disabled = isMonth ? (month === thisMonth) : (date === today);
+      todayBtn.addEventListener("click", function () {
+        if (isMonth) setParam("month", thisMonth); else setParam("date", today);
+      });
+      // the browser's own calendar, for the far jump. showPicker() opens it
+      // from our button; where a browser lacks it, focusing the input does.
+      document.getElementById("pick-word").textContent = isMonth ? "Pick A Month" : "Pick A Date";
+      document.getElementById("pick-btn").addEventListener("click", function () {
+        var el = isMonth ? monthEl : dateEl;
+        try { el.showPicker(); } catch (e) { el.focus(); el.click(); }
+      });
 
       // view switch
       var sw = document.getElementById("view-switch");
@@ -498,14 +631,12 @@
         ev.preventDefault();
         setParam("view", a.getAttribute("data-view") === "month" ? "month" : "");
       });
-      document.getElementById("lbl-date").hidden = (view === "month");
-      document.getElementById("lbl-month").hidden = (view !== "month");
       document.getElementById("punch-toggle").hidden = (view === "month");
       if (view === "month") {
         document.querySelector(".table-wrap").hidden = true;
         document.getElementById("month-wrap").hidden = false;
       }
-      document.getElementById("punch-toggle").textContent = showRaw ? "Hide raw punches" : "Show raw punches";
+      document.getElementById("punch-toggle").textContent = showRaw ? "Hide Every Punch" : "Show Every Punch";
       document.getElementById("punch-toggle").addEventListener("click", function (e) {
         e.preventDefault(); setParam("punches", showRaw ? "" : "1");
       });
@@ -537,7 +668,7 @@
         var shifts = results[0], missing = results[1], projects = results[2], punches = results[3];
 
         // site dropdown (active BP sites)
-        siteEl.innerHTML = '<option value="">All sites</option>' + projects.map(function (p) {
+        siteEl.innerHTML = '<option value="">All Sites</option>' + projects.map(function (p) {
           return '<option value="' + p.project_id + '"' + (p.project_id === site ? " selected" : "") + ">" +
                  p.project_code + " — " + p.project_name + "</option>";
         }).join("");
@@ -561,7 +692,7 @@
         // checked out. That detail is the answer to "why is this flagged",
         // which is the only reason anyone opens this page twice.
         if (!shifts.length) {
-          tbody.innerHTML = '<tr><td colspan="7" class="empty">No punches on ' + date +
+          tbody.innerHTML = '<tr><td colspan="7" class="empty">No punches on ' + esc(friendlyDate(date)) +
             ". The punch app pilot hasn't started at the sites yet.</td></tr>";
         } else {
           tbody.innerHTML = shifts.map(function (s, i) {
@@ -569,14 +700,14 @@
             var flags = [];
             if (s.overlong_shift) {
               flags.push('<span class="badge badge-anomaly" title="The shift ran longer than the ' +
-                         'system\'s limit — usually a worker who forgot to punch out.">overlong</span>');
+                         'system\'s limit — usually a worker who forgot to punch out.">Forgot To Punch Out</span>');
             } else if (s.has_anomaly) {
               flags.push('<span class="badge badge-anomaly" title="At least one punch that day ' +
                          'could not be location-verified — outside the site fence, weak GPS, or ' +
-                         'the site has no fence set.">check</span>');
+                         'the site has no fence set.">Location Not Confirmed</span>');
             }
             if (s.in_count && !s.out_count) {
-              flags.push('<span class="badge badge-gray" title="Punched in, no punch out yet.">on site</span>');
+              flags.push('<span class="badge badge-gray" title="Punched in, no punch out yet.">Still Working</span>');
             }
             // The office overruled the clock for this day. It sits with the
             // other badges because this column is "what should I know about
@@ -587,15 +718,16 @@
                 esc("The office corrected this day's hours" +
                     (s.corrected_by_name ? " (" + s.corrected_by_name + ")" : "") +
                     (s.correction_reason ? " — " + s.correction_reason : "") +
-                    ". Open the worker for the tapped times and the reason.") +
-                '">amended</span>');
+                    ". Click the row for the tapped times and the reason.") +
+                '">Corrected By Office</span>');
             }
             var h = hoursOf(s);
             return '<tr class="shift-row" data-i="' + i + '" data-find="' + esc(findKey(s)) + '">' +
               '<td><button type="button" class="worker-btn" data-i="' + i + '" ' +
                    'aria-expanded="false" aria-controls="d' + i + '">' +
                  '<span class="caret" aria-hidden="true"></span>' +
-                 "<strong>" + esc(s.full_name) + "</strong>" + codeTag(s.staff_id) + "</button></td>" +
+                 '<span class="who-line"><strong>' + esc(s.full_name) + "</strong>" + codeTag(s.staff_id) +
+                 "</span></button></td>" +
               "<td>" + esc(s.project_name || "—") + "</td>" +
               // The IN/OUT columns show the time the day is PAID from, which on
               // an amended day is the office's, not the worker's. It is marked
@@ -674,16 +806,17 @@
           var vCls = v === "verified" ? "verified" : "anomaly";
           var lat = p.gps_lat !== undefined ? p.gps_lat : p.gps_latitude;
           var lng = p.gps_lng !== undefined ? p.gps_lng : p.gps_longitude;
-          var where = (lat !== null && lat !== undefined && lng !== null && lng !== undefined)
-            ? Number(lat).toFixed(5) + ", " + Number(lng).toFixed(5)
-            : "no location recorded";
-          var dist = (p.distance_m === null || p.distance_m === undefined)
-            ? "" : " · " + Math.round(p.distance_m) + " m from the site";
+          // The coordinates are not something the office reads; they stay on
+          // the line as a tooltip for whoever is chasing a location dispute.
+          var hasLoc = lat !== null && lat !== undefined && lng !== null && lng !== undefined;
+          var coords = hasLoc ? Number(lat).toFixed(5) + ", " + Number(lng).toFixed(5) : "";
+          var d = plainDistance(p.distance_m);
+          var where = d ? d + " from the site" : (hasLoc ? "location recorded" : "no location recorded");
           return '<li><span class="pl-type">' + esc((p.punch_type || "").toUpperCase()) + "</span>" +
                  '<span class="pl-time">' + Dash.klTime(p.punched_at) + "</span>" +
-                 '<span class="badge badge-' + vCls + '">' + esc(v.replace(/_/g, " ")) + "</span> " +
+                 '<span class="badge badge-' + vCls + '">' + esc(checkWords(v)) + "</span> " +
                  provenance(p) +
-                 '<span class="pl-where">' + esc(where) + esc(dist) +
+                 '<span class="pl-where"' + (coords ? ' title="GPS ' + esc(coords) + '"' : "") + ">" + esc(where) +
                    (p.entry_note ? " · note: " + esc(p.entry_note) : "") + "</span></li>";
         }
 
@@ -699,11 +832,11 @@
             '<span class="pl-time">' +
               esc(ruled ? Dash.klTime(ruled) : (tapped ? Dash.klTime(tapped) : "—")) + "</span>" +
             (ruled
-              ? '<span class="badge badge-amended">office set</span>' +
+              ? '<span class="badge badge-amended">Set By Office</span>' +
                 '<span class="pl-where">' +
                   (tapped ? "the worker tapped " + esc(Dash.klTime(tapped))
                           : "the worker never tapped this end") + "</span>"
-              : '<span class="badge badge-verified">worker</span>' +
+              : '<span class="badge badge-verified">Worker</span>' +
                 '<span class="pl-where">left as tapped</span>') +
           "</li>";
         }
@@ -793,7 +926,7 @@
         }
 
         tbody.addEventListener("click", async function (ev) {
-          var btn = ev.target.closest ? ev.target.closest(".worker-btn") : null;
+          var btn = rowButton(ev);
           if (!btn) return;
           var i = btn.getAttribute("data-i");
           var row = document.getElementById("d" + i);
@@ -908,8 +1041,8 @@
                   "<td>" + (p.full_name || "") + "</td>" +
                   "<td>" + (p.punch_type || "").toUpperCase() + "</td>" +
                   "<td>" + (p.project_name || "—") + "</td>" +
-                  '<td class="num">' + (p.distance_m === null || p.distance_m === undefined ? "—" : Math.round(p.distance_m)) + "</td>" +
-                  '<td><span class="badge badge-' + vCls + '">' + UI.label(p.verification_status || "") + "</span>" +
+                  '<td class="num">' + (plainDistance(p.distance_m) || "—") + "</td>" +
+                  '<td><span class="badge badge-' + vCls + '">' + esc(checkWords(p.verification_status)) + "</span>" +
                   (canEdit && (p.verification_status === "office_closed" || p.verification_status === "auto_closed")
                     ? ' <button type="button" data-reopen="' + p.punch_id + '">Remove</button>'
                     : "") +
@@ -1012,8 +1145,8 @@
       }).map(function (r) {
         var h = hoursOf(r);
         var counted = !r.overlong_shift && h;
-        return "<tr>" +
-          "<td>" + esc(r.work_date) + "</td>" +
+        return "<tr" + (isSunday(r.work_date) ? ' class="is-sunday"' : "") + ">" +
+          "<td>" + esc(friendlyDate(r.work_date)) + "</td>" +
           // the times the day is PAID from, marked when the office set them —
           // the same two the day view shows, so the month never argues with it
           "<td>" + timeCell(effIn(r),  r.corrected_in_at)  + "</td>" +
@@ -1021,13 +1154,13 @@
           '<td class="num">' + (counted ? hm(h.normal) : "—") + "</td>" +
           '<td class="num">' + (counted ? (h.ot > 0 ? '<span class="ot-on">' + hm(h.ot) + "</span>" : hm(0)) : "—") + "</td>" +
           "<td>" + ([
-              r.overlong_shift ? '<span class="badge badge-anomaly">overlong</span>'
-                : (!effOut(r) ? '<span class="badge badge-gray">no punch out</span>'
-                : (r.has_anomaly ? '<span class="badge badge-anomaly">check</span>' : "")),
+              r.overlong_shift ? '<span class="badge badge-anomaly">Forgot To Punch Out</span>'
+                : (!effOut(r) ? '<span class="badge badge-gray">No Punch Out</span>'
+                : (r.has_anomaly ? '<span class="badge badge-anomaly">Location Not Confirmed</span>' : "")),
               r.has_correction ? '<span class="badge badge-amended" title="' +
                 esc("The office corrected this day" +
                     (r.correction_reason ? " — " + r.correction_reason : "") + ".") +
-                '">amended</span>' : ""
+                '">Corrected By Office</span>' : ""
             ].filter(Boolean).join(" ") || "—") + "</td>" +
         "</tr>";
       }).join("");
@@ -1059,14 +1192,15 @@
         var att = [];
         if (w.broken) att.push('<span class="badge badge-anomaly" title="Day(s) with a shift ' +
           'longer than the system allows — almost always a missing punch out. Not counted ' +
-          'in this worker\'s totals until corrected.">' + w.broken + " to fix</span>");
+          'in this worker\'s totals until corrected.">' + w.broken + " To Fix</span>");
         if (w.open) att.push('<span class="badge badge-gray" title="Day(s) with a punch in and ' +
-          'no punch out. No hours to count yet.">' + w.open + " open</span>");
+          'no punch out. No hours to count yet.">' + w.open + " Still Open</span>");
         return '<tr class="shift-row" data-i="' + i + '" data-find="' +
                  esc(findKey(w, Object.keys(w.sites).join(" "))) + '">' +
           '<td><button type="button" class="worker-btn" data-i="' + i + '" aria-expanded="false">' +
-            '<span class="caret" aria-hidden="true"></span><strong>' + esc(w.name) + "</strong>" +
-            codeTag(w.staff_id) + "</button></td>" +
+            '<span class="caret" aria-hidden="true"></span>' +
+            '<span class="who-line"><strong>' + esc(w.name) + "</strong>" + codeTag(w.staff_id) + "</span>" +
+            "</button></td>" +
           "<td>" + esc(Object.keys(w.sites).join(", ") || "—") + "</td>" +
           '<td class="num">' + w.days + "</td>" +
           '<td class="num">' + hm(w.normal) + "</td>" +
@@ -1079,12 +1213,12 @@
       note.innerHTML = '<span class="legend-prose">Days a worker was on site with a completed punch out. ' +
         "Overtime is counted per day, by the company hours rule, never from the " +
         "monthly total — a 12-hour Monday and a 4-hour Tuesday is 4 hours of overtime, not none. " +
-        "Days marked <em>to fix</em> or <em>open</em> are left out of the totals.</span>";
+        "Days marked <strong>To Fix</strong> or <strong>Still Open</strong> are left out of the totals.</span>";
 
       if (document.getElementById("f-find").value) applyFind("month-rows", 6);
 
       tbody.addEventListener("click", function (ev) {
-        var btn = ev.target.closest ? ev.target.closest(".worker-btn") : null;
+        var btn = rowButton(ev);
         if (!btn) return;
         var i = btn.getAttribute("data-i");
         var row = document.getElementById("m" + i);

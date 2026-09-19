@@ -3127,3 +3127,143 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
     font-variant-numeric: tabular-nums;
   }
 }
+
+/* ==========================================================================
+   ATTENDANCE — READABLE FOR THE PEOPLE WHO PAY FROM IT  (body.att-readable)
+   --------------------------------------------------------------------------
+   HR works from this page, and the first thing wrong with it for them was the
+   type: 14px body, 12px explanations, and the explanations in --ink-3
+   (#8d9cb4), which on this pale ground is about 2.6:1 — well under the 4.5:1
+   that small text needs. The words that explain the page were the hardest
+   words on it to read.
+
+   Everything here is scoped to body.att-readable, so no other page moves. The
+   LAYOUT does not change either — same table, same columns, same drawer — so
+   there is nothing for anybody to relearn. Only size, contrast and wording.
+   If this reads well, the same class can be opted into page by page.
+   ========================================================================== */
+.att-readable .page-caption { font-size: 15px; color: var(--ink-2); }
+.att-readable .filters { font-size: 15px; row-gap: var(--sp-3); }
+.att-readable .filters label { color: var(--ink); }
+.att-readable .filters select,
+.att-readable .filters input[type="date"],
+.att-readable .filters input[type="month"],
+.att-readable .filters .filter-box { font-size: 15px; }
+.att-readable .filters a { font-size: 15px; }
+.att-readable .view-switch a { font-size: 15px; }
+
+.att-readable .att-table th { font-size: 13px; color: var(--ink-2); }
+.att-readable .att-table td { font-size: 15.5px; padding-top: 12px; padding-bottom: 12px; }
+/* Every table cell on this site is white-space:nowrap, which was fine at 13.5px
+   with one-word badges. With readable type and badges that say what they mean,
+   the table outgrew the page and the Attention column slid off the right edge.
+   The two columns made of WORDS may wrap; the columns made of numbers stay put. */
+.att-readable .att-table td:nth-child(2),
+.att-readable .att-table td:last-child { white-space: normal; }
+.att-readable .att-table td:last-child .badge { margin: 2px 1px; }
+.att-readable .att-table > tbody > tr > td:nth-child(2) { min-width: 190px; }
+.att-readable .att-table .empty { font-size: 16px; color: var(--ink-2); }
+/* employee codes were --ink-3 at 12px — present, but not readable */
+.att-readable .att-table .muted { font-size: 13.5px; color: var(--ink-2); }
+
+.att-readable .badge { font-size: 13px; padding: 3px 11px; }
+
+/* THE WHOLE ROW IS THE BUTTON — press anywhere on a worker's row to open it.
+   The hint that it opens: a chevron at the start (bigger and darker than the
+   5px --ink-3 triangle it used to be), a pointer, and a tint under the mouse. */
+.att-readable tr.shift-row { cursor: pointer; }
+.att-readable tr.shift-row:hover { background: rgba(37, 99, 235, 0.06); }
+.att-readable .worker-btn { gap: 10px; align-items: center; }
+.att-readable .worker-btn .caret {
+  border-left: 7px solid var(--ink-2);
+  border-top: 5px solid transparent; border-bottom: 5px solid transparent;
+}
+.att-readable tr.shift-row:hover .worker-btn .caret { border-left-color: var(--brand-ink); }
+/* name over code: on ONE line the Worker column grew wide enough to push the
+   Attention column off the page again */
+.who-line { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 1px; white-space: nowrap; }
+.att-readable .att-table th, .att-readable .att-table td { padding-left: 12px; padding-right: 12px; }
+
+/* a time the office set — a tag you can SEE, not an underline you must hover */
+.att-readable .t-office { border-bottom: 0; cursor: default; }
+.t-office-tag {
+  display: block; width: fit-content; margin: 3px auto 0; padding: 1px 8px; border-radius: 999px;
+  font-size: 11.5px; font-weight: 700; letter-spacing: 0.02em;
+  background: #dbeafe; color: #1e40af; cursor: help;
+}
+
+/* the drawer */
+.att-readable .detail-sum { font-size: 16px; }
+.att-readable .detail-note { font-size: 14.5px; color: var(--ink-2); }
+.att-readable .punch-lines li { font-size: 15.5px; padding: 8px 0; }
+.att-readable .pl-type { font-size: 13px; flex-basis: 48px; }
+.att-readable .pl-time { flex-basis: 96px; }
+.att-readable .pl-where { font-size: 14.5px; color: var(--ink-2); }
+.att-readable .month-days { font-size: 15.5px; }
+.att-readable .month-days th { font-size: 13px; }
+/* the drill-down's In column inherited the outer table's left-aligned 2nd column;
+   centred like Out, so a time and its Office tag line up */
+.att-readable .month-days th:nth-child(2), .att-readable .month-days td:nth-child(2) { text-align: center; min-width: 0; }
+.att-readable .month-days th, .att-readable .month-days td { padding: 9px var(--sp-2); }
+/* Sundays stand out in the month drill-down: they are not an ordinary day */
+.att-readable .month-days tr.is-sunday td:first-child { color: var(--danger-ink); font-weight: 600; }
+
+/* the legend: one label per line, in type you can read, right under the table */
+.att-readable .table-legend { font-size: 14.5px; color: var(--ink-2); }
+.table-legend.legend-list { display: block; margin-top: var(--sp-4); }
+.legend-title {
+  font-size: 12.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--ink-2); margin: 0 0 var(--sp-2);
+}
+.table-legend.legend-list > span {
+  display: flex; align-items: baseline; gap: 10px; margin: 0 0 8px; line-height: 1.5;
+}
+.table-legend.legend-list > span > .badge { flex: 0 0 auto; }
+
+/* ---- attendance: the two-row bar (WHEN, then NARROW IT DOWN) -------------
+   Row 1 is .att-when — Day/Month, a stepper with arrows big enough to hit
+   without aiming, the date written out in the page's own type, the way back
+   to today, and the browser's calendar behind one plain button.
+   Row 2 is the existing .filters row, now just Site + Find. */
+.att-when {
+  display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3);
+  margin: 0 0 var(--sp-3);
+}
+.stepper {
+  display: inline-flex; align-items: center; gap: 2px; padding: 3px;
+  background: rgba(255, 255, 255, 0.78); border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+}
+.step-btn {
+  width: 42px; height: 42px; flex: 0 0 auto; padding: 0 0 4px; margin: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 30px; line-height: 1; color: var(--ink);
+  background: transparent; border: 0; border-radius: 50%; cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.step-btn:hover:not(:disabled), .step-btn:focus-visible { background: rgba(37, 99, 235, 0.12); color: var(--brand-ink); }
+.step-btn:disabled { opacity: 0.28; cursor: default; }
+.step-label {
+  min-width: 215px; padding: 0 6px; text-align: center;
+  font-size: 18px; font-weight: 600; color: var(--ink); white-space: nowrap;
+}
+/* buttons in this bar are sized to be read and hit, not the site's 12.5px */
+.att-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 15px; padding: 10px 18px; color: var(--ink); text-decoration: none;
+}
+.att-btn:disabled { opacity: 0.4; cursor: default; }
+.att-readable .filters a.att-btn { color: var(--ink); font-size: 15px; }
+.att-readable .filters a.att-btn:hover { text-decoration: none; }
+.att-push-right { margin-left: auto; }
+.att-readable .view-switch a { padding: 8px 18px; }
+
+/* the real date / month inputs: still what opens the pop-up, no longer seen.
+   Kept rendered (not display:none) so showPicker() has something to anchor to. */
+.pick-wrap { position: relative; display: inline-flex; }
+.pick-input {
+  position: absolute; left: 0; bottom: 0; width: 1px; height: 1px;
+  opacity: 0; pointer-events: none; border: 0; padding: 0; margin: 0;
+}
+.att-narrow select { width: 300px; max-width: 100%; }
+.att-readable .att-narrow .filter-box { width: 300px; }
