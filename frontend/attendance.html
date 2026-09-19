@@ -20,12 +20,41 @@
     <!-- Two questions, two views. DAY answers "who is on site today"; MONTH
          answers "what do I pay this man" — one row per worker, his own days,
          his own hours, his own overtime. -->
-    <div class="filters">
+    <!-- THE BAR ANSWERS TWO QUESTIONS, ONE PER ROW.
+         Row 1 — WHEN am I looking at? Day or Month, and big arrows to step one
+         day (or month) at a time, because "the day before" is the move HR makes
+         all day and it used to mean opening a calendar every time. The date is
+         written out in the page's own type. "Today" is always one press away.
+         The browser's pop-up calendar is still here, behind "Pick A Date", for
+         the rare jump to somewhere far away — it is drawn by the browser in the
+         system font and no stylesheet can reach it, so it is the exception now,
+         not the way in.
+         Row 2 — NARROW IT DOWN: which site, which worker. -->
+    <div class="att-when">
       <span class="view-switch" id="view-switch">
         <a href="#" data-view="day">Day</a><a href="#" data-view="month">Month</a>
       </span>
-      <label id="lbl-date">Date <input type="date" id="f-date" /></label>
-      <label id="lbl-month" hidden>Month <input type="month" id="f-month" /></label>
+      <span class="stepper">
+        <button type="button" class="step-btn" id="step-prev" aria-label="Previous Day">&lsaquo;</button>
+        <span class="step-label" id="step-label" aria-live="polite"></span>
+        <button type="button" class="step-btn" id="step-next" aria-label="Next Day">&rsaquo;</button>
+      </span>
+      <button type="button" class="btn att-btn" id="step-today">Today</button>
+      <span class="pick-wrap">
+        <button type="button" class="btn att-btn" id="pick-btn">
+          <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none"
+               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="5" width="18" height="16" rx="2"></rect>
+            <path d="M3 10h18M8 3v4M16 3v4"></path>
+          </svg>
+          <span id="pick-word">Pick A Date</span>
+        </button>
+        <!-- the real inputs: still the source of the pop-up, no longer on show -->
+        <input type="date"  id="f-date"  class="pick-input" tabindex="-1" aria-hidden="true" />
+        <input type="month" id="f-month" class="pick-input" tabindex="-1" aria-hidden="true" />
+      </span>
+    </div>
+    <div class="filters att-narrow">
       <label>Site
         <select id="f-site"><option value="">All Sites</option></select>
       </label>
@@ -33,7 +62,7 @@
         <input type="search" id="f-find" class="filter-box" autocomplete="off"
                placeholder="Name, employee code or site…">
       </label>
-      <a id="punch-toggle" href="#">Show Every Punch</a>
+      <a id="punch-toggle" href="#" class="btn att-btn att-push-right">Show Every Punch</a>
     </div>
 
     <div class="table-wrap">
@@ -163,6 +192,23 @@
 
     // "2026-08-17" -> "Mon, 17 Aug 2026". HR reads dates this way, and the day
     // of the week is a fact about the day they need (a Sunday is not a Tuesday).
+    var FULL_MONTHS = ["January", "February", "March", "April", "May", "June", "July",
+                       "August", "September", "October", "November", "December"];
+    // "2026-08" -> "August 2026"
+    function friendlyMonth(ym) {
+      var p = String(ym || "").split("-");
+      return (FULL_MONTHS[Number(p[1]) - 1] || "") + " " + (p[0] || "");
+    }
+    // one day / one month either way, done on the calendar, not on the clock
+    function shiftDay(iso, by) {
+      var d = new Date(iso + "T00:00:00Z");
+      d.setUTCDate(d.getUTCDate() + by);
+      return d.toISOString().slice(0, 10);
+    }
+    function shiftMonth(ym, by) {
+      var p = ym.split("-"), d = new Date(Date.UTC(Number(p[0]), Number(p[1]) - 1 + by, 1));
+      return d.toISOString().slice(0, 7);
+    }
     var DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     var MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     function friendlyDate(iso) {
@@ -539,11 +585,42 @@
       var dateEl  = document.getElementById("f-date");
       var monthEl = document.getElementById("f-month");
       var siteEl  = document.getElementById("f-site");
-      dateEl.value = date;
-      monthEl.value = month;
-      dateEl.addEventListener("change", function () { setParam("date", this.value); });
-      monthEl.addEventListener("change", function () { setParam("month", this.value); });
+      var today = Dash.todayKL(), thisMonth = today.slice(0, 7);
+      dateEl.value = date;   dateEl.max = today;        // tomorrow has no attendance
+      monthEl.value = month; monthEl.max = thisMonth;
+      dateEl.addEventListener("change", function () { if (this.value) setParam("date", this.value); });
+      monthEl.addEventListener("change", function () { if (this.value) setParam("month", this.value); });
       siteEl.addEventListener("change", function () { setParam("site", this.value); });
+
+      // ---- the stepper: one day (or month) either way, and the way home ----
+      var isMonth = (view === "month");
+      var atEnd   = isMonth ? (month >= thisMonth) : (date >= today);
+      var unit    = isMonth ? "Month" : "Day";
+      document.getElementById("step-label").textContent = isMonth ? friendlyMonth(month) : friendlyDate(date);
+      var prevBtn = document.getElementById("step-prev"), nextBtn = document.getElementById("step-next");
+      prevBtn.setAttribute("aria-label", "Previous " + unit); prevBtn.title = "Previous " + unit;
+      nextBtn.setAttribute("aria-label", "Next " + unit);     nextBtn.title = "Next " + unit;
+      nextBtn.disabled = atEnd;                           // nothing to see in the future
+      prevBtn.addEventListener("click", function () {
+        if (isMonth) setParam("month", shiftMonth(month, -1)); else setParam("date", shiftDay(date, -1));
+      });
+      nextBtn.addEventListener("click", function () {
+        if (atEnd) return;
+        if (isMonth) setParam("month", shiftMonth(month, 1)); else setParam("date", shiftDay(date, 1));
+      });
+      var todayBtn = document.getElementById("step-today");
+      todayBtn.textContent = isMonth ? "This Month" : "Today";
+      todayBtn.disabled = isMonth ? (month === thisMonth) : (date === today);
+      todayBtn.addEventListener("click", function () {
+        if (isMonth) setParam("month", thisMonth); else setParam("date", today);
+      });
+      // the browser's own calendar, for the far jump. showPicker() opens it
+      // from our button; where a browser lacks it, focusing the input does.
+      document.getElementById("pick-word").textContent = isMonth ? "Pick A Month" : "Pick A Date";
+      document.getElementById("pick-btn").addEventListener("click", function () {
+        var el = isMonth ? monthEl : dateEl;
+        try { el.showPicker(); } catch (e) { el.focus(); el.click(); }
+      });
 
       // view switch
       var sw = document.getElementById("view-switch");
@@ -554,8 +631,6 @@
         ev.preventDefault();
         setParam("view", a.getAttribute("data-view") === "month" ? "month" : "");
       });
-      document.getElementById("lbl-date").hidden = (view === "month");
-      document.getElementById("lbl-month").hidden = (view !== "month");
       document.getElementById("punch-toggle").hidden = (view === "month");
       if (view === "month") {
         document.querySelector(".table-wrap").hidden = true;
@@ -593,7 +668,7 @@
         var shifts = results[0], missing = results[1], projects = results[2], punches = results[3];
 
         // site dropdown (active BP sites)
-        siteEl.innerHTML = '<option value="">All sites</option>' + projects.map(function (p) {
+        siteEl.innerHTML = '<option value="">All Sites</option>' + projects.map(function (p) {
           return '<option value="' + p.project_id + '"' + (p.project_id === site ? " selected" : "") + ">" +
                  p.project_code + " — " + p.project_name + "</option>";
         }).join("");

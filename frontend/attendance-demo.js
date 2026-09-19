@@ -205,7 +205,7 @@
     b.innerHTML = "<strong>Demo data</strong> — this page is showing an invented crew so the " +
       "layout can be reviewed before the punch pilot starts. Nothing here is real and nothing " +
       "was written to the database. Drop <code>?demo=1</code> from the URL for the real page.";
-    main.insertBefore(b, main.querySelector(".filters"));
+    main.insertBefore(b, main.querySelector(".att-when, .filters"));
   });
 
   console.log("[demo] attendance reads replaced with fake data. Nothing hits the database.");
