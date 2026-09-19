@@ -314,6 +314,9 @@
     var OS = { list: null, openFor: null, err: "", okMsg: "" };
 
     async function loadOpenShifts() {
+      // closing a shift is an attendance.edit act, and the database refuses the
+      // list to anyone else — so a view-only login is not asked at all
+      if (!Dash.can("attendance.edit")) { OS.list = null; renderOpenShifts(); return; }
       try { OS.list = await Dash.getOpenShifts(); }
       catch (e) { OS.list = null; }        // DB said no — section stays absent
       renderOpenShifts();
@@ -517,7 +520,16 @@
       try {
         var results = await Promise.all([
           Dash.getShifts(date, site || null),
-          Dash.getSitesMissingGeofence(),
+          // The geofence to-do list is for whoever may SET coordinates
+          // (attendance.manage), and the database refuses it to anyone else.
+          // It used to be asked of everybody, inside this all-or-nothing batch —
+          // so a login that may only VIEW attendance (Project Manager, Site
+          // Supervisor) got "Could not load: not_authorised" and no page at all,
+          // over a banner they were never going to be shown. Ask only those who
+          // may use it, and never let it take the day's table down with it.
+          Dash.can("attendance.manage")
+            ? Dash.getSitesMissingGeofence().catch(function () { return []; })
+            : Promise.resolve([]),
           Dash.getProjectPulse(),
           showRaw ? Dash.getRecentPunches(date, site || null) : Promise.resolve(null),
           loadCodes()
@@ -1064,7 +1076,7 @@
       }).join("");
 
       note.hidden = false;
-      note.innerHTML = "<span>Days a worker was on site with a completed punch out. " +
+      note.innerHTML = '<span class="legend-prose">Days a worker was on site with a completed punch out. ' +
         "Overtime is counted per day, by the company hours rule, never from the " +
         "monthly total — a 12-hour Monday and a 4-hour Tuesday is 4 hours of overtime, not none. " +
         "Days marked <em>to fix</em> or <em>open</em> are left out of the totals.</span>";
