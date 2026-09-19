@@ -5,6 +5,21 @@ contract for replacing the **Close Shift** button with **Edit Hours** on the
 attendance page. Until that swap ships, nothing breaks: `close_shift` and
 `reopen_shift` still work exactly as before.
 
+## Where the page stands (updated 2026-09-19)
+
+| Piece | State |
+|---|---|
+| Amend / remove a day's hours, with the reason beside it | **Done** — `d142a71`, 2026-08-17 |
+| Hours bound to the server's `working_minutes` / `ot_minutes`; the page's own copy of the rule (`splitShift` + the shift/lunch constants) deleted | **Done** — 2026-09-19. Checked against the server on all 26 day-rows on record first: every one agreed to the minute. |
+| Rows keyed on `staff_id`, not on the worker's name (month view grouping + drawer punch matching) | **Done** — 2026-09-19. The rows always carried `staff_id`; the old "no id in the payload" comments were wrong. |
+| Provenance badges in the punch drawer (`punched_by`, `entered_by_name`, `entry_note`, `synced_late`, `wrong_site`) | **Done** — 2026-09-19 |
+| Find box (name / employee code / site) | **Done** — 2026-09-19 |
+| Close Shift banner replaced by Edit Hours; `close_shift` retired | **Outstanding** — waits until the office has used Edit Hours for real. The cleanup migration that drops `close_shift` follows it. |
+| Month view in ONE call instead of one call per day | **Outstanding** — needs a `get_shifts_range` database function (a migration; not written yet). Only `fetchMonth()` changes when it lands. |
+
+The page now does **no hours arithmetic**. A rule change is one migration to
+`fn_shift_minutes`; nothing here needs editing.
+
 ## The model (owner-decided)
 
 Worker punch rows are **never edited or deleted** — "else they would say we

@@ -58,6 +58,19 @@
 
   function dayOf(iso) { return new Date(iso + "T00:00:00+08:00").getDay(); }
 
+  // THE DEMO'S STAND-IN FOR THE DATABASE. The real page does no hours
+  // arithmetic — every real row arrives priced by fn_shift_minutes (0091) as
+  // working_minutes / ot_minutes. Fake rows have no database behind them, so
+  // this prices them the way the server would, for the demo only. It is NOT a
+  // second copy of the rule for the app: nothing outside ?demo=1 can reach it.
+  function fakeServerPrice(inHours, outHours) {
+    var start = Math.round(inHours * 60), end = Math.round(outHours * 60);
+    if (end - start > 16 * 60) return null;                  // over the limit: unpriced
+    var normal = Math.max(0, Math.min(end, 17 * 60) - Math.max(start, 8 * 60 + 30));
+    if (normal > 6 * 60) normal -= 60;
+    return { working: normal, ot: Math.max(0, end - Math.max(start, 17 * 60)) };
+  }
+
   // One worker's day. Sundays off, and a handful of scripted problem days so
   // every badge on the page has something to point at.
   function shiftFor(w, iso) {
@@ -70,7 +83,11 @@
     var outAt = inAt + len;
 
     var siteRow = SITES[w.site];
+    var price = fakeServerPrice(inAt, outAt);
     var row = {
+      staff_id: "demo-" + w.name,      // real rows carry a uuid; the page keys on it
+      working_minutes: price ? price.working : null,
+      ot_minutes: price ? price.ot : null,
       full_name: w.name,
       project_id: siteRow.id,
       project_name: siteRow.name,
@@ -87,18 +104,21 @@
     // forgot to punch out — the shift runs on and the day cannot be counted
     if (dom === 12 && w.name.indexOf("Hulk") === 0) {
       row.last_out_at = null; row.out_count = 0; row.hours_on_site = null;
+      row.working_minutes = null; row.ot_minutes = null;      // open = unpriced
     }
     // punched out the next morning: the overlong flag's whole reason to exist
     if (dom === 19 && w.name.indexOf("Thor") === 0) {
       row.last_out_at = stamp(iso, 24 + 9.4);
       row.hours_on_site = Math.round((24 + 9.4 - inAt) * 100) / 100;
       row.overlong_shift = true;
+      row.working_minutes = null; row.ot_minutes = null;      // over the limit = unpriced
     }
     // punched from outside the fence
     if (dom % 7 === 3 && w.site === 2) row.has_anomaly = true;
     // still on site right now (today only)
     if (iso === Dash.todayKL() && w.name.indexOf("Falcon") === 0) {
       row.last_out_at = null; row.out_count = 0; row.hours_on_site = null;
+      row.working_minutes = null; row.ot_minutes = null;
     }
     return row;
   }
@@ -107,6 +127,10 @@
     var out = [];
     var far = row.has_anomaly;
     out.push({
+      staff_id: row.staff_id, punched_by: "worker",
+      // one late-synced tap and one wrong-site tap, so both badges have a home
+      synced_late: row.full_name.indexOf("Hawkeye") === 0,
+      wrong_site: far, detected_project_code: far ? SITES[0].code : null,
       punched_at: row.first_in_at, full_name: row.full_name, punch_type: "in",
       project_name: row.project_name,
       gps_lat: 3.3215 + wobble(row.full_name, row.work_date, 0.004),
@@ -115,7 +139,15 @@
       verification_status: far ? "outside_geofence" : "verified"
     });
     if (row.last_out_at) {
+      // Black Widow's punch-outs are office-entered, Thor's are auto-closed —
+      // the two kinds of punch the worker did NOT tap
+      var office = row.full_name.indexOf("Black Widow") === 0;
+      var system = row.full_name.indexOf("Thor") === 0 && !row.overlong_shift;
       out.push({
+        staff_id: row.staff_id,
+        punched_by: office ? "office" : system ? "system" : "worker",
+        entered_by_name: office ? "Nick Fury (demo)" : null,
+        entry_note: office ? "forgot phone, supervisor confirmed" : null,
         punched_at: row.last_out_at, full_name: row.full_name, punch_type: "out",
         project_name: row.project_name,
         gps_lat: 3.3216 + wobble(row.full_name, row.work_date + "o", 0.004),
@@ -142,6 +174,18 @@
   Dash.getShifts = async function (date, projectId) {
     return shiftsOn(date, projectId || null);
   };
+  // The month view reads a whole range in one call when it can. Left alone,
+  // that call would go to the REAL database and the demo month would show real
+  // workers. Answer it from the same fake crew instead, day by day.
+  Dash.getShiftsRange = async function (from, to, projectId) {
+    var out = [], d = new Date(from + "T00:00:00Z"), end = new Date(to + "T00:00:00Z");
+    for (; d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
+      out = out.concat(shiftsOn(d.toISOString().slice(0, 10), projectId || null));
+    }
+    return out;
+  };
+  // the codes lookup is a real read too — the demo crew has no codes
+  Dash.getManpowerBySite = async function () { return []; };
   Dash.getRecentPunches = async function (date, projectId) {
     var out = [];
     shiftsOn(date, projectId || null).forEach(function (r) { out = out.concat(punchesFor(r)); });
