@@ -725,7 +725,11 @@
         // the map needs people + machines; neither should be able to blank the
         // page, so a failure there degrades to empty lists, not a dead map
         var pulseP = Dash.getProjectPulse();
-        var leaveP = Dash.getLeaveRequests(Dash.currentYearKL(), "pending").catch(function () { return null; });
+        // only for a login that may see leave — asking everybody meant a refused
+        // call (HTTP 400) on every Overview load for everyone else
+        var leaveP = Dash.can("leave.view")
+          ? Dash.getLeaveRequests(Dash.currentYearKL(), "pending").catch(function () { return null; })
+          : Promise.resolve(null);
         var staffP = Dash.getManpowerBySite().catch(function () { return []; });
         var machP  = Dash.getMachines().catch(function () { return []; });
         // powers each card's sparkline; a failure just means no sparklines

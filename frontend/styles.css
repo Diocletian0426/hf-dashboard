@@ -407,6 +407,14 @@ h1 {
   font-size: 13.5px; background: rgba(255, 255, 255, 0.75); color: var(--ink);
 }
 .filter-box::placeholder { color: var(--ink-3); }
+/* A search box INSIDE a .filters row (attendance Find). On its own line the box
+   is width:100%; inside an inline label that pushed it UNDER its own label and
+   clipped the placeholder. Here it sits beside the label, sized like its
+   neighbours (Date / Site). */
+.filters .filter-box {
+  width: 250px; max-width: none; padding: 8px 14px; font-size: var(--fs-md);
+  margin-left: 6px; vertical-align: middle;
+}
 
 /* ---- the Filter popover (projects.html, owner design 2026-08-03) ----
    One button, one panel of checkbox groups. Solid surface, not frosted:
@@ -3008,6 +3016,9 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
   margin: var(--sp-3) 0 0; font-size: var(--fs-xs); color: var(--ink-3);
 }
 .table-legend > span { display: inline-flex; align-items: center; gap: var(--sp-2); }
+/* a legend line that is a SENTENCE, not a badge + its meaning: as a flex row its
+   italic words became separate columns. Prose stays prose. */
+.table-legend > span.legend-prose { display: block; }
 
 /* Attendance table: the worker and the site read as text (left), everything
    else is a fact about the day and sits CENTRED under its own heading —
