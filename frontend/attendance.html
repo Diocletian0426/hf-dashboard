@@ -60,7 +60,7 @@
         the site has no GPS area set yet</span>
       <span><span class="badge badge-gray">Still Working</span> punched in, no punch out yet</span>
       <span><span class="badge badge-amended">Corrected By Office</span> the office set this day's
-        hours — press Details to see the worker's own times and the reason</span>
+        hours — click the worker's row to see their own times and the reason</span>
       <span><span class="badge badge-anomaly">Closed By Office</span> the office entered this
         punch-out for the worker</span>
       <span><span class="badge badge-anomaly">Auto Closed</span> no punch-out by 6 AM the next day,
@@ -209,7 +209,7 @@
       // cannot.
       return correctedTs
         ? '<span class="t-office">' + t + '</span> <span class="t-office-tag" title="Set by the ' +
-          'office — the worker tapped a different time. Press Details to see both.">Office</span>'
+          'office — the worker tapped a different time. Click the row to see both.">Office</span>'
         : t;
     }
 
@@ -245,13 +245,11 @@
       } catch (e) { /* no codes — see above */ }
     }
 
-    // The way into a worker's detail. It used to be a 5-pixel grey triangle
-    // beside the name — nothing about it said "press me", and the detail behind
-    // it is the whole answer to "why is this day flagged". Now it says so.
-    var DETAILS_PILL = ' <span class="details-pill"><span class="details-word">Details</span>' +
-                       '<span class="caret" aria-hidden="true"></span></span>';
-
-    // Anywhere on the row opens it — except a control that has its own job.
+    // THE WHOLE ROW IS THE BUTTON (owner decision 2026-09-20: a separate
+    // "Details" button was one thing too many on the row). Pressing anywhere on
+    // a worker's row opens what is behind it; a chevron at the start of the row
+    // and a hover tint are the hint that it opens. A control inside the row
+    // that has its own job (the Amend buttons, inputs) keeps that job.
     function rowButton(ev) {
       if (!ev.target.closest) return null;
       var btn = ev.target.closest(".worker-btn");
@@ -260,11 +258,6 @@
       var tr = ev.target.closest("tr.shift-row");
       return tr ? tr.querySelector(".worker-btn") : null;
     }
-    function setPillWord(btn, isOpen) {
-      var w = btn.querySelector(".details-word");
-      if (w) w.textContent = isOpen ? "Hide" : "Details";
-    }
-
     function codeTag(staffId) {
       var c = CODES[staffId];
       return c ? ' <span class="muted">' + esc(c) + "</span>" : "";
@@ -650,15 +643,16 @@
                 esc("The office corrected this day's hours" +
                     (s.corrected_by_name ? " (" + s.corrected_by_name + ")" : "") +
                     (s.correction_reason ? " — " + s.correction_reason : "") +
-                    ". Press Details for the tapped times and the reason.") +
+                    ". Click the row for the tapped times and the reason.") +
                 '">Corrected By Office</span>');
             }
             var h = hoursOf(s);
             return '<tr class="shift-row" data-i="' + i + '" data-find="' + esc(findKey(s)) + '">' +
               '<td><button type="button" class="worker-btn" data-i="' + i + '" ' +
                    'aria-expanded="false" aria-controls="d' + i + '">' +
+                 '<span class="caret" aria-hidden="true"></span>' +
                  '<span class="who-line"><strong>' + esc(s.full_name) + "</strong>" + codeTag(s.staff_id) +
-                 "</span>" + DETAILS_PILL + "</button></td>" +
+                 "</span></button></td>" +
               "<td>" + esc(s.project_name || "—") + "</td>" +
               // The IN/OUT columns show the time the day is PAID from, which on
               // an amended day is the office's, not the worker's. It is marked
@@ -863,7 +857,6 @@
           var row = document.getElementById("d" + i);
           var open = btn.getAttribute("aria-expanded") === "true";
           btn.setAttribute("aria-expanded", open ? "false" : "true");
-          setPillWord(btn, !open);
           btn.parentNode.parentNode.classList.toggle("open", !open);
           row.hidden = open;
           if (open || row.dataset.loaded) return;
@@ -1130,8 +1123,9 @@
         return '<tr class="shift-row" data-i="' + i + '" data-find="' +
                  esc(findKey(w, Object.keys(w.sites).join(" "))) + '">' +
           '<td><button type="button" class="worker-btn" data-i="' + i + '" aria-expanded="false">' +
+            '<span class="caret" aria-hidden="true"></span>' +
             '<span class="who-line"><strong>' + esc(w.name) + "</strong>" + codeTag(w.staff_id) + "</span>" +
-            DETAILS_PILL + "</button></td>" +
+            "</button></td>" +
           "<td>" + esc(Object.keys(w.sites).join(", ") || "—") + "</td>" +
           '<td class="num">' + w.days + "</td>" +
           '<td class="num">' + hm(w.normal) + "</td>" +
@@ -1155,7 +1149,6 @@
         var row = document.getElementById("m" + i);
         var open = btn.getAttribute("aria-expanded") === "true";
         btn.setAttribute("aria-expanded", open ? "false" : "true");
-        setPillWord(btn, !open);
         btn.parentNode.parentNode.classList.toggle("open", !open);
         row.hidden = open;
         if (!open && !row.dataset.loaded) {

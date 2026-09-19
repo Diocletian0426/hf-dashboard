@@ -3168,29 +3168,21 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
 
 .att-readable .badge { font-size: 13px; padding: 3px 11px; }
 
-/* the way in to a worker's detail: says what it is, and is big enough to hit */
+/* THE WHOLE ROW IS THE BUTTON — press anywhere on a worker's row to open it.
+   The hint that it opens: a chevron at the start (bigger and darker than the
+   5px --ink-3 triangle it used to be), a pointer, and a tint under the mouse. */
 .att-readable tr.shift-row { cursor: pointer; }
-.att-readable tr.shift-row:hover { background: var(--surface-2); }
-/* name + code on one line, the way in to the detail on the line below */
-.att-readable .worker-btn { flex-direction: column; align-items: flex-start; gap: 6px; }
-.who-line { display: inline-flex; align-items: baseline; gap: 8px; white-space: nowrap; }
-.details-pill {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 3px 11px; border-radius: 999px;
-  font-size: 13px; font-weight: 600; color: var(--brand-ink);
-  background: rgba(37, 99, 235, 0.08); border: 1px solid rgba(37, 99, 235, 0.25);
-  white-space: nowrap;
+.att-readable tr.shift-row:hover { background: rgba(37, 99, 235, 0.06); }
+.att-readable .worker-btn { gap: 10px; align-items: center; }
+.att-readable .worker-btn .caret {
+  border-left: 7px solid var(--ink-2);
+  border-top: 5px solid transparent; border-bottom: 5px solid transparent;
 }
-.worker-btn:hover .details-pill, .worker-btn:focus-visible .details-pill {
-  background: rgba(37, 99, 235, 0.16);
-}
-.details-pill .caret {
-  width: 0; height: 0; flex: 0 0 auto;
-  border-left: 5px solid currentColor;
-  border-top: 4px solid transparent; border-bottom: 4px solid transparent;
-  transition: transform 0.15s ease;
-}
-.shift-row.open .details-pill .caret { transform: rotate(90deg) translateX(1px); }
+.att-readable tr.shift-row:hover .worker-btn .caret { border-left-color: var(--brand-ink); }
+/* name over code: on ONE line the Worker column grew wide enough to push the
+   Attention column off the page again */
+.who-line { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 1px; white-space: nowrap; }
+.att-readable .att-table th, .att-readable .att-table td { padding-left: 12px; padding-right: 12px; }
 
 /* a time the office set — a tag you can SEE, not an underline you must hover */
 .att-readable .t-office { border-bottom: 0; cursor: default; }
