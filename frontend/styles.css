@@ -3267,3 +3267,66 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
 }
 .att-narrow select { width: 300px; max-width: 100%; }
 .att-readable .att-narrow .filter-box { width: 300px; }
+
+/* ---- attendance: the month's TOTAL row ---------------------------------- */
+.att-table tfoot .total-row td {
+  border-top: 2px solid var(--line-strong); border-bottom: 0;
+  background: rgba(37, 99, 235, 0.05); font-size: 16px;
+  padding-top: 14px; padding-bottom: 14px;
+}
+.att-table tfoot .total-row .muted { margin-left: 8px; }
+/* the label cell spans two columns, so the Days cell is this row's SECOND td - and
+   would inherit the Site column's left alignment and sit beside its own heading */
+.att-table tfoot .total-row td:nth-child(n+2) { text-align: center; }
+
+/* ---- attendance: what goes on PAPER --------------------------------------
+   The site had no print styling at all: printing a page gave you the side
+   menu, the glass panels and a table clipped at the edge of the sheet. This is
+   scoped to the attendance page. On paper: the heading that says what the
+   sheet is, the table at full width in plain black on white, the totals, and
+   the key to the labels. Not printed: the menu, the bar, and the banners —
+   they are for using the page, and paper cannot be used. */
+.print-head { display: none; }
+@media print {
+  @page { size: A4 landscape; margin: 12mm; }
+  body.att-readable { background: #fff !important; display: block !important; }
+  body.att-readable .rail, body.att-readable .topwrap, body.att-readable #nav,
+  body.att-readable .att-when, body.att-readable .filters,
+  body.att-readable #geofence-banner, body.att-readable #open-shifts,
+  body.att-readable .page-caption, body.att-readable .worker-btn .caret,
+  body.att-readable .amend-wrap, body.att-readable #punch-rows button { display: none !important; }
+  body.att-readable main, body.att-readable #main {
+    margin: 0 !important; padding: 0 !important; max-width: none !important; width: 100% !important;
+    grid-column: auto !important;
+  }
+  body.att-readable h1 { display: none; }
+  body.att-readable .print-head { display: block; margin: 0 0 10px; }
+  body.att-readable .print-head h2 { margin: 0 0 3px; font-size: 19px; color: #000; }
+  body.att-readable .print-head p { margin: 0; font-size: 12px; color: #333; }
+  body.att-readable .table-wrap {
+    overflow: visible !important; background: #fff !important; border: 0 !important;
+    border-radius: 0 !important; box-shadow: none !important;
+    -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+  }
+  body.att-readable .att-table { width: 100%; }
+  body.att-readable .att-table th {
+    position: static !important; background: #fff !important; color: #000 !important;
+    border-bottom: 1.5px solid #000; font-size: 11px;
+  }
+  body.att-readable .att-table td {
+    font-size: 12.5px; padding: 6px 8px !important; color: #000; border-bottom: 1px solid #bbb;
+  }
+  body.att-readable .att-table .muted { color: #333 !important; font-size: 11px; }
+  body.att-readable .ot-on { color: #000 !important; }
+  body.att-readable tr.shift-row, body.att-readable tr.shift-row.open { background: #fff !important; }
+  body.att-readable tr { break-inside: avoid; }
+  body.att-readable thead { display: table-header-group; }   /* the header repeats on every sheet */
+  body.att-readable tfoot { display: table-row-group; }      /* the total prints once, at the end */
+  body.att-readable .badge, body.att-readable .t-office-tag {
+    background: #fff !important; color: #000 !important; border: 1px solid #000; font-size: 10.5px;
+  }
+  body.att-readable .detail-box { background: #fff !important; }
+  body.att-readable .table-legend { font-size: 11px; color: #000 !important; margin-top: 10px; }
+  body.att-readable .table-legend.legend-list > span { margin-bottom: 3px; }
+  body.att-readable .att-table tfoot .total-row td { background: #fff !important; border-top: 1.5px solid #000; font-size: 13px; }
+}

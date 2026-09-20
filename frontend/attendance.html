@@ -53,7 +53,24 @@
         <input type="date"  id="f-date"  class="pick-input" tabindex="-1" aria-hidden="true" />
         <input type="month" id="f-month" class="pick-input" tabindex="-1" aria-hidden="true" />
       </span>
+      <!-- GETTING THE HOURS OUT. Print is for anyone who can see the page (the
+           browser's own Ctrl+P is theirs anyway). Download Excel is an EXPORT,
+           so it answers to attendance.export and only shows on the month view —
+           the sheet wages are worked out from. -->
+      <button type="button" class="btn att-btn att-push-right" id="btn-print">
+        <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 9V3h12v6M6 18H4a1 1 0 0 1-1-1v-6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v6a1 1 0 0 1-1 1h-2"></path>
+          <rect x="6" y="14" width="12" height="7"></rect>
+        </svg>Print</button>
+      <button type="button" class="btn att-btn" id="btn-excel" hidden>
+        <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 3v12M7 10l5 5 5-5M4 21h16"></path>
+        </svg>Download Excel</button>
     </div>
+    <!-- shown on paper only: says what the sheet is, since the bar above is not printed -->
+    <div class="print-head" id="print-head"></div>
     <div class="filters att-narrow">
       <label>Site
         <select id="f-site"><option value="">All Sites</option></select>
@@ -107,6 +124,7 @@
           </tr>
         </thead>
         <tbody id="month-rows"></tbody>
+        <tfoot id="month-foot" hidden></tfoot>
       </table>
     </div>
     <p class="table-legend" id="month-note" hidden></p>
@@ -134,6 +152,7 @@
   <!-- DEV ONLY: does nothing unless the URL has ?demo=1, and never writes.
        Delete this line + attendance-demo.js before the pilot starts. -->
   <script src="attendance-demo.js"></script>
+  <script src="xlsx-lite.js"></script>
   <script src="shell.js"></script>
 
   <script>
@@ -282,11 +301,16 @@
        and for the Find box. If that read is refused, the page still works:
        rows simply show no code and Find matches on name and site. */
     var CODES = {};                       // staff_id -> employee_code
+    // ...and the company. HF Bored Piles and Hai Fu work overtime out
+    // differently (owner, 2026-09-20), so an exported sheet has to say which
+    // company each worker belongs to or HR cannot split it.
+    var COMPANY = {};                     // staff_id -> "HF-BP" | "Hai Fu"
 
     async function loadCodes() {
       try {
         ((await Dash.getManpowerBySite()) || []).forEach(function (m) {
           if (m.staff_id && m.employee_code) CODES[m.staff_id] = m.employee_code;
+          if (m.staff_id && m.company) COMPANY[m.staff_id] = m.company;
         });
       } catch (e) { /* no codes — see above */ }
     }
@@ -345,6 +369,7 @@
       } else if (none) {
         none.hidden = true;
       }
+      if (tbodyId === "month-rows") updateMonthTotals();
       // keep the search across a date or site change, without a reload
       var p = new URLSearchParams(location.search);
       if (q) p.set("find", q); else p.delete("find");
@@ -578,6 +603,15 @@
       var date    = params.get("date") || Dash.todayKL();
       var site    = params.get("site") || "";
       var showRaw = params.get("punches") === "1";
+      // Open on the view this person used last. HR lives in Month; making them
+      // press it every morning is a small tax paid daily. Only when the link
+      // does not say otherwise — a link to a particular DAY still opens that day.
+      var saved = null;
+      try { saved = localStorage.getItem("att.view"); } catch (e) { /* private mode */ }
+      if (!params.has("view") && !params.has("date") && saved === "month") {
+        params.set("view", "month");
+        history.replaceState(null, "", location.pathname + "?" + params);
+      }
       var view    = params.get("view") === "month" ? "month" : "day";
       var month   = params.get("month") || date.slice(0, 7);
 
@@ -629,7 +663,9 @@
         var a = ev.target.closest ? ev.target.closest("[data-view]") : null;
         if (!a) return;
         ev.preventDefault();
-        setParam("view", a.getAttribute("data-view") === "month" ? "month" : "");
+        var want = a.getAttribute("data-view") === "month" ? "month" : "day";
+        try { localStorage.setItem("att.view", want); } catch (e) { /* private mode */ }
+        setParam("view", want === "month" ? "month" : "");
       });
       document.getElementById("punch-toggle").hidden = (view === "month");
       if (view === "month") {
@@ -639,6 +675,14 @@
       document.getElementById("punch-toggle").textContent = showRaw ? "Hide Every Punch" : "Show Every Punch";
       document.getElementById("punch-toggle").addEventListener("click", function (e) {
         e.preventDefault(); setParam("punches", showRaw ? "" : "1");
+      });
+
+      document.getElementById("btn-print").addEventListener("click", function () {
+        writePrintHead(view, view === "month" ? friendlyMonth(month) : friendlyDate(date));
+        window.print();
+      });
+      window.addEventListener("beforeprint", function () {       // Ctrl+P gets the heading too
+        writePrintHead(view, view === "month" ? friendlyMonth(month) : friendlyDate(date));
       });
 
       var findEl = document.getElementById("f-find");
@@ -1076,6 +1120,104 @@
        belief that the rows carried no id (they always did): two workers with
        the same name would have merged into one payroll row, silently.
        ======================================================================= */
+    // The totals row adds up the workers ON SCREEN — so with "hulk" in the Find
+    // box it is Hulk's total, not the site's, and the label says which.
+    function updateMonthTotals() {
+      var foot = document.getElementById("month-foot");
+      var rows = Array.prototype.filter.call(
+        document.querySelectorAll("#month-rows tr.shift-row"), function (tr) { return !tr.hidden; });
+      if (!rows.length) { foot.hidden = true; foot.innerHTML = ""; return; }
+      var days = 0, wm = 0, om = 0;
+      rows.forEach(function (tr) {
+        days += Number(tr.getAttribute("data-days")) || 0;
+        wm   += Number(tr.getAttribute("data-wm")) || 0;
+        om   += Number(tr.getAttribute("data-om")) || 0;
+      });
+      var all = document.querySelectorAll("#month-rows tr.shift-row").length;
+      foot.hidden = false;
+      foot.innerHTML = '<tr class="total-row"><td colspan="2"><strong>Total</strong> ' +
+        '<span class="muted">' + rows.length + (rows.length === all ? "" : " of " + all) +
+        " worker" + (all === 1 ? "" : "s") + "</span></td>" +
+        '<td class="num"><strong>' + days + "</strong></td>" +
+        '<td class="num"><strong>' + hm(wm / 60) + "</strong></td>" +
+        '<td class="num"><strong>' + (om > 0 ? '<span class="ot-on">' + hm(om / 60) + "</span>" : hm(0)) +
+        "</strong></td><td></td></tr>";
+    }
+
+    function siteLabel() {
+      var el = document.getElementById("f-site");
+      return (el && el.value && el.selectedIndex >= 0) ? el.options[el.selectedIndex].text : "All Sites";
+    }
+
+    // The heading that prints. The bar is not printed, so the paper has to say
+    // for itself what it is, of when, of where, and when it was printed.
+    function writePrintHead(view, whenText) {
+      var find = document.getElementById("f-find").value.trim();
+      document.getElementById("print-head").innerHTML =
+        "<h2>Attendance — " + esc(view === "month" ? "Month Of " + whenText : whenText) + "</h2>" +
+        "<p>Site: " + esc(siteLabel()) + (find ? " · Showing: “" + esc(find) + "”" : "") +
+        " · Printed " + esc(Dash.klDateTime(new Date().toISOString())) + "</p>";
+    }
+
+    // ---- Download Excel ---------------------------------------------------
+    // Two sheets: Summary (one row per worker — what payroll keys in) and Daily
+    // (every day behind those totals, for when a worker asks "which day?").
+    // Hours are real NUMBERS in decimal hours (7.50), because a payroll sheet
+    // multiplies them; the spelled-out form sits beside them for the eye.
+    // Nothing is fetched here — it is exactly what the screen already holds.
+    function downloadMonthExcel(workers, month, site) {
+      function B(v) { return { v: v, bold: true }; }
+      // Hours are stored EXACT and only SHOWN to 2 places. Rounding each row first made
+      // the column add up to 19.44 under a total that said 19.45 - and a payroll sheet
+      // that disagrees with itself by a cent is a sheet nobody trusts.
+      function H(min) { return { v: min / 60, hours: true }; }
+      function byCompanyThenName(a, b) {
+        var ca = COMPANY[a.staff_id] || "", cb = COMPANY[b.staff_id] || "";
+        return ca < cb ? -1 : ca > cb ? 1 : (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+      }
+      var list = workers.slice().sort(byCompanyThenName);
+      var title = "Attendance — " + friendlyMonth(month);
+      var stamp = "Site: " + siteLabel() + " · Downloaded " + Dash.klDateTime(new Date().toISOString());
+
+      var sum = [[B(title)], [stamp],
+        ["Days marked To Fix or Still Open are NOT in these totals — correct them on the Attendance page first."], [],
+        [B("Employee Code"), B("Name"), B("Company"), B("Sites"), B("Days Worked"),
+         B("Working Hours"), B("Over Time Hours"), B("Working Hours (Words)"), B("Over Time (Words)"),
+         B("Days To Fix"), B("Days Still Open")]];
+      var tDays = 0, tWm = 0, tOm = 0;
+      list.forEach(function (w) {
+        tDays += w.days; tWm += w.wm; tOm += w.om;
+        sum.push([CODES[w.staff_id] || "", w.name, COMPANY[w.staff_id] || "", Object.keys(w.sites).join(", "),
+                  w.days, H(w.wm), H(w.om), hm(w.wm / 60), hm(w.om / 60), w.broken || "", w.open || ""]);
+      });
+      sum.push([B("Total"), B(list.length + " worker" + (list.length === 1 ? "" : "s")), null, null,
+                B(tDays), { v: tWm / 60, hours: true, bold: true },
+                { v: tOm / 60, hours: true, bold: true }, B(hm(tWm / 60)), B(hm(tOm / 60))]);
+
+      var daily = [[B("Employee Code"), B("Name"), B("Company"), B("Date"), B("Day"), B("Site"),
+                    B("In"), B("Out"), B("Working Hours"), B("Over Time Hours"),
+                    B("Counted In Totals"), B("Corrected By Office"), B("Reason"), B("Note")]];
+      list.forEach(function (w) {
+        w.rows.slice().sort(function (a, b) { return a.work_date < b.work_date ? -1 : 1; }).forEach(function (r) {
+          var h = hoursOf(r), counted = !r.overlong_shift && !!h;
+          var note = r.overlong_shift ? "Forgot To Punch Out" : (!effOut(r) ? "No Punch Out"
+                     : (r.has_anomaly ? "Location Not Confirmed" : ""));
+          daily.push([CODES[w.staff_id] || "", w.name, COMPANY[w.staff_id] || "",
+            { v: r.work_date, date: true }, DAY_NAMES[new Date(String(r.work_date).slice(0, 10) + "T00:00:00Z").getUTCDay()],
+            r.project_name || "", effIn(r) ? Dash.klTime(effIn(r)) : "", effOut(r) ? Dash.klTime(effOut(r)) : "",
+            counted ? H(Number(r.working_minutes) || 0) : "", counted ? H(Number(r.ot_minutes) || 0) : "",
+            counted ? "Yes" : "No", r.has_correction ? "Yes" : "", r.correction_reason || "", note]);
+        });
+      });
+
+      var blob = XlsxLite.build([
+        { name: "Summary", freezeRows: 5, widths: [16, 34, 12, 34, 13, 15, 17, 24, 22, 13, 16], rows: sum },
+        { name: "Daily",   freezeRows: 1, widths: [16, 34, 12, 14, 7, 30, 11, 11, 15, 17, 18, 20, 50, 26], rows: daily }
+      ]);
+      var where = siteLabel().replace(/[\\/:*?"<>|]+/g, " ").trim();
+      XlsxLite.download(blob, "Attendance " + month + " " + where + ".xlsx");
+    }
+
     function daysOfMonth(month) {
       var parts = month.split("-");
       var y = Number(parts[0]), m = Number(parts[1]);
@@ -1125,14 +1267,19 @@
         var key = r.staff_id || ("name:" + (r.full_name || "(unnamed)"));
         var w = map[key] || (map[key] = {
           staff_id: r.staff_id || null, name: r.full_name || "(unnamed)",
-          sites: {}, days: 0, normal: 0, ot: 0, broken: 0, open: 0, rows: []
+          sites: {}, days: 0, normal: 0, ot: 0, wm: 0, om: 0, broken: 0, open: 0, rows: []
         });
         if (r.project_name) w.sites[r.project_name] = true;
         // the database's price for the day, or null — never re-worked-out here
         var h = hoursOf(r);
         if (r.overlong_shift) w.broken++;
         else if (!h) w.open++;
-        else { w.days++; w.normal += h.normal; w.ot += h.ot; }
+        else {
+          w.days++; w.normal += h.normal; w.ot += h.ot;
+          // whole minutes as the database gave them — the totals row and the
+          // Excel sheet add THESE, so they can never drift from the rows
+          w.wm += Number(r.working_minutes) || 0; w.om += Number(r.ot_minutes) || 0;
+        }
         w.rows.push(r);
       });
       return Object.keys(map).map(function (k) { return map[k]; })
@@ -1195,7 +1342,8 @@
           'in this worker\'s totals until corrected.">' + w.broken + " To Fix</span>");
         if (w.open) att.push('<span class="badge badge-gray" title="Day(s) with a punch in and ' +
           'no punch out. No hours to count yet.">' + w.open + " Still Open</span>");
-        return '<tr class="shift-row" data-i="' + i + '" data-find="' +
+        return '<tr class="shift-row" data-i="' + i + '" data-days="' + w.days + '" data-wm="' + w.wm +
+                 '" data-om="' + w.om + '" data-find="' +
                  esc(findKey(w, Object.keys(w.sites).join(" "))) + '">' +
           '<td><button type="button" class="worker-btn" data-i="' + i + '" aria-expanded="false">' +
             '<span class="caret" aria-hidden="true"></span>' +
@@ -1216,6 +1364,14 @@
         "Days marked <strong>To Fix</strong> or <strong>Still Open</strong> are left out of the totals.</span>";
 
       if (document.getElementById("f-find").value) applyFind("month-rows", 6);
+      updateMonthTotals();
+
+      // Download Excel — an export, so it answers to attendance.export
+      var xBtn = document.getElementById("btn-excel");
+      if (Dash.can("attendance.export") && window.XlsxLite) {
+        xBtn.hidden = false;
+        xBtn.addEventListener("click", function () { downloadMonthExcel(workers, month, site); });
+      }
 
       tbody.addEventListener("click", function (ev) {
         var btn = rowButton(ev);
