@@ -75,6 +75,17 @@
       <label>Site
         <select id="f-site"><option value="">All Sites</option></select>
       </label>
+      <!-- HF Bored Piles and Hai Fu are paid separately, so the office prints and
+           downloads them separately. This narrows the table — and Print and
+           Download Excel both hand over exactly what the table is showing. Hidden
+           until the staff list has told the page who works for whom. -->
+      <label id="lbl-company" hidden>Company
+        <select id="f-company">
+          <option value="">All Companies</option>
+          <option value="HF-BP">HF Bored Piles</option>
+          <option value="Hai Fu">Hai Fu</option>
+        </select>
+      </label>
       <label>Find
         <input type="search" id="f-find" class="filter-box" autocomplete="off"
                placeholder="Name, employee code or site…">
@@ -328,15 +339,41 @@
       var tr = ev.target.closest("tr.shift-row");
       return tr ? tr.querySelector(".worker-btn") : null;
     }
+    // the company's name as the office says it (the database keeps a short code)
+    var COMPANY_NAME = { "HF-BP": "HF Bored Piles", "Hai Fu": "Hai Fu" };
+    function companyName(code) { return COMPANY_NAME[code] || code || ""; }
+    function companyLabel() {
+      var el = document.getElementById("f-company");
+      return (el && el.value) ? companyName(el.value) : "All Companies";
+    }
+
+    // under the name: the employee code, and whose payroll the worker is on
     function codeTag(staffId) {
-      var c = CODES[staffId];
-      return c ? ' <span class="muted">' + esc(c) + "</span>" : "";
+      var bits = [CODES[staffId], companyName(COMPANY[staffId])].filter(Boolean);
+      return bits.length ? ' <span class="muted">' + esc(bits.join(" · ")) + "</span>" : "";
+    }
+
+    // Malaysia's clock, now — for stamping a printout or a download to the minute
+    function klNow() {
+      var d = new Date(Date.now() + 8 * 3600 * 1000), iso = d.toISOString();   // shifted, then read as UTC
+      var h = d.getUTCHours(), m = iso.slice(14, 16);
+      return {
+        file:  iso.slice(0, 10) + " at " + iso.slice(11, 13) + "." + m,        // 2026-09-21 at 14.32 — sorts, and no ":" (Windows refuses it)
+        words: d.getUTCDate() + " " + MONTH_NAMES[d.getUTCMonth()] + " " + d.getUTCFullYear() + ", " +
+               ((h % 12) || 12) + ":" + m + " " + (h < 12 ? "AM" : "PM")
+      };
+    }
+    // "Attendance August 2026 - HF Bored Piles - Downloaded 2026-09-21 at 14.32"
+    function fileName(verb, whenText, now) {
+      var site = siteLabel();
+      return ["Attendance " + whenText, companyLabel(), site === "All Sites" ? "" : site, verb + " " + now.file]
+        .filter(Boolean).join(" - ").replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim();
     }
 
     // the text one row answers to in the Find box
     function findKey(r, sites) {
-      return [r.full_name || r.name, CODES[r.staff_id] || "", sites || r.project_name || ""]
-        .join(" ").toLowerCase();
+      return [r.full_name || r.name, CODES[r.staff_id] || "", companyName(COMPANY[r.staff_id]),
+              sites || r.project_name || ""].join(" ").toLowerCase();
     }
 
     // Filters what is already on screen — no reload, so it is instant and the
@@ -344,11 +381,13 @@
     function applyFind(tbodyId, cols) {
       var q = document.getElementById("f-find").value.trim().toLowerCase();
       var words = q ? q.split(/\s+/) : [];
+      var company = document.getElementById("f-company").value;
       var body = document.getElementById(tbodyId), shown = 0, total = 0;
       Array.prototype.forEach.call(body.querySelectorAll("tr.shift-row"), function (tr) {
         total++;
         var key = tr.getAttribute("data-find") || "";
-        var hit = words.every(function (w) { return key.indexOf(w) !== -1; });
+        var hit = words.every(function (w) { return key.indexOf(w) !== -1; }) &&
+                  (!company || tr.getAttribute("data-company") === company);
         tr.hidden = !hit;
         var drawer = tr.nextElementSibling;
         if (drawer && drawer.classList.contains("detail-row")) {
@@ -364,7 +403,9 @@
           none.innerHTML = '<td colspan="' + cols + '" class="empty"></td>';
           body.appendChild(none);
         }
-        none.firstChild.textContent = "No worker here matches \u201C" + q + "\u201D.";
+        none.firstChild.textContent = q
+          ? "No " + (company ? companyName(company) + " " : "") + "worker here matches \u201C" + q + "\u201D."
+          : "No " + companyName(company) + " workers here.";
         none.hidden = false;
       } else if (none) {
         none.hidden = true;
@@ -373,6 +414,7 @@
       // keep the search across a date or site change, without a reload
       var p = new URLSearchParams(location.search);
       if (q) p.set("find", q); else p.delete("find");
+      if (company) p.set("company", company); else p.delete("company");
       history.replaceState(null, "", location.pathname + (p.toString() ? "?" + p : ""));
     }
 
@@ -681,15 +723,23 @@
         writePrintHead(view, view === "month" ? friendlyMonth(month) : friendlyDate(date));
         window.print();
       });
-      window.addEventListener("beforeprint", function () {       // Ctrl+P gets the heading too
-        writePrintHead(view, view === "month" ? friendlyMonth(month) : friendlyDate(date));
+      // Ctrl+P gets the heading too. And "Save as PDF" names the file after the
+      // page title — so for the length of the print the title IS the file name.
+      var pageTitle = document.title;
+      window.addEventListener("beforeprint", function () {
+        var when = view === "month" ? friendlyMonth(month) : friendlyDate(date);
+        writePrintHead(view, when);
+        document.title = fileName("Printed", when, klNow());
       });
+      window.addEventListener("afterprint", function () { document.title = pageTitle; });
 
       var findEl = document.getElementById("f-find");
       findEl.value = params.get("find") || "";
-      findEl.addEventListener("input", function () {
-        applyFind(view === "month" ? "month-rows" : "rows", view === "month" ? 6 : 7);
-      });
+      function refilter() { applyFind(view === "month" ? "month-rows" : "rows", view === "month" ? 6 : 7); }
+      findEl.addEventListener("input", refilter);
+      var companyEl = document.getElementById("f-company");
+      companyEl.value = params.get("company") || "";
+      companyEl.addEventListener("change", refilter);
 
       var tbody = document.getElementById("rows");
       try {
@@ -710,6 +760,8 @@
           loadCodes()
         ]);
         var shifts = results[0], missing = results[1], projects = results[2], punches = results[3];
+        // the Company filter only makes sense once the page knows who works for whom
+        document.getElementById("lbl-company").hidden = !Object.keys(COMPANY).length;
 
         // site dropdown (active BP sites)
         siteEl.innerHTML = '<option value="">All Sites</option>' + projects.map(function (p) {
@@ -766,7 +818,8 @@
                 '">Corrected By Office</span>');
             }
             var h = hoursOf(s);
-            return '<tr class="shift-row" data-i="' + i + '" data-find="' + esc(findKey(s)) + '">' +
+            return '<tr class="shift-row" data-i="' + i + '" data-company="' + esc(COMPANY[s.staff_id] || "") +
+                   '" data-find="' + esc(findKey(s)) + '">' +
               '<td><button type="button" class="worker-btn" data-i="' + i + '" ' +
                    'aria-expanded="false" aria-controls="d' + i + '">' +
                  '<span class="caret" aria-hidden="true"></span>' +
@@ -792,7 +845,7 @@
             '<tr class="detail-row" id="d' + i + '" hidden><td colspan="7"></td></tr>';
           }).join("");
           document.getElementById("legend").hidden = false;
-          if (findEl.value) applyFind("rows", 7);
+          if (findEl.value || companyEl.value) applyFind("rows", 7);
         }
 
         /* ---- the detail drawer ---------------------------------------------
@@ -1279,67 +1332,95 @@
       var find = document.getElementById("f-find").value.trim();
       document.getElementById("print-head").innerHTML =
         "<h2>Attendance — " + esc(view === "month" ? "Month Of " + whenText : whenText) + "</h2>" +
-        "<p>Site: " + esc(siteLabel()) + (find ? " · Showing: “" + esc(find) + "”" : "") +
-        " · Printed " + esc(Dash.klDateTime(new Date().toISOString())) + "</p>";
+        "<p>Company: " + esc(companyLabel()) + " · Site: " + esc(siteLabel()) +
+        (find ? " · Showing: “" + esc(find) + "”" : "") +
+        " · Printed " + esc(klNow().words) + "</p>";
     }
 
     // ---- Download Excel ---------------------------------------------------
+    // WHAT YOU SEE IS WHAT YOU GET: the sheet holds the workers on screen — so
+    // Company = Hai Fu gives Hai Fu's sheet, and the sheet says so at the top.
+    //
     // Two sheets: Summary (one row per worker — what payroll keys in) and Daily
     // (every day behind those totals, for when a worker asks "which day?").
-    // Hours are real NUMBERS in decimal hours (7.50), because a payroll sheet
-    // multiplies them; the spelled-out form sits beside them for the eye.
+    //
+    // EVERY FIGURE IS A NUMBER HR CAN COMPUTE WITH (owner, 2026-09-21). Hours are
+    // decimal hours (7.50), never "7 Hours 30 Mins"; In and Out are real Excel
+    // times; dates are real dates; and the total row is =SUM(...), so it follows
+    // the rows if HR edits or deletes one. Hours are stored EXACT and only SHOWN
+    // to 2 places — rounding each row first made a column add up to 19.44 under
+    // a total that said 19.45.
+    //
+    // The file name and the sheet both carry WHEN it was downloaded, to the
+    // minute: corrections keep landing after a download, and "which of these
+    // two files is the newer one" has to be answerable from the file itself.
     // Nothing is fetched here — it is exactly what the screen already holds.
-    function downloadMonthExcel(workers, month, site) {
+    async function downloadMonthExcel(workers, month) {
       function B(v) { return { v: v, bold: true }; }
-      // Hours are stored EXACT and only SHOWN to 2 places. Rounding each row first made
-      // the column add up to 19.44 under a total that said 19.45 - and a payroll sheet
-      // that disagrees with itself by a cent is a sheet nobody trusts.
       function H(min) { return { v: min / 60, hours: true }; }
-      function byCompanyThenName(a, b) {
-        var ca = COMPANY[a.staff_id] || "", cb = COMPANY[b.staff_id] || "";
-        return ca < cb ? -1 : ca > cb ? 1 : (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
-      }
-      var list = workers.slice().sort(byCompanyThenName);
-      var title = "Attendance — " + friendlyMonth(month);
-      var stamp = "Site: " + siteLabel() + " · Downloaded " + Dash.klDateTime(new Date().toISOString());
+      function T(ts) { var v = klInputValue(ts); return v ? { v: v.slice(11, 16), time: true } : ""; }
 
-      var sum = [[B(title)], [stamp],
-        ["Days marked To Fix or Still Open are NOT in these totals — correct them on the Attendance page first."], [],
-        [B("Employee Code"), B("Name"), B("Company"), B("Sites"), B("Days Worked"),
-         B("Working Hours"), B("Over Time Hours"), B("Working Hours (Words)"), B("Over Time (Words)"),
-         B("Days To Fix"), B("Days Still Open")]];
-      var tDays = 0, tWm = 0, tOm = 0;
-      list.forEach(function (w) {
-        tDays += w.days; tWm += w.wm; tOm += w.om;
-        sum.push([CODES[w.staff_id] || "", w.name, COMPANY[w.staff_id] || "", Object.keys(w.sites).join(", "),
-                  w.days, H(w.wm), H(w.om), hm(w.wm / 60), hm(w.om / 60), w.broken || "", w.open || ""]);
+      // the workers on screen (Company + Find), in company-then-name order
+      var visible = {};
+      Array.prototype.forEach.call(document.querySelectorAll("#month-rows tr.shift-row"), function (tr) {
+        if (!tr.hidden) visible[tr.getAttribute("data-i")] = true;
       });
+      var list = workers.filter(function (w, i) { return visible[String(i)]; }).sort(function (a, b) {
+        var ca = companyName(COMPANY[a.staff_id]), cb = companyName(COMPANY[b.staff_id]);
+        return ca < cb ? -1 : ca > cb ? 1 : (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+      });
+      if (!list.length) { alert("There are no workers on screen to download."); return; }
+
+      var now = klNow(), who = "";
+      try { var acc = await Dash.getMyAccess(); who = (acc && acc.ok && acc.access && acc.access.full_name) || ""; } catch (e) { who = ""; }
+      var find = document.getElementById("f-find").value.trim();
+
+      var HEAD = 7;                               // the row the column headings sit on
+      var sum = [
+        [B("Attendance — " + friendlyMonth(month))],
+        [B("Company"), companyLabel()],
+        [B("Site"), siteLabel()],
+        [B("Workers"), list.length + " of " + workers.length + (find ? "  (Find: " + find + ")" : "")],
+        [B("Downloaded"), now.words + (who ? " by " + who : "")],
+        ["Days marked To Fix or Still Open are NOT in these totals — correct them on the Attendance page, then download again."],
+        [B("Employee Code"), B("Name"), B("Company"), B("Sites"), B("Days Worked"), B("Working Hours"),
+         B("Over Time Hours"), B("Total Hours"), B("Days To Fix"), B("Days Still Open")]];
+      var tDays = 0, tWm = 0, tOm = 0, tFix = 0, tOpen = 0;
+      list.forEach(function (w) {
+        tDays += w.days; tWm += w.wm; tOm += w.om; tFix += w.broken; tOpen += w.open;
+        sum.push([CODES[w.staff_id] || "", w.name, companyName(COMPANY[w.staff_id]), Object.keys(w.sites).join(", "),
+                  w.days, H(w.wm), H(w.om), H(w.wm + w.om), w.broken, w.open]);
+      });
+      var first = HEAD + 1, last = HEAD + list.length;
+      function S(col, cached, hours) {            // =SUM down one column, with the value to show meanwhile
+        return { f: "SUM(" + col + first + ":" + col + last + ")", v: cached, hours: !!hours, bold: true };
+      }
       sum.push([B("Total"), B(list.length + " worker" + (list.length === 1 ? "" : "s")), null, null,
-                B(tDays), { v: tWm / 60, hours: true, bold: true },
-                { v: tOm / 60, hours: true, bold: true }, B(hm(tWm / 60)), B(hm(tOm / 60))]);
+                S("E", tDays), S("F", tWm / 60, true), S("G", tOm / 60, true), S("H", (tWm + tOm) / 60, true),
+                S("I", tFix), S("J", tOpen)]);
 
       var daily = [[B("Employee Code"), B("Name"), B("Company"), B("Date"), B("Day"), B("Site"),
-                    B("In"), B("Out"), B("Working Hours"), B("Over Time Hours"),
+                    B("In"), B("Out"), B("Working Hours"), B("Over Time Hours"), B("Total Hours"),
                     B("Counted In Totals"), B("Corrected By Office"), B("Reason"), B("Note")]];
       list.forEach(function (w) {
         w.rows.slice().sort(function (a, b) { return a.work_date < b.work_date ? -1 : 1; }).forEach(function (r) {
           var h = hoursOf(r), counted = !r.overlong_shift && !!h;
+          var wm = Number(r.working_minutes) || 0, om = Number(r.ot_minutes) || 0;
           var note = r.overlong_shift ? "Forgot To Punch Out" : (!effOut(r) ? "No Punch Out"
                      : (r.has_anomaly ? "Location Not Confirmed" : ""));
-          daily.push([CODES[w.staff_id] || "", w.name, COMPANY[w.staff_id] || "",
+          daily.push([CODES[w.staff_id] || "", w.name, companyName(COMPANY[w.staff_id]),
             { v: r.work_date, date: true }, DAY_NAMES[new Date(String(r.work_date).slice(0, 10) + "T00:00:00Z").getUTCDay()],
-            r.project_name || "", effIn(r) ? Dash.klTime(effIn(r)) : "", effOut(r) ? Dash.klTime(effOut(r)) : "",
-            counted ? H(Number(r.working_minutes) || 0) : "", counted ? H(Number(r.ot_minutes) || 0) : "",
-            counted ? "Yes" : "No", r.has_correction ? "Yes" : "", r.correction_reason || "", note]);
+            r.project_name || "", T(effIn(r)), T(effOut(r)),
+            counted ? H(wm) : "", counted ? H(om) : "", counted ? H(wm + om) : "",
+            counted ? "Yes" : "No", r.has_correction ? "Yes" : "No", r.correction_reason || "", note]);
         });
       });
 
       var blob = XlsxLite.build([
-        { name: "Summary", freezeRows: 5, widths: [16, 34, 12, 34, 13, 15, 17, 24, 22, 13, 16], rows: sum },
-        { name: "Daily",   freezeRows: 1, widths: [16, 34, 12, 14, 7, 30, 11, 11, 15, 17, 18, 20, 50, 26], rows: daily }
+        { name: "Summary", freezeRows: HEAD, widths: [16, 34, 17, 34, 13, 15, 17, 13, 13, 16], rows: sum },
+        { name: "Daily",   freezeRows: 1,    widths: [16, 34, 17, 14, 7, 30, 11, 11, 15, 17, 13, 18, 20, 50, 26], rows: daily }
       ]);
-      var where = siteLabel().replace(/[\\/:*?"<>|]+/g, " ").trim();
-      XlsxLite.download(blob, "Attendance " + month + " " + where + ".xlsx");
+      XlsxLite.download(blob, fileName("Downloaded", friendlyMonth(month), now) + ".xlsx");
     }
 
     function daysOfMonth(month) {
@@ -1476,7 +1557,8 @@
           'in this worker\'s totals until corrected.">' + w.broken + " To Fix</span>");
         if (w.open) att.push('<span class="badge badge-gray" title="Day(s) with a punch in and ' +
           'no punch out. No hours to count yet.">' + w.open + " Still Open</span>");
-        return '<tr class="shift-row" data-i="' + i + '" data-days="' + w.days + '" data-wm="' + w.wm +
+        return '<tr class="shift-row" data-i="' + i + '" data-company="' + esc(COMPANY[w.staff_id] || "") +
+                 '" data-days="' + w.days + '" data-wm="' + w.wm +
                  '" data-om="' + w.om + '" data-find="' +
                  esc(findKey(w, Object.keys(w.sites).join(" "))) + '">' +
           '<td><button type="button" class="worker-btn" data-i="' + i + '" aria-expanded="false">' +
@@ -1497,14 +1579,14 @@
         "monthly total — a 12-hour Monday and a 4-hour Tuesday is 4 hours of overtime, not none. " +
         "Days marked <strong>To Fix</strong> or <strong>Still Open</strong> are left out of the totals.</span>";
 
-      if (document.getElementById("f-find").value) applyFind("month-rows", 6);
+      if (document.getElementById("f-find").value || document.getElementById("f-company").value) applyFind("month-rows", 6);
       updateMonthTotals();
 
       // Download Excel — an export, so it answers to attendance.export
       var xBtn = document.getElementById("btn-excel");
       if (Dash.can("attendance.export") && window.XlsxLite) {
         xBtn.hidden = false;
-        xBtn.addEventListener("click", function () { downloadMonthExcel(workers, month, site); });
+        xBtn.addEventListener("click", function () { downloadMonthExcel(workers, month); });
       }
 
       tbody.addEventListener("click", function (ev) {
