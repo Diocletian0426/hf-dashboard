@@ -960,22 +960,12 @@
           var coords = hasLoc ? Number(lat).toFixed(5) + ", " + Number(lng).toFixed(5) : "";
           // Only a distance is worth words here: whether a location was caught
           // at all is what the Location badge beside it already says. A worker
-          // with no site of their own is measured against the nearest real site
-          // (DB 0102, worked out when the punch is read). Until 0102 is live the
-          // columns are simply absent, and the only such distance on record is
-          // the fenced site the punch was detected inside (0083).
-          var hasNear = p.nearest_distance_m !== null && p.nearest_distance_m !== undefined;
-          var d = plainDistance(p.distance_m),
-              dNear = plainDistance(hasNear ? p.nearest_distance_m : p.detected_distance_m);
-          var nearName = hasNear ? (p.nearest_project_name || p.nearest_project_code)
-                                 : (p.detected_project_name || p.detected_project_code);
-          var where = d ? d + " From Site"
-                    : (!p.project_id && dNear) ? dNear + " From Nearest Site" : "";
-          if (where && !d && nearName) {
-            coords = nearName + (coords ? " · GPS " + coords : "");
-          } else if (coords) {
-            coords = "GPS " + coords;
-          }
+          // with no site of their own gets no distance: "From Nearest Site" was
+          // built (hf-database PR #12) and put ON HOLD by the owner — the nearest
+          // site is not always the one he was at. See HF Roadmap for its trigger.
+          var d = plainDistance(p.distance_m);
+          var where = d ? d + " From Site" : "";
+          if (coords) coords = "GPS " + coords;
           // The system's own note on a shift it closed only spells out what
           // "Auto Closed" means, and the badge's hover says that. A note a
           // PERSON typed is the one thing on this line found nowhere else.
