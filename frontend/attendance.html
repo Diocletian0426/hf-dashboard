@@ -1376,7 +1376,7 @@
         var ca = companyName(COMPANY[a.staff_id]), cb = companyName(COMPANY[b.staff_id]);
         return ca < cb ? -1 : ca > cb ? 1 : (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
       });
-      if (!list.length) { alert("There is nobody from " + chosen + " in this month."); return; }
+      if (!list.length) { alert(chosen + " is unavailable for this month — there are no attendance records."); return; }
 
       var now = klNow(), who = "";
       try { var acc = await Dash.getMyAccess(); who = (acc && acc.ok && acc.access && acc.access.full_name) || ""; } catch (e) { who = ""; }
@@ -1608,7 +1608,7 @@
               var k = countFor(c[0]);
               return '<button type="button" role="menuitem" class="xl-item" data-xl="' + esc(c[0]) + '"' +
                      (k ? "" : " disabled") + "><strong>" + esc(c[1]) + "</strong><span>" +
-                     (k ? k + " worker" + (k === 1 ? "" : "s") : "nobody this month") + "</span></button>";
+                     (k ? k + " worker" + (k === 1 ? "" : "s") : "Unavailable") + "</span></button>";
             }).join("") +
             '<div class="xl-menu-note">The whole of ' + esc(friendlyMonth(month)) + " · " + esc(siteLabel()) + "</div>";
           xMenu.hidden = false; xBtn.setAttribute("aria-expanded", "true");
