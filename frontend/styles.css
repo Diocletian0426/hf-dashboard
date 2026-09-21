@@ -3330,3 +3330,67 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
   body.att-readable .table-legend.legend-list > span { margin-bottom: 3px; }
   body.att-readable .att-table tfoot .total-row td { background: #fff !important; border-top: 1.5px solid #000; font-size: 13px; }
 }
+
+/* ---- attendance: the Correct Hours form ----------------------------------
+   The one place on this page where the office TYPES was the smallest thing on
+   it: 12.5px inputs, 12px labels, 30px buttons. Sized here to be read and hit.
+   Save and Cancel sit together under the thing they act on; Remove Correction
+   is the destructive one, so it stands apart and looks it. */
+.att-readable .amend-wrap { margin-top: var(--sp-4); }
+.att-readable .amend-wrap > .amend-open {
+  font-size: 15px; padding: 10px 20px; color: var(--ink);
+}
+.att-readable .amend-form {
+  display: block; padding: var(--sp-4); margin-top: var(--sp-2);
+  background: rgba(255, 255, 255, 0.85); border: 1px solid var(--line-strong); border-radius: var(--r-lg);
+}
+.att-readable .amend-title { font-size: 16px; color: var(--ink); margin: 0 0 var(--sp-4); }
+.att-readable .amend-times { display: flex; align-items: flex-end; flex-wrap: wrap; gap: var(--sp-4) var(--sp-5); margin: 0 0 var(--sp-4); }
+.att-readable .amend-form label { font-size: 14.5px; font-weight: 600; color: var(--ink); }
+.att-readable .amend-times label { display: flex; flex-direction: column; gap: 6px; }
+.att-readable .amend-form input[type="time"],
+.att-readable .amend-form input[type="text"] {
+  font-size: 17px; padding: 10px 14px; min-height: 46px; color: var(--ink);
+  background: #fff; border: 1.5px solid var(--line-strong); border-radius: var(--r-md);
+}
+.att-readable .amend-form input[type="time"] { width: 170px; }
+.att-readable .amend-form input[type="text"] { width: 100%; max-width: 760px; box-sizing: border-box; }
+.att-readable .amend-form input:focus { outline: 2px solid var(--brand); outline-offset: 1px; border-color: var(--brand); }
+.att-readable .amend-form input.field-error { border-color: var(--danger-ink); outline: 2px solid rgba(220, 38, 38, 0.35); }
+.att-readable .amend-times label.amend-next {
+  flex-direction: row; align-items: center; gap: 10px; font-weight: 400; min-height: 46px; cursor: pointer;
+}
+.att-readable .amend-next input { width: 20px; height: 20px; }
+.att-readable .amend-reason { display: block; margin: 0 0 var(--sp-3); }
+.att-readable .amend-reason > label { display: block; margin: 0 0 6px; }
+.reason-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 10px; }
+.att-readable .amend-form .reason-chip {
+  font-size: 14.5px; padding: 8px 16px; color: var(--ink);
+  background: rgba(37, 99, 235, 0.07); border: 1px solid rgba(37, 99, 235, 0.3); border-radius: 999px; cursor: pointer;
+}
+.att-readable .amend-form .reason-chip:hover { background: rgba(37, 99, 235, 0.16); color: var(--brand-ink); }
+.att-readable .amend-msg:not(:empty) { margin: 0 0 var(--sp-3); }
+.att-readable .amend-msg .banner { font-size: 15px; margin: 0; }
+.att-readable .amend-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); margin: var(--sp-2) 0 var(--sp-3); }
+.att-readable .amend-actions button { font-size: 15.5px; padding: 11px 24px; min-height: 46px; }
+/* Save is the ONE filled button. The shared .claim-form button rule fills every button
+   blue and turns its text dark on hover - so Cancel looked like a second Save, and Save's
+   own label went dark-on-blue under the mouse, exactly when someone is about to press it. */
+.att-readable .amend-actions .btn-primary,
+.att-readable .amend-actions .btn-primary:hover,
+.att-readable .amend-actions .btn-primary:focus { font-weight: 600; color: #fff; background: var(--brand); border-color: var(--brand); }
+.att-readable .amend-actions .btn-primary:hover { filter: brightness(0.93); }
+.att-readable .amend-actions .btn-primary:disabled { opacity: 0.6; cursor: default; }
+.att-readable .amend-actions [data-amend-cancel],
+.att-readable .amend-actions [data-amend-cancel]:hover { color: var(--ink); background: #fff; border: 1px solid var(--line-strong); }
+.att-readable .amend-actions [data-amend-cancel]:hover { background: var(--surface-2); }
+.att-readable .amend-actions .amend-remove {
+  margin-left: auto; color: var(--danger-ink); border-color: #fecaca; background: #fff;
+}
+.att-readable .amend-actions .amend-remove:hover { background: var(--danger-soft); border-color: var(--danger-ink); color: var(--danger-ink); }
+.att-readable .amend-form .muted-line { display: block; font-size: 14px; color: var(--ink-2); }
+.att-readable .saved-note { font-size: 15.5px; margin: 0 0 var(--sp-3); }
+/* the month drill-down's way to the fix */
+.att-readable .fix-link { font-size: 14.5px; font-weight: 600; color: var(--brand-ink); text-decoration: none; white-space: nowrap; }
+.att-readable .fix-link:hover { text-decoration: underline; }
+@media print { body.att-readable .fix-link { display: none !important; } }
