@@ -960,14 +960,19 @@
           var coords = hasLoc ? Number(lat).toFixed(5) + ", " + Number(lng).toFixed(5) : "";
           // Only a distance is worth words here: whether a location was caught
           // at all is what the Location badge beside it already says. A worker
-          // with no site of their own is measured against the site they were
-          // detected at (0083) — today that exists only when they stood inside
-          // a site's fence.
-          var d = plainDistance(p.distance_m), dNear = plainDistance(p.detected_distance_m);
+          // with no site of their own is measured against the nearest real site
+          // (DB 0102, worked out when the punch is read). Until 0102 is live the
+          // columns are simply absent, and the only such distance on record is
+          // the fenced site the punch was detected inside (0083).
+          var hasNear = p.nearest_distance_m !== null && p.nearest_distance_m !== undefined;
+          var d = plainDistance(p.distance_m),
+              dNear = plainDistance(hasNear ? p.nearest_distance_m : p.detected_distance_m);
+          var nearName = hasNear ? (p.nearest_project_name || p.nearest_project_code)
+                                 : (p.detected_project_name || p.detected_project_code);
           var where = d ? d + " From Site"
                     : (!p.project_id && dNear) ? dNear + " From Nearest Site" : "";
-          if (where && !d && (p.detected_project_name || p.detected_project_code)) {
-            coords = (p.detected_project_name || p.detected_project_code) + (coords ? " · GPS " + coords : "");
+          if (where && !d && nearName) {
+            coords = nearName + (coords ? " · GPS " + coords : "");
           } else if (coords) {
             coords = "GPS " + coords;
           }
