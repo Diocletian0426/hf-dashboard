@@ -1521,8 +1521,9 @@
       }).join("");
       var can = !!workers && dlCount(workers, DL.company) > 0;
       document.getElementById("dl-go").disabled = !can;
+      document.getElementById("dl-hint").className = "dl-hint";
       document.getElementById("dl-hint").textContent = !workers ? ""
-        : can ? "" : "Nothing to download for that choice — pick another company, month or site.";
+        : can ? "" : "No Data Available";
     }
 
     async function dlLoad() {
@@ -1533,7 +1534,7 @@
         var rows = await fetchMonth(DL.month, DL.site);
         DL.cache[key] = byWorker(rows);
       } catch (e) {
-        if (mine === DL.ticket) document.getElementById("dl-hint").textContent = "Could not read that month: " + (e.message || e);
+        if (mine === DL.ticket) { document.getElementById("dl-hint").className = "dl-hint is-error"; document.getElementById("dl-hint").textContent = "Could Not Load — Try Again"; }
         return;
       }
       if (mine === DL.ticket) dlRender();          // a slower, older answer never overwrites a newer choice
@@ -1595,7 +1596,7 @@
         var workers = DL.cache[dlKey()]; if (!workers) return;
         this.disabled = true; this.textContent = "Preparing…";
         try { await downloadMonthExcel(workers, DL.month, DL.company, dlSiteName()); dlClose(); }
-        catch (e) { document.getElementById("dl-hint").textContent = "Could not make the file: " + (e.message || e); }
+        catch (e) { document.getElementById("dl-hint").className = "dl-hint is-error"; document.getElementById("dl-hint").textContent = "Download Failed — Try Again"; }
         this.textContent = "Download"; dlRender();
       });
     }

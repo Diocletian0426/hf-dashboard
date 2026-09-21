@@ -3490,7 +3490,9 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
   width: 100%; height: 40px; padding: 0 10px; font-size: 14.5px; color: var(--ink);
   background: #fff; border: 1px solid var(--line-strong); border-radius: 12px;
 }
-.dl-hint { min-height: 0; margin: 10px 0 0; font-size: 13.5px; line-height: 1.4; color: var(--danger-ink); }
+/* a STATE (no data) is said quietly; only a FAILURE is red */
+.dl-hint { min-height: 0; margin: 10px 0 0; font-size: 13.5px; line-height: 1.4; color: var(--ink-2); }
+.dl-hint.is-error { color: var(--danger-ink); }
 .dl-hint:empty { display: none; }
 .dl-actions { display: flex; justify-content: flex-end; margin-top: 14px; }
 .dl-actions .btn-primary, .dl-actions .btn-primary:hover {
