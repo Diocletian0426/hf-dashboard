@@ -63,20 +63,13 @@
           <path d="M6 9V3h12v6M6 18H4a1 1 0 0 1-1-1v-6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v6a1 1 0 0 1-1 1h-2"></path>
           <rect x="6" y="14" width="12" height="7"></rect>
         </svg>Print</button>
-      <!-- Pressing Download Excel ASKS which company (owner, 2026-09-21): the two
-           are paid separately, and choosing at the moment of downloading is
-           harder to get wrong than remembering to set a filter first. -->
-      <span class="xl-wrap" id="xl-wrap" hidden>
-        <button type="button" class="btn att-btn" id="btn-excel" aria-haspopup="menu" aria-expanded="false">
-          <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor"
-               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 3v12M7 10l5 5 5-5M4 21h16"></path>
-          </svg>Download Excel
-          <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor"
-               stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg>
-        </button>
-        <div class="xl-menu" id="xl-menu" role="menu" hidden></div>
-      </span>
+      <!-- Download Excel opens a small dialog that asks its own three questions
+           (company, month, site) — see DOWNLOAD ATTENDANCE in the script. -->
+      <button type="button" class="btn att-btn" id="btn-excel" hidden>
+        <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 3v12M7 10l5 5 5-5M4 21h16"></path>
+        </svg>Download Excel</button>
     </div>
     <!-- shown on paper only: says what the sheet is, since the bar above is not printed -->
     <div class="print-head" id="print-head"></div>
@@ -91,8 +84,8 @@
       <label id="lbl-company" hidden>Company
         <select id="f-company">
           <option value="">All Companies</option>
-          <option value="HF-BP">HF Bored Piles</option>
-          <option value="Hai Fu">Hai Fu</option>
+          <option value="HF-BP">HF Bored Piles Malaysia Sdn Bhd</option>
+          <option value="Hai Fu">Hai Fu Sheet Piles Sdn Bhd</option>
         </select>
       </label>
       <label>Find
@@ -106,11 +99,11 @@
       <table class="att-table">
         <thead>
           <tr>
-            <th>Worker</th><th>Site</th><th>In</th><th>Out</th>
+            <th>Employee Code</th><th>Worker</th><th>Site</th><th>In</th><th>Out</th>
             <th class="num">Working Hours</th><th class="num">Over Time</th><th>Attention</th>
           </tr>
         </thead>
-        <tbody id="rows"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+        <tbody id="rows"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
       </table>
     </div>
 
@@ -137,7 +130,7 @@
       <table class="att-table">
         <thead>
           <tr>
-            <th>Worker</th><th>Sites</th>
+            <th>Employee Code</th><th>Worker</th><th>Sites</th>
             <th class="num">Days Worked</th>
             <th class="num">Working Hours</th><th class="num">Over Time</th>
             <th>Attention</th>
@@ -164,6 +157,38 @@
 
     <div id="error"></div>
   </main>
+
+  <div class="modal-back" id="dl-back" hidden>
+    <div class="dl-card" role="dialog" aria-modal="true" aria-labelledby="dl-title">
+      <h3 id="dl-title">Download Attendance</h3>
+      <p class="dl-sub">One Excel file, for the company, month and site you choose here.</p>
+
+      <div class="dl-field">
+        <div class="dl-label">Company</div>
+        <div id="dl-companies" role="radiogroup" aria-label="Company"></div>
+      </div>
+
+      <div class="dl-field">
+        <div class="dl-label">Month</div>
+        <span class="stepper">
+          <button type="button" class="step-btn" id="dl-prev" aria-label="Previous Month" title="Previous Month">&lsaquo;</button>
+          <span class="step-label" id="dl-month-label" aria-live="polite"></span>
+          <button type="button" class="step-btn" id="dl-next" aria-label="Next Month" title="Next Month">&rsaquo;</button>
+        </span>
+      </div>
+
+      <div class="dl-field">
+        <label class="dl-label" for="dl-site">Site <span class="dl-optional">Optional</span></label>
+        <select id="dl-site"></select>
+      </div>
+
+      <p class="dl-hint" id="dl-hint" aria-live="polite"></p>
+      <div class="dl-actions">
+        <button type="button" class="btn-primary" id="dl-go">Download</button>
+        <button type="button" id="dl-cancel">Cancel</button>
+      </div>
+    </div>
+  </div>
 
   <script src="vendor/supabase.js"></script>
   <script src="config.js"></script>
@@ -351,15 +376,29 @@
     // the company's name as the office says it (the database keeps a short code)
     var COMPANY_NAME = { "HF-BP": "HF Bored Piles", "Hai Fu": "Hai Fu" };
     function companyName(code) { return COMPANY_NAME[code] || code || ""; }
+    // ...and the full legal name (owner, 2026-09-21): used wherever the company is
+    // NAMED ONCE — the download dialog, the Company filter, the Excel sheet, the
+    // printed heading. The short name stays where it would repeat or must be brief:
+    // under every worker's name, and in file names. Kept here because the page has
+    // no read of the companies table; two legal entities, and they do not change often.
+    var COMPANY_FULL = { "HF-BP": "HF Bored Piles Malaysia Sdn Bhd", "Hai Fu": "Hai Fu Sheet Piles Sdn Bhd" };
+    function companyFull(code) { return COMPANY_FULL[code] || companyName(code); }
     function companyLabel() {
       var el = document.getElementById("f-company");
       return (el && el.value) ? companyName(el.value) : "All Companies";
     }
 
-    // under the name: the employee code, and whose payroll the worker is on
+    // EMPLOYEE CODE HAS ITS OWN COLUMN (owner, 2026-09-21) — it is what payroll
+    // looks a worker up by, so it leads the row, the way it leads a salary
+    // listing. The chevron that says "this row opens" sits in front of it.
+    function codeCell(staffId) {
+      return '<td class="code-cell"><span class="caret" aria-hidden="true"></span>' +
+             '<span class="emp-code">' + esc(CODES[staffId] || "—") + "</span></td>";
+    }
+    // under the name: whose payroll the worker is on (short name — it repeats on every row)
     function codeTag(staffId) {
-      var bits = [CODES[staffId], companyName(COMPANY[staffId])].filter(Boolean);
-      return bits.length ? ' <span class="muted">' + esc(bits.join(" · ")) + "</span>" : "";
+      var c = companyName(COMPANY[staffId]);
+      return c ? ' <span class="muted">' + esc(c) + "</span>" : "";
     }
 
     // Malaysia's clock, now — for stamping a printout or a download to the minute
@@ -373,8 +412,8 @@
       };
     }
     // "Attendance August 2026 - HF Bored Piles - Downloaded 2026-09-21 at 14.32"
-    function fileName(verb, whenText, now, company) {
-      var site = siteLabel();
+    function fileName(verb, whenText, now, company, siteName) {
+      var site = siteName || siteLabel();
       return ["Attendance " + whenText, company || companyLabel(), site === "All Sites" ? "" : site, verb + " " + now.file]
         .filter(Boolean).join(" - ").replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim();
     }
@@ -744,7 +783,7 @@
 
       var findEl = document.getElementById("f-find");
       findEl.value = params.get("find") || "";
-      function refilter() { applyFind(view === "month" ? "month-rows" : "rows", view === "month" ? 6 : 7); }
+      function refilter() { applyFind(view === "month" ? "month-rows" : "rows", view === "month" ? 7 : 8); }
       findEl.addEventListener("input", refilter);
       var companyEl = document.getElementById("f-company");
       companyEl.value = params.get("company") || "";
@@ -789,6 +828,7 @@
 
         // ---- month view: one row per worker, his own numbers ---------------
         if (view === "month") { await renderMonth(month, site); return; }
+        wireDownloadDialog(date.slice(0, 7), site, null);      // from the day view: that day's month, read when asked for
 
         // ---- the shift table ----------------------------------------------
         // One row per worker. The NAME is a button: it opens a detail row
@@ -797,7 +837,7 @@
         // checked out. That detail is the answer to "why is this flagged",
         // which is the only reason anyone opens this page twice.
         if (!shifts.length) {
-          tbody.innerHTML = '<tr><td colspan="7" class="empty">No punches on ' + esc(friendlyDate(date)) +
+          tbody.innerHTML = '<tr><td colspan="8" class="empty">No punches on ' + esc(friendlyDate(date)) +
             ". The punch app pilot hasn't started at the sites yet.</td></tr>";
         } else {
           tbody.innerHTML = shifts.map(function (s, i) {
@@ -829,9 +869,9 @@
             var h = hoursOf(s);
             return '<tr class="shift-row" data-i="' + i + '" data-company="' + esc(COMPANY[s.staff_id] || "") +
                    '" data-find="' + esc(findKey(s)) + '">' +
+              codeCell(s.staff_id) +
               '<td><button type="button" class="worker-btn" data-i="' + i + '" ' +
                    'aria-expanded="false" aria-controls="d' + i + '">' +
-                 '<span class="caret" aria-hidden="true"></span>' +
                  '<span class="who-line"><strong>' + esc(s.full_name) + "</strong>" + codeTag(s.staff_id) +
                  "</span></button></td>" +
               "<td>" + esc(s.project_name || "—") + "</td>" +
@@ -851,10 +891,10 @@
                   : "—") + "</td>" +
               "<td>" + (flags.join(" ") || "—") + "</td>" +
             "</tr>" +
-            '<tr class="detail-row" id="d' + i + '" hidden><td colspan="7"></td></tr>';
+            '<tr class="detail-row" id="d' + i + '" hidden><td colspan="8"></td></tr>';
           }).join("");
           document.getElementById("legend").hidden = false;
-          if (findEl.value || companyEl.value) applyFind("rows", 7);
+          if (findEl.value || companyEl.value) applyFind("rows", 8);
         }
 
         /* ---- the detail drawer ---------------------------------------------
@@ -1243,7 +1283,7 @@
           shifts.forEach(function (x, k) { if (x.staff_id === wantOpen) idx = k; });
           if (idx >= 0) {
             var tr = tbody.querySelector('tr.shift-row[data-i="' + idx + '"]');
-            if (tr && tr.hidden) { findEl.value = ""; applyFind("rows", 7); }   // never open a row the Find box is hiding
+            if (tr && tr.hidden) { findEl.value = ""; applyFind("rows", 8); }   // never open a row the Find box is hiding
             setOpen(idx, true);
             await loadDrawer(idx);
             var box = document.querySelector("#d" + idx + " .detail-box");
@@ -1321,7 +1361,7 @@
       });
       var all = document.querySelectorAll("#month-rows tr.shift-row").length;
       foot.hidden = false;
-      foot.innerHTML = '<tr class="total-row"><td colspan="2"><strong>Total</strong> ' +
+      foot.innerHTML = '<tr class="total-row"><td colspan="3"><strong>Total</strong> ' +
         '<span class="muted">' + rows.length + (rows.length === all ? "" : " of " + all) +
         " worker" + (all === 1 ? "" : "s") + "</span></td>" +
         '<td class="num"><strong>' + days + "</strong></td>" +
@@ -1341,14 +1381,15 @@
       var find = document.getElementById("f-find").value.trim();
       document.getElementById("print-head").innerHTML =
         "<h2>Attendance — " + esc(view === "month" ? "Month Of " + whenText : whenText) + "</h2>" +
-        "<p>Company: " + esc(companyLabel()) + " · Site: " + esc(siteLabel()) +
+        "<p>Company: " + esc(document.getElementById("f-company").value ? companyFull(document.getElementById("f-company").value) : "All Companies") +
+        " · Site: " + esc(siteLabel()) +
         (find ? " · Showing: “" + esc(find) + "”" : "") +
         " · Printed " + esc(klNow().words) + "</p>";
     }
 
     // ---- Download Excel ---------------------------------------------------
-    // The sheet holds ONE COMPANY'S WHOLE MONTH — the company picked from the
-    // button's menu — and says which at the top. (Print is the other way round:
+    // The sheet holds what the DOWNLOAD DIALOG chose — a company (or all), a month,
+    // a site (or all) — and says all three at the top. (Print is the other way round:
     // it prints what the table is showing, so the Company filter stays in the bar.)
     //
     // Two sheets: Summary (one row per worker — what payroll keys in) and Daily
@@ -1365,13 +1406,15 @@
     // minute: corrections keep landing after a download, and "which of these
     // two files is the newer one" has to be answerable from the file itself.
     // Nothing is fetched here — it is exactly what the screen already holds.
-    async function downloadMonthExcel(workers, month, companyCode) {
+    async function downloadMonthExcel(workers, month, companyCode, siteName) {
       function B(v) { return { v: v, bold: true }; }
       function H(min) { return { v: min / 60, hours: true }; }
       function T(ts) { var v = klInputValue(ts); return v ? { v: v.slice(11, 16), time: true } : ""; }
 
       // the company chosen in the menu — the WHOLE month of it, in company-then-name order
-      var chosen = companyCode ? companyName(companyCode) : "All Companies";
+      var chosen = companyCode ? companyName(companyCode) : "All Companies";          // short — for the file name
+      var chosenFull = companyCode ? companyFull(companyCode) : "All Companies";     // legal — for the sheet
+      siteName = siteName || "All Sites";
       var list = workers.filter(function (w) { return !companyCode || COMPANY[w.staff_id] === companyCode; }).sort(function (a, b) {
         var ca = companyName(COMPANY[a.staff_id]), cb = companyName(COMPANY[b.staff_id]);
         return ca < cb ? -1 : ca > cb ? 1 : (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
@@ -1383,8 +1426,8 @@
       var HEAD = 7;                               // the row the column headings sit on
       var sum = [
         [B("Attendance — " + friendlyMonth(month))],
-        [B("Company"), chosen],
-        [B("Site"), siteLabel()],
+        [B("Company"), chosenFull],
+        [B("Site"), siteName],
         [B("Workers"), list.length],
         [B("Downloaded"), now.words + (who ? " by " + who : "")],
         ["Days marked To Fix or Still Open are NOT in these totals — correct them on the Attendance page, then download again."],
@@ -1393,7 +1436,7 @@
       var tDays = 0, tWm = 0, tOm = 0, tFix = 0, tOpen = 0;
       list.forEach(function (w) {
         tDays += w.days; tWm += w.wm; tOm += w.om; tFix += w.broken; tOpen += w.open;
-        sum.push([CODES[w.staff_id] || "", w.name, companyName(COMPANY[w.staff_id]), Object.keys(w.sites).join(", "),
+        sum.push([CODES[w.staff_id] || "", w.name, companyFull(COMPANY[w.staff_id]), Object.keys(w.sites).join(", "),
                   w.days, H(w.wm), H(w.om), H(w.wm + w.om), w.broken, w.open]);
       });
       var first = HEAD + 1, last = HEAD + list.length;
@@ -1413,7 +1456,7 @@
           var wm = Number(r.working_minutes) || 0, om = Number(r.ot_minutes) || 0;
           var note = r.overlong_shift ? "Forgot To Punch Out" : (!effOut(r) ? "No Punch Out"
                      : (r.has_anomaly ? "Location Not Confirmed" : ""));
-          daily.push([CODES[w.staff_id] || "", w.name, companyName(COMPANY[w.staff_id]),
+          daily.push([CODES[w.staff_id] || "", w.name, companyFull(COMPANY[w.staff_id]),
             { v: r.work_date, date: true }, DAY_NAMES[new Date(String(r.work_date).slice(0, 10) + "T00:00:00Z").getUTCDay()],
             r.project_name || "", T(effIn(r)), T(effOut(r)),
             counted ? H(wm) : "", counted ? H(om) : "", counted ? H(wm + om) : "",
@@ -1425,7 +1468,118 @@
         { name: "Summary", freezeRows: HEAD, widths: [16, 34, 17, 34, 13, 15, 17, 13, 13, 16], rows: sum },
         { name: "Daily",   freezeRows: 1,    widths: [16, 34, 17, 14, 7, 30, 11, 11, 15, 17, 13, 18, 20, 50, 26], rows: daily }
       ]);
-      XlsxLite.download(blob, fileName("Downloaded", friendlyMonth(month), now, chosen) + ".xlsx");
+      XlsxLite.download(blob, fileName("Downloaded", friendlyMonth(month), now, chosen, siteName) + ".xlsx");
+    }
+
+    /* =======================================================================
+       DOWNLOAD ATTENDANCE — the dialog behind the Download Excel button
+       -----------------------------------------------------------------------
+       LOOKING at attendance and PRODUCING a payroll file are different jobs
+       (owner, 2026-09-21). The download used to take whatever the page was
+       showing, so getting Hai Fu's June file meant steering the whole page to
+       Hai Fu and June first. Now the button asks its own three questions —
+       which company, which month, which site (optional) — and the page behind
+       it does not matter.
+
+       It opens ALREADY FILLED IN from the page (its month, its site, its
+       company filter), so the everyday case is still: press, pick the company,
+       Download. Each company shows how many workers it has for the month and
+       site chosen; one with none reads "Unavailable" and cannot be picked.
+
+       The month is read through the same door the month view uses
+       (fetchMonth -> get_shifts_range), and kept, so stepping back to a month
+       already looked at is instant. Nothing here writes anything.
+       ======================================================================= */
+    var DL = { month: "", site: "", company: "", cache: {}, ticket: 0 };
+
+    function dlKey() { return DL.month + "|" + DL.site; }
+    function dlSiteName() {
+      var el = document.getElementById("dl-site");
+      return (el && el.value && el.selectedIndex >= 0) ? el.options[el.selectedIndex].text : "All Sites";
+    }
+    function dlCount(workers, code) {
+      return workers.filter(function (w) { return !code || COMPANY[w.staff_id] === code; }).length;
+    }
+
+    function dlRender() {
+      var thisMonth = Dash.todayKL().slice(0, 7), workers = DL.cache[dlKey()];
+      document.getElementById("dl-month-label").textContent = friendlyMonth(DL.month);
+      document.getElementById("dl-next").disabled = DL.month >= thisMonth;
+      var choices = [["", "All Companies"], ["HF-BP", companyFull("HF-BP")], ["Hai Fu", companyFull("Hai Fu")]];
+      document.getElementById("dl-companies").innerHTML = choices.map(function (c) {
+        var k = workers ? dlCount(workers, c[0]) : null, off = (k === 0);
+        return '<label class="dl-choice' + (off ? " is-off" : "") + '">' +
+          '<input type="radio" name="dl-company" value="' + esc(c[0]) + '"' +
+            (DL.company === c[0] ? " checked" : "") + (off ? " disabled" : "") + ">" +
+          '<span class="dl-name">' + esc(c[1]) + "</span>" +
+          '<span class="dl-count">' + (k === null ? "Checking…" : off ? "Unavailable"
+            : k + " worker" + (k === 1 ? "" : "s")) + "</span></label>";
+      }).join("");
+      var can = !!workers && dlCount(workers, DL.company) > 0;
+      document.getElementById("dl-go").disabled = !can;
+      document.getElementById("dl-hint").textContent = !workers ? ""
+        : can ? "" : "Nothing to download for that choice — pick another company, month or site.";
+    }
+
+    async function dlLoad() {
+      var key = dlKey(), mine = ++DL.ticket;
+      dlRender();
+      if (DL.cache[key]) return;
+      try {
+        var rows = await fetchMonth(DL.month, DL.site);
+        DL.cache[key] = byWorker(rows);
+      } catch (e) {
+        if (mine === DL.ticket) document.getElementById("dl-hint").textContent = "Could not read that month: " + (e.message || e);
+        return;
+      }
+      if (mine === DL.ticket) dlRender();          // a slower, older answer never overwrites a newer choice
+    }
+
+    function dlOpen(month, site, company) {
+      DL.month = month; DL.site = site || ""; DL.company = company || "";
+      var src = document.getElementById("f-site"), dst = document.getElementById("dl-site");
+      dst.innerHTML = src.innerHTML; dst.value = DL.site;
+      document.getElementById("dl-back").hidden = false;
+      dlLoad().then(function () {
+        var first = document.querySelector("#dl-companies input:checked:not(:disabled)") ||
+                    document.querySelector("#dl-companies input:not(:disabled)");
+        if (first) first.focus();
+      });
+    }
+    function dlClose() {
+      document.getElementById("dl-back").hidden = true;
+      var b = document.getElementById("btn-excel"); if (b) b.focus();
+    }
+
+    function wireDownloadDialog(startMonth, startSite, loadedWorkers) {
+      var btn = document.getElementById("btn-excel");
+      if (!Dash.can("attendance.export") || !window.XlsxLite) return;     // an export answers to attendance.export
+      btn.hidden = false;
+      if (loadedWorkers) DL.cache[startMonth + "|" + (startSite || "")] = loadedWorkers;   // the month view already has it
+      btn.addEventListener("click", function () {
+        dlOpen(startMonth, startSite, document.getElementById("f-company").value);
+      });
+      document.getElementById("dl-prev").addEventListener("click", function () { DL.month = shiftMonth(DL.month, -1); dlLoad(); });
+      document.getElementById("dl-next").addEventListener("click", function () {
+        if (DL.month < Dash.todayKL().slice(0, 7)) { DL.month = shiftMonth(DL.month, 1); dlLoad(); }
+      });
+      document.getElementById("dl-site").addEventListener("change", function () { DL.site = this.value; dlLoad(); });
+      document.getElementById("dl-companies").addEventListener("change", function (ev) {
+        if (ev.target.name === "dl-company") { DL.company = ev.target.value; dlRender();
+          var again = document.querySelector('#dl-companies input[value="' + DL.company + '"]'); if (again) again.focus(); }
+      });
+      document.getElementById("dl-cancel").addEventListener("click", dlClose);
+      document.getElementById("dl-back").addEventListener("click", function (ev) { if (ev.target.id === "dl-back") dlClose(); });
+      document.addEventListener("keydown", function (ev) {
+        if (ev.key === "Escape" && !document.getElementById("dl-back").hidden) dlClose();
+      });
+      document.getElementById("dl-go").addEventListener("click", async function () {
+        var workers = DL.cache[dlKey()]; if (!workers) return;
+        this.disabled = true; this.textContent = "Preparing…";
+        try { await downloadMonthExcel(workers, DL.month, DL.company, dlSiteName()); dlClose(); }
+        catch (e) { document.getElementById("dl-hint").textContent = "Could not make the file: " + (e.message || e); }
+        this.textContent = "Download"; dlRender();
+      });
     }
 
     function daysOfMonth(month) {
@@ -1540,16 +1694,17 @@
     async function renderMonth(month, site) {
       var tbody = document.getElementById("month-rows");
       var note = document.getElementById("month-note");
-      tbody.innerHTML = '<tr><td colspan="6" class="empty">Reading the month…</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" class="empty">Reading the month…</td></tr>';
 
       var rows = await fetchMonth(month, site, function (done, total) {
-        tbody.innerHTML = '<tr><td colspan="6" class="empty">Reading the month… ' +
+        tbody.innerHTML = '<tr><td colspan="7" class="empty">Reading the month… ' +
                           done + " of " + total + " days</td></tr>";
       });
       var workers = byWorker(rows);
+      wireDownloadDialog(month, site, workers);      // opens pre-filled with this month; reuses what was just read
 
       if (!workers.length) {
-        tbody.innerHTML = '<tr><td colspan="6" class="empty">No punches in ' + esc(month) +
+        tbody.innerHTML = '<tr><td colspan="7" class="empty">No punches in ' + esc(friendlyMonth(month)) +
           ". The punch app pilot hasn't started at the sites yet.</td></tr>";
         note.hidden = true;
         return;
@@ -1566,8 +1721,8 @@
                  '" data-days="' + w.days + '" data-wm="' + w.wm +
                  '" data-om="' + w.om + '" data-find="' +
                  esc(findKey(w, Object.keys(w.sites).join(" "))) + '">' +
+          codeCell(w.staff_id) +
           '<td><button type="button" class="worker-btn" data-i="' + i + '" aria-expanded="false">' +
-            '<span class="caret" aria-hidden="true"></span>' +
             '<span class="who-line"><strong>' + esc(w.name) + "</strong>" + codeTag(w.staff_id) + "</span>" +
             "</button></td>" +
           "<td>" + esc(Object.keys(w.sites).join(", ") || "—") + "</td>" +
@@ -1575,7 +1730,7 @@
           '<td class="num">' + hm(w.normal) + "</td>" +
           '<td class="num">' + (w.ot > 0 ? '<span class="ot-on">' + hm(w.ot) + "</span>" : hm(0)) + "</td>" +
           "<td>" + (att.join(" ") || "—") + "</td></tr>" +
-          '<tr class="detail-row" id="m' + i + '" hidden><td colspan="6"></td></tr>';
+          '<tr class="detail-row" id="m' + i + '" hidden><td colspan="7"></td></tr>';
       }).join("");
 
       note.hidden = false;
@@ -1584,51 +1739,8 @@
         "monthly total — a 12-hour Monday and a 4-hour Tuesday is 4 hours of overtime, not none. " +
         "Days marked <strong>To Fix</strong> or <strong>Still Open</strong> are left out of the totals.</span>";
 
-      if (document.getElementById("f-find").value || document.getElementById("f-company").value) applyFind("month-rows", 6);
+      if (document.getElementById("f-find").value || document.getElementById("f-company").value) applyFind("month-rows", 7);
       updateMonthTotals();
-
-      // Download Excel — an export, so it answers to attendance.export.
-      // The menu lists the companies WITH how many workers each has this month,
-      // so the office sees what it is about to get; a company with nobody in the
-      // month cannot be picked. The download takes the WHOLE month for that
-      // company (and the Site chosen above) — never the Find box: a name left in
-      // Find must not quietly turn a payroll file into one worker's.
-      var xWrap = document.getElementById("xl-wrap"), xBtn = document.getElementById("btn-excel"),
-          xMenu = document.getElementById("xl-menu");
-      if (Dash.can("attendance.export") && window.XlsxLite) {
-        xWrap.hidden = false;
-        var knowsCompanies = Object.keys(COMPANY).length > 0;
-        function countFor(code) {
-          return workers.filter(function (w) { return !code || COMPANY[w.staff_id] === code; }).length;
-        }
-        function closeMenu() { xMenu.hidden = true; xBtn.setAttribute("aria-expanded", "false"); }
-        function openMenu() {
-          xMenu.innerHTML = '<div class="xl-menu-title">Download Which Company?</div>' +
-            [["", "All Companies"], ["HF-BP", "HF Bored Piles"], ["Hai Fu", "Hai Fu"]].map(function (c) {
-              var k = countFor(c[0]);
-              return '<button type="button" role="menuitem" class="xl-item" data-xl="' + esc(c[0]) + '"' +
-                     (k ? "" : " disabled") + "><strong>" + esc(c[1]) + "</strong><span>" +
-                     (k ? k + " worker" + (k === 1 ? "" : "s") : "Unavailable") + "</span></button>";
-            }).join("") +
-            '<div class="xl-menu-note">The whole of ' + esc(friendlyMonth(month)) + " · " + esc(siteLabel()) + "</div>";
-          xMenu.hidden = false; xBtn.setAttribute("aria-expanded", "true");
-          var first = xMenu.querySelector(".xl-item:not([disabled])"); if (first) first.focus();
-        }
-        xBtn.addEventListener("click", function (ev) {
-          ev.stopPropagation();
-          // no staff list = no way to tell the companies apart: just download everyone
-          if (!knowsCompanies) { downloadMonthExcel(workers, month, ""); return; }
-          if (xMenu.hidden) openMenu(); else closeMenu();
-        });
-        xMenu.addEventListener("click", function (ev) {
-          var item = ev.target.closest ? ev.target.closest(".xl-item") : null;
-          if (!item || item.disabled) return;
-          closeMenu();
-          downloadMonthExcel(workers, month, item.getAttribute("data-xl") || "");
-        });
-        document.addEventListener("click", function (ev) { if (!xWrap.contains(ev.target)) closeMenu(); });
-        document.addEventListener("keydown", function (ev) { if (ev.key === "Escape" && !xMenu.hidden) { closeMenu(); xBtn.focus(); } });
-      }
 
       tbody.addEventListener("click", function (ev) {
         var btn = rowButton(ev);

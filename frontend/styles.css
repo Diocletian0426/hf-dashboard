@@ -3158,10 +3158,17 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
    with one-word badges. With readable type and badges that say what they mean,
    the table outgrew the page and the Attention column slid off the right edge.
    The two columns made of WORDS may wrap; the columns made of numbers stay put. */
-.att-readable .att-table td:nth-child(2),
+.att-readable .att-table:not(.month-days) > tbody > tr > td:nth-child(3),
 .att-readable .att-table td:last-child { white-space: normal; }
 .att-readable .att-table td:last-child .badge { margin: 2px 1px; }
-.att-readable .att-table > tbody > tr > td:nth-child(2) { min-width: 190px; }
+/* With Employee Code as its own column the row ran out of width again. A badge is one
+   unbreakable word by default; in THIS column a long label may take two lines instead
+   of pushing the column off the page. Holds for any code length, not just short ones. */
+.att-readable .att-table:not(.month-days) > tbody > tr > td:last-child { max-width: 190px; }
+.att-readable .att-table:not(.month-days) > tbody > tr > td:last-child .badge {
+  white-space: normal; text-align: center; line-height: 1.25; padding-top: 4px; padding-bottom: 4px; border-radius: 14px;
+}
+.att-readable .att-table:not(.month-days) > tbody > tr > td:nth-child(3) { min-width: 190px; }
 .att-readable .att-table .empty { font-size: 16px; color: var(--ink-2); }
 /* employee codes were --ink-3 at 12px — present, but not readable */
 .att-readable .att-table .muted { font-size: 13.5px; color: var(--ink-2); }
@@ -3398,33 +3405,66 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
 /* the Company filter is a short list - it does not need the Site box's width */
 .att-narrow #f-company { width: 210px; }
 
-/* ---- attendance: the Download Excel menu ---------------------------------
-   Opens under the button. A SOLID surface, not frosted glass — it floats over
-   the table and has to stay readable. Big rows: this is pressed by people who
-   should not have to aim. */
-.xl-wrap { position: relative; display: inline-flex; }
-.xl-menu {
-  position: absolute; right: 0; top: calc(100% + 8px); z-index: 40; min-width: 300px;
-  padding: 8px; background: #fff; border: 1px solid var(--line-strong);
-  border-radius: var(--r-lg); box-shadow: 0 14px 38px rgba(22, 32, 58, 0.18);
+/* ---- attendance: the Employee Code column --------------------------------
+   Code | Worker | Site read as text, left-aligned; everything after is a fact
+   about the day, centred under its heading. The chevron that says "this row
+   opens" leads the row, in front of the code. */
+.att-table:not(.month-days) > thead > tr > th:nth-child(3),
+.att-table:not(.month-days) > tbody > tr > td:nth-child(3) { text-align: left; }
+.att-readable .code-cell { white-space: nowrap; }
+.att-readable .code-cell .emp-code { font-variant-numeric: tabular-nums; color: var(--ink); }
+.code-cell .caret {
+  display: inline-block; width: 0; height: 0; margin-right: 10px; vertical-align: 1px;
+  border-left: 7px solid var(--ink-2);
+  border-top: 5px solid transparent; border-bottom: 5px solid transparent;
+  transition: transform 0.15s ease;
 }
-.xl-menu-title {
-  padding: 6px 12px 8px; font-size: 12.5px; font-weight: 700; letter-spacing: 0.06em;
+.shift-row.open .code-cell .caret { transform: rotate(90deg) translateX(1px); }
+.att-readable tr.shift-row:hover .code-cell .caret { border-left-color: var(--brand-ink); }
+@media print { body.att-readable .code-cell .caret { display: none !important; } }
+
+/* ---- attendance: the Download Attendance dialog ---------------------------
+   Three questions, in type you can read, with targets you cannot miss. A SOLID
+   card — it sits over the page and has to stay readable. */
+.dl-card {
+  width: 100%; max-width: 560px; max-height: calc(100vh - 48px); overflow: auto;
+  padding: 26px 28px 22px; background: #fff; border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg); box-shadow: 0 24px 60px rgba(15, 23, 42, 0.3);
+}
+.dl-card h3 { margin: 0 0 4px; font-size: 23px; color: var(--ink); }
+.dl-sub { margin: 0 0 20px; font-size: 15px; color: var(--ink-2); }
+.dl-field { margin: 0 0 20px; }
+.dl-label {
+  display: block; margin: 0 0 8px; font-size: 13px; font-weight: 700; letter-spacing: 0.07em;
   text-transform: uppercase; color: var(--ink-2);
 }
-.xl-item {
-  display: flex; align-items: baseline; justify-content: space-between; gap: 18px;
-  width: 100%; min-height: 48px; padding: 11px 14px; margin: 0;
-  font: inherit; font-size: 16px; color: var(--ink); text-align: left;
-  background: none; border: 0; border-radius: var(--r-md); cursor: pointer;
+.dl-optional { margin-left: 8px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--ink-3); }
+.dl-choice {
+  display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 8px 14px; margin: 0 0 8px;
+  font-size: 16.5px; color: var(--ink); cursor: pointer;
+  border: 1.5px solid var(--line-strong); border-radius: var(--r-md); background: #fff;
 }
-.xl-item span { font-size: 14px; color: var(--ink-2); white-space: nowrap; }
-.xl-item:hover:not(:disabled), .xl-item:focus-visible { background: rgba(37, 99, 235, 0.1); outline: none; }
-.xl-item:hover:not(:disabled) strong, .xl-item:focus-visible strong { color: var(--brand-ink); }
-.xl-item:disabled { cursor: default; }
-.xl-item:disabled strong, .xl-item:disabled span { color: var(--ink-3); font-weight: 400; }
-.xl-menu-note {
-  margin-top: 6px; padding: 9px 12px 4px; border-top: 1px solid var(--line-strong);
-  font-size: 13.5px; color: var(--ink-2);
+.dl-choice:hover:not(.is-off) { border-color: var(--brand); background: rgba(37, 99, 235, 0.05); }
+.dl-choice:has(input:checked) { border-color: var(--brand); background: rgba(37, 99, 235, 0.09); }
+.dl-choice:has(input:focus-visible) { outline: 2px solid var(--brand); outline-offset: 2px; }
+.dl-choice input { width: 20px; height: 20px; flex: 0 0 auto; margin: 0; accent-color: var(--brand); }
+.dl-name { flex: 1 1 auto; font-weight: 600; }
+.dl-count { flex: 0 0 auto; font-size: 14.5px; color: var(--ink-2); white-space: nowrap; }
+.dl-choice.is-off { cursor: default; background: var(--surface-2); }
+.dl-choice.is-off .dl-name, .dl-choice.is-off .dl-count { color: var(--ink-3); font-weight: 400; }
+.dl-card .stepper { background: #fff; }
+.dl-card #dl-site {
+  width: 100%; font-size: 16px; padding: 12px 14px; min-height: 48px; color: var(--ink);
+  background: #fff; border: 1.5px solid var(--line-strong); border-radius: var(--r-md);
 }
-@media print { .xl-wrap { display: none !important; } }
+.dl-hint { min-height: 20px; margin: 0 0 12px; font-size: 14.5px; color: var(--danger-ink); }
+.dl-actions { display: flex; gap: 12px; }
+.dl-actions button {
+  font-size: 16px; padding: 12px 28px; min-height: 48px; border-radius: var(--r-pill); cursor: pointer;
+  color: var(--ink); background: #fff; border: 1px solid var(--line-strong);
+}
+.dl-actions button:hover { background: var(--surface-2); }
+.dl-actions .btn-primary, .dl-actions .btn-primary:hover { color: #fff; font-weight: 600; background: var(--brand); border-color: var(--brand); }
+.dl-actions .btn-primary:hover { filter: brightness(0.93); }
+.dl-actions .btn-primary:disabled { opacity: 0.45; cursor: default; filter: none; }
+@media print { #dl-back { display: none !important; } }
