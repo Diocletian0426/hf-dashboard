@@ -112,18 +112,12 @@
          line as a tooltip. Hidden until there are rows to explain. -->
     <div class="table-legend legend-list" id="legend" hidden>
       <div class="legend-title">What The Labels Mean</div>
-      <span><span class="badge badge-anomaly">Forgot To Punch Out</span> the shift ran far too long
-        to be real, so its hours are not counted until the office corrects it</span>
-      <span><span class="badge badge-anomaly">Location Not Confirmed</span> at least one punch that
-        day could not be matched to the site — taken outside the site area, a weak GPS signal, or
-        the site has no GPS area set yet</span>
-      <span><span class="badge badge-gray">Still Working</span> punched in, no punch out yet</span>
-      <span><span class="badge badge-amended">Corrected By Office</span> the office set this day's
-        hours — click the worker's row to see their own times and the reason</span>
-      <span><span class="badge badge-anomaly">Closed By Office</span> the office entered this
-        punch-out for the worker</span>
-      <span><span class="badge badge-anomaly">Auto Closed</span> no punch-out by 6 AM the next day,
-        so the system closed the shift at 5:00 PM with no overtime</span>
+      <span><span class="badge badge-anomaly">Forgot To Punch Out</span> Hours not counted until corrected</span>
+      <span><span class="badge badge-anomaly">Location Not Confirmed</span> Punch could not be matched to the site</span>
+      <span><span class="badge badge-gray">Still Working</span> No punch out yet</span>
+      <span><span class="badge badge-amended">Corrected By Office</span> Click the row for details</span>
+      <span><span class="badge badge-anomaly">Closed By Office</span> Punch out entered by the office</span>
+      <span><span class="badge badge-anomaly">Auto Closed</span> Closed by the system at 5:00 PM, no overtime</span>
     </div>
 
     <div class="table-wrap" id="month-wrap" hidden>
@@ -1001,8 +995,7 @@
           var at = s.corrected_at ? " on " + Dash.klDateTime(s.corrected_at) : "";
           return '<div class="amend-note">' +
             '<p class="detail-note"><strong>Hours Corrected By The Office</strong>' + esc(by + at) +
-              ". The punches below are untouched — this is the ruling laid over them. " +
-              "The worker reads this reason in their own app.</p>" +
+              ". Original punches are kept below.</p>" +
             '<ul class="punch-lines">' +
               provLine("IN",  s.first_in_at,  s.corrected_in_at) +
               provLine("OUT", s.last_out_at,  s.corrected_out_at) +
@@ -1069,8 +1062,7 @@
                   ? '<button type="button" class="amend-remove" data-amend-clear="' + i + '">Remove Correction</button>'
                   : "") +
               "</div>" +
-              '<span class="muted-line">Change only the time that is wrong. The worker will see your ' +
-              "reason in their app. Times are Malaysia time.</span>" +
+              '<span class="muted-line">The worker will see this reason. Malaysia time.</span>' +
             "</div>" +
           "</div>";
         }
@@ -1753,10 +1745,8 @@
       }).join("");
 
       note.hidden = false;
-      note.innerHTML = '<span class="legend-prose">Days a worker was on site with a completed punch out. ' +
-        "Overtime is counted per day, by the company hours rule, never from the " +
-        "monthly total — a 12-hour Monday and a 4-hour Tuesday is 4 hours of overtime, not none. " +
-        "Days marked <strong>To Fix</strong> or <strong>Still Open</strong> are left out of the totals.</span>";
+      note.innerHTML = '<span class="legend-prose">Overtime is counted per day. ' +
+        "Days marked <strong>To Fix</strong> or <strong>Still Open</strong> are excluded from totals.</span>";
 
       if (document.getElementById("f-find").value || document.getElementById("f-company").value) applyFind("month-rows", 7);
       updateMonthTotals();
