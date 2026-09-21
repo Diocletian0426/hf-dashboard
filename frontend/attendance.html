@@ -292,6 +292,10 @@
       return (m < 10000 ? (m / 1000).toFixed(1) : Math.round(m / 1000)) + " km";
     }
 
+    // A reason or a note somebody typed, shown starting with a capital. Display
+    // only — what they typed is stored, and sent back into the form, untouched.
+    function capFirst(t) { t = String(t || "").trim(); return t ? t.charAt(0).toUpperCase() + t.slice(1) : ""; }
+
     // The database's location-check codes, in words the office uses. The code
     // stays the code everywhere it is COMPARED; this is only what gets printed.
     var CHECK_WORDS = {
@@ -954,9 +958,26 @@
           // the line as a tooltip for whoever is chasing a location dispute.
           var hasLoc = lat !== null && lat !== undefined && lng !== null && lng !== undefined;
           var coords = hasLoc ? Number(lat).toFixed(5) + ", " + Number(lng).toFixed(5) : "";
-          var d = plainDistance(p.distance_m);
-          var where = d ? d + " from the site" : (hasLoc ? "location recorded" : "no location recorded");
-          return '<li><span class="pl-type">' + esc((p.punch_type || "").toUpperCase()) + "</span>" +
+          // Only a distance is worth words here: whether a location was caught
+          // at all is what the Location badge beside it already says. A worker
+          // with no site of their own is measured against the site they were
+          // detected at (0083) — today that exists only when they stood inside
+          // a site's fence.
+          var d = plainDistance(p.distance_m), dNear = plainDistance(p.detected_distance_m);
+          var where = d ? d + " From Site"
+                    : (!p.project_id && dNear) ? dNear + " From Nearest Site" : "";
+          if (where && !d && (p.detected_project_name || p.detected_project_code)) {
+            coords = (p.detected_project_name || p.detected_project_code) + (coords ? " · GPS " + coords : "");
+          } else if (coords) {
+            coords = "GPS " + coords;
+          }
+          // The system's own note on a shift it closed only spells out what
+          // "Auto Closed" means, and the badge's hover says that. A note a
+          // PERSON typed is the one thing on this line found nowhere else.
+          var note = (p.punched_by === "system" || v === "auto_closed") ? "" : capFirst(p.entry_note);
+          var tail = [where, note ? "Note: " + note : ""].filter(Boolean).join(" · ");
+          return "<li" + (coords ? ' title="' + esc(coords) + '"' : "") + ">" +
+                 '<span class="pl-type">' + esc((p.punch_type || "").toUpperCase()) + "</span>" +
                  '<span class="pl-time">' + Dash.klTime(p.punched_at) + "</span>" +
                  // A shift the office or the system closed has no location to check —
                  // its "status" IS who closed it, and the who-made-it badge says that.
@@ -964,8 +985,7 @@
                  ((p.punched_by && (v === "office_closed" || v === "auto_closed")) ? ""
                    : '<span class="badge badge-' + vCls + '">' + esc(checkWords(v)) + "</span> ") +
                  provenance(p) +
-                 '<span class="pl-where"' + (coords ? ' title="GPS ' + esc(coords) + '"' : "") + ">" + esc(where) +
-                   (p.entry_note ? " · note: " + esc(p.entry_note) : "") + "</span></li>";
+                 (tail ? '<span class="pl-where">' + esc(tail) + "</span>" : "") + "</li>";
         }
 
         /* ---- Correct Hours (DB 0090–0092) ----------------------------------
@@ -975,32 +995,28 @@
            two together from then on. So this block always reads "he tapped X,
            we set Y, because Z", never just Y. */
 
-        function provLine(label, tapped, ruled) {
+        // Only the end the office ruled on gets a line. What the worker tapped
+        // is not repeated here — it is in the punch list directly underneath,
+        // under its own "Original Punches" heading — and an end the office left
+        // alone has nothing to say.
+        function provLine(label, ruled) {
+          if (!ruled) return "";
           return '<li><span class="pl-type">' + label + "</span>" +
-            '<span class="pl-time">' +
-              esc(ruled ? Dash.klTime(ruled) : (tapped ? Dash.klTime(tapped) : "—")) + "</span>" +
-            (ruled
-              ? '<span class="badge badge-amended">Set By Office</span>' +
-                '<span class="pl-where">' +
-                  (tapped ? "the worker tapped " + esc(Dash.klTime(tapped))
-                          : "the worker never tapped this end") + "</span>"
-              : '<span class="badge badge-verified">Worker</span>' +
-                '<span class="pl-where">left as tapped</span>') +
-          "</li>";
+            '<span class="pl-time">' + esc(Dash.klTime(ruled)) + "</span>" +
+            '<span class="badge badge-amended">Set By Office</span></li>';
         }
 
         function correctionBlock(s) {
           if (!s.has_correction) return "";
-          var by = s.corrected_by_name ? " by " + s.corrected_by_name : "";
-          var at = s.corrected_at ? " on " + Dash.klDateTime(s.corrected_at) : "";
+          var by = s.corrected_by_name ? " · " + s.corrected_by_name : "";
+          var at = s.corrected_at ? " · " + Dash.klDateTime(s.corrected_at) : "";
           return '<div class="amend-note">' +
-            '<p class="detail-note"><strong>Hours Corrected By The Office</strong>' + esc(by + at) +
-              ". Original punches are kept below.</p>" +
+            '<p class="detail-note"><strong>Hours Corrected By The Office</strong>' + esc(by + at) + "</p>" +
             '<ul class="punch-lines">' +
-              provLine("IN",  s.first_in_at,  s.corrected_in_at) +
-              provLine("OUT", s.last_out_at,  s.corrected_out_at) +
+              provLine("IN",  s.corrected_in_at) +
+              provLine("OUT", s.corrected_out_at) +
             "</ul>" +
-            '<p class="detail-note">Reason: <em>' + esc(s.correction_reason || "—") + "</em></p>" +
+            '<p class="detail-note">Reason: <em>' + esc(capFirst(s.correction_reason) || "—") + "</em></p>" +
           "</div>";
         }
 
@@ -1067,28 +1083,18 @@
           "</div>";
         }
 
+        // THE DRAWER SAYS ONLY WHAT THE ROW CANNOT. It used to open with a
+        // sentence restating the row's own hours and a count of the punches
+        // listed right under it — the owner: "doing the job double… more words
+        // do not mean better". The row has the figures and the badges; this has
+        // the office's ruling, the punches themselves, and the form.
         function detailHtml(s, punches, i) {
-          var h = hoursOf(s);
-          var sum = s.overlong_shift
-            ? "This shift is longer than the system allows (" + hm(Number(s.hours_on_site || 0)) +
-              " on site), so its hours are not counted. Almost always a missing punch-out — " +
-              "check the punches below, then have the office correct the record."
-            : h
-            ? "On site " + hm(h.gross) + " · counted by the company hours rule: " +
-              hm(h.normal) + " Working Hours" +
-              (h.ot > 0 ? " + " + hm(h.ot) + " overtime" : ", no overtime")
-            : "Still on site — no punch out yet, so the day is not counted.";
-          var extra = "";
-          if (s.in_count > 1 || s.out_count > 1) {
-            extra = '<p class="detail-note">' + s.in_count + " punch-in(s), " + s.out_count +
-                    " punch-out(s) — the table shows the first in and the last out.</p>";
-          }
           return '<div class="detail-box">' +
-            '<p class="detail-sum">' + esc(sum) + "</p>" + extra +
             correctionBlock(s) +
             (punches.length
-              ? '<ul class="punch-lines">' + punches.map(punchLine).join("") + "</ul>"
-              : '<p class="detail-note">No raw punch rows came back for this worker.</p>') +
+              ? (s.has_correction ? '<p class="detail-head">Original Punches</p>' : "") +
+                '<ul class="punch-lines">' + punches.map(punchLine).join("") + "</ul>"
+              : '<p class="detail-note">No Punches Found</p>') +
             amendForm(s, i) +
           "</div>";
         }

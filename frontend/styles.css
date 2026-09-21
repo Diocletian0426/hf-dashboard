@@ -2925,7 +2925,11 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
   background: var(--surface-2);
   border-bottom: 1px solid var(--line-strong);
 }
-.detail-sum { margin: 0 0 var(--sp-2); font-size: var(--fs-sm); }
+/* names the worker's own punches once an office ruling sits above them */
+.detail-head {
+  margin: var(--sp-3) 0 var(--sp-1); font-size: var(--fs-xs); font-weight: 700;
+  letter-spacing: 0.04em; color: var(--ink-3);
+}
 .detail-note { margin: 0 0 var(--sp-2); font-size: var(--fs-xs); color: var(--ink-3); }
 
 /* one line per punch: what it was, when, whether the location held up */
@@ -3200,7 +3204,7 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
 }
 
 /* the drawer */
-.att-readable .detail-sum { font-size: 16px; }
+.att-readable .detail-head { font-size: 13px; color: var(--ink-2); }
 .att-readable .detail-note { font-size: 14.5px; color: var(--ink-2); }
 .att-readable .punch-lines li { font-size: 15.5px; padding: 8px 0; }
 .att-readable .pl-type { font-size: 13px; flex-basis: 48px; }
