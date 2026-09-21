@@ -3397,3 +3397,34 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
 
 /* the Company filter is a short list - it does not need the Site box's width */
 .att-narrow #f-company { width: 210px; }
+
+/* ---- attendance: the Download Excel menu ---------------------------------
+   Opens under the button. A SOLID surface, not frosted glass — it floats over
+   the table and has to stay readable. Big rows: this is pressed by people who
+   should not have to aim. */
+.xl-wrap { position: relative; display: inline-flex; }
+.xl-menu {
+  position: absolute; right: 0; top: calc(100% + 8px); z-index: 40; min-width: 300px;
+  padding: 8px; background: #fff; border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg); box-shadow: 0 14px 38px rgba(22, 32, 58, 0.18);
+}
+.xl-menu-title {
+  padding: 6px 12px 8px; font-size: 12.5px; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--ink-2);
+}
+.xl-item {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 18px;
+  width: 100%; min-height: 48px; padding: 11px 14px; margin: 0;
+  font: inherit; font-size: 16px; color: var(--ink); text-align: left;
+  background: none; border: 0; border-radius: var(--r-md); cursor: pointer;
+}
+.xl-item span { font-size: 14px; color: var(--ink-2); white-space: nowrap; }
+.xl-item:hover:not(:disabled), .xl-item:focus-visible { background: rgba(37, 99, 235, 0.1); outline: none; }
+.xl-item:hover:not(:disabled) strong, .xl-item:focus-visible strong { color: var(--brand-ink); }
+.xl-item:disabled { cursor: default; }
+.xl-item:disabled strong, .xl-item:disabled span { color: var(--ink-3); font-weight: 400; }
+.xl-menu-note {
+  margin-top: 6px; padding: 9px 12px 4px; border-top: 1px solid var(--line-strong);
+  font-size: 13.5px; color: var(--ink-2);
+}
+@media print { .xl-wrap { display: none !important; } }
