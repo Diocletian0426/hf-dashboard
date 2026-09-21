@@ -158,34 +158,38 @@
     <div id="error"></div>
   </main>
 
-  <div class="modal-back" id="dl-back" hidden>
-    <div class="dl-card" role="dialog" aria-modal="true" aria-labelledby="dl-title">
-      <h3 id="dl-title">Download Attendance</h3>
-      <p class="dl-sub">One Excel file, for the company, month and site you choose here.</p>
-
-      <div class="dl-field">
-        <div class="dl-label">Company</div>
-        <div id="dl-companies" role="radiogroup" aria-label="Company"></div>
+  <!-- A PANEL, NOT A CURTAIN (owner, 2026-09-21): it used to be a centred box over a
+       darkened page — a lot of drama for three small questions, and it hid the very
+       table the office was looking at. It now drops from the Download Excel button,
+       the page stays lit behind it, and a press anywhere else puts it away. -->
+  <div class="dl-back" id="dl-back" hidden>
+    <div class="dl-card" id="dl-card" role="dialog" aria-modal="false" aria-labelledby="dl-title">
+      <div class="dl-head">
+        <h3 id="dl-title">Download Attendance</h3>
+        <button type="button" class="dl-x" id="dl-cancel" aria-label="Close" title="Close">&times;</button>
       </div>
 
-      <div class="dl-field">
-        <div class="dl-label">Month</div>
-        <span class="stepper">
-          <button type="button" class="step-btn" id="dl-prev" aria-label="Previous Month" title="Previous Month">&lsaquo;</button>
-          <span class="step-label" id="dl-month-label" aria-live="polite"></span>
-          <button type="button" class="step-btn" id="dl-next" aria-label="Next Month" title="Next Month">&rsaquo;</button>
-        </span>
-      </div>
+      <div class="dl-label">Company</div>
+      <div class="dl-group" id="dl-companies" role="radiogroup" aria-label="Company"></div>
 
-      <div class="dl-field">
-        <label class="dl-label" for="dl-site">Site <span class="dl-optional">Optional</span></label>
-        <select id="dl-site"></select>
+      <div class="dl-row">
+        <div class="dl-col">
+          <div class="dl-label">Month</div>
+          <span class="dl-stepper">
+            <button type="button" id="dl-prev" aria-label="Previous Month" title="Previous Month">&lsaquo;</button>
+            <span id="dl-month-label" aria-live="polite"></span>
+            <button type="button" id="dl-next" aria-label="Next Month" title="Next Month">&rsaquo;</button>
+          </span>
+        </div>
+        <div class="dl-col dl-col-grow">
+          <label class="dl-label" for="dl-site">Site <span class="dl-optional">Optional</span></label>
+          <select id="dl-site"></select>
+        </div>
       </div>
 
       <p class="dl-hint" id="dl-hint" aria-live="polite"></p>
       <div class="dl-actions">
         <button type="button" class="btn-primary" id="dl-go">Download</button>
-        <button type="button" id="dl-cancel">Cancel</button>
       </div>
     </div>
   </div>
@@ -1540,12 +1544,24 @@
       var src = document.getElementById("f-site"), dst = document.getElementById("dl-site");
       dst.innerHTML = src.innerHTML; dst.value = DL.site;
       document.getElementById("dl-back").hidden = false;
+      dlPlace();
       dlLoad().then(function () {
         var first = document.querySelector("#dl-companies input:checked:not(:disabled)") ||
                     document.querySelector("#dl-companies input:not(:disabled)");
         if (first) first.focus();
       });
     }
+    function dlPlace() {
+      var btn = document.getElementById("btn-excel"), card = document.getElementById("dl-card");
+      if (!btn || !card) return;
+      var r = btn.getBoundingClientRect(), gap = 10, w = card.offsetWidth || 428;
+      var right = Math.max(12, window.innerWidth - r.right);
+      if (window.innerWidth - right - w < 12) right = Math.max(12, window.innerWidth - w - 12);   // narrow screens
+      card.style.right = right + "px";
+      card.style.top = Math.max(12, r.bottom + gap) + "px";
+      card.style.maxHeight = Math.max(260, window.innerHeight - r.bottom - gap - 16) + "px";
+    }
+
     function dlClose() {
       document.getElementById("dl-back").hidden = true;
       var b = document.getElementById("btn-excel"); if (b) b.focus();
@@ -1569,6 +1585,8 @@
           var again = document.querySelector('#dl-companies input[value="' + DL.company + '"]'); if (again) again.focus(); }
       });
       document.getElementById("dl-cancel").addEventListener("click", dlClose);
+      window.addEventListener("resize", function () { if (!document.getElementById("dl-back").hidden) dlPlace(); });
+      window.addEventListener("scroll", function () { if (!document.getElementById("dl-back").hidden) dlPlace(); }, { passive: true });
       document.getElementById("dl-back").addEventListener("click", function (ev) { if (ev.target.id === "dl-back") dlClose(); });
       document.addEventListener("keydown", function (ev) {
         if (ev.key === "Escape" && !document.getElementById("dl-back").hidden) dlClose();

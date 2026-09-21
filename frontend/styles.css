@@ -3423,48 +3423,81 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
 .att-readable tr.shift-row:hover .code-cell .caret { border-left-color: var(--brand-ink); }
 @media print { body.att-readable .code-cell .caret { display: none !important; } }
 
-/* ---- attendance: the Download Attendance dialog ---------------------------
-   Three questions, in type you can read, with targets you cannot miss. A SOLID
-   card — it sits over the page and has to stay readable. */
+/* ---- attendance: the Download Attendance panel -----------------------------
+   A panel that hangs from its button, not a box over a darkened page. Three
+   questions deserve a quiet surface: no curtain, the page stays lit, a soft
+   shadow does the lifting. Compact, but nothing under 40px to press and
+   nothing under 14px to read — the people using it are not young. */
+.dl-back { position: fixed; inset: 0; z-index: 300; background: transparent; }
 .dl-card {
-  width: 100%; max-width: 560px; max-height: calc(100vh - 48px); overflow: auto;
-  padding: 26px 28px 22px; background: #fff; border: 1px solid var(--line-strong);
-  border-radius: var(--r-lg); box-shadow: 0 24px 60px rgba(15, 23, 42, 0.3);
+  position: fixed; top: 80px; right: 24px; width: 428px; max-width: calc(100vw - 24px);
+  overflow: auto; padding: 16px 18px 16px;
+  background: #fff; border: 1px solid rgba(22, 32, 58, 0.1); border-radius: 18px;
+  box-shadow: 0 1px 2px rgba(22, 32, 58, 0.06), 0 18px 44px -8px rgba(22, 32, 58, 0.28);
+  animation: dl-in 0.16s ease-out;
 }
-.dl-card h3 { margin: 0 0 4px; font-size: 23px; color: var(--ink); }
-.dl-sub { margin: 0 0 20px; font-size: 15px; color: var(--ink-2); }
-.dl-field { margin: 0 0 20px; }
+@keyframes dl-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+.dl-head { display: flex; align-items: center; justify-content: space-between; margin: 0 0 12px; }
+.dl-card h3 { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -0.01em; color: var(--ink); }
+.dl-x {
+  width: 30px; height: 30px; margin: -4px -6px -4px 0; padding: 0 0 2px; font-size: 22px; line-height: 1;
+  color: var(--ink-3); background: none; border: 0; border-radius: 50%; cursor: pointer;
+}
+.dl-x:hover, .dl-x:focus-visible { color: var(--ink); background: var(--surface-2); outline: none; }
 .dl-label {
-  display: block; margin: 0 0 8px; font-size: 13px; font-weight: 700; letter-spacing: 0.07em;
-  text-transform: uppercase; color: var(--ink-2);
+  display: block; margin: 0 0 6px; font-size: 11.5px; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--ink-3);
 }
-.dl-optional { margin-left: 8px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--ink-3); }
+.dl-optional { margin-left: 6px; font-weight: 400; letter-spacing: 0; text-transform: none; }
+
+/* the companies: ONE quiet list with hairlines, not three boxes */
+.dl-group { margin: 0 0 14px; border: 1px solid var(--line-strong); border-radius: 12px; overflow: hidden; }
 .dl-choice {
-  display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 8px 14px; margin: 0 0 8px;
-  font-size: 16.5px; color: var(--ink); cursor: pointer;
-  border: 1.5px solid var(--line-strong); border-radius: var(--r-md); background: #fff;
+  display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 6px 12px; margin: 0;
+  font-size: 14.5px; color: var(--ink); cursor: pointer; background: #fff;
+  border: 0; border-top: 1px solid var(--line); border-radius: 0;
+  transition: background 0.12s ease;
 }
-.dl-choice:hover:not(.is-off) { border-color: var(--brand); background: rgba(37, 99, 235, 0.05); }
-.dl-choice:has(input:checked) { border-color: var(--brand); background: rgba(37, 99, 235, 0.09); }
-.dl-choice:has(input:focus-visible) { outline: 2px solid var(--brand); outline-offset: 2px; }
-.dl-choice input { width: 20px; height: 20px; flex: 0 0 auto; margin: 0; accent-color: var(--brand); }
-.dl-name { flex: 1 1 auto; font-weight: 600; }
-.dl-count { flex: 0 0 auto; font-size: 14.5px; color: var(--ink-2); white-space: nowrap; }
-.dl-choice.is-off { cursor: default; background: var(--surface-2); }
-.dl-choice.is-off .dl-name, .dl-choice.is-off .dl-count { color: var(--ink-3); font-weight: 400; }
-.dl-card .stepper { background: #fff; }
+.dl-choice:first-child { border-top: 0; }
+.dl-choice:hover:not(.is-off) { background: rgba(37, 99, 235, 0.05); }
+.dl-choice:has(input:checked) { background: rgba(37, 99, 235, 0.08); }
+.dl-choice:has(input:checked) .dl-name { color: var(--brand-ink); }
+.dl-choice:has(input:focus-visible) { box-shadow: inset 0 0 0 2px var(--brand); }
+.dl-choice input { width: 16px; height: 16px; flex: 0 0 auto; margin: 0; accent-color: var(--brand); }
+/* a legal name is never cut short with an ellipsis - if it cannot fit on one line it takes two */
+.dl-name { flex: 1 1 auto; min-width: 0; font-weight: 600; line-height: 1.25; }
+.dl-count { flex: 0 0 auto; font-size: 13px; color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dl-choice.is-off { cursor: default; background: #fff; }
+.dl-choice.is-off .dl-name { color: var(--ink-3); font-weight: 400; }
+.dl-choice.is-off .dl-count { color: var(--ink-3); font-style: italic; }
+
+/* month and site share a line */
+.dl-row { display: flex; gap: 12px; align-items: flex-end; margin: 0 0 4px; }
+.dl-col { flex: 0 0 auto; min-width: 0; }
+.dl-col-grow { flex: 1 1 auto; }
+.dl-stepper {
+  display: inline-flex; align-items: center; height: 40px; padding: 0 2px;
+  border: 1px solid var(--line-strong); border-radius: 12px; background: #fff;
+}
+.dl-stepper button {
+  width: 32px; height: 34px; padding: 0 0 3px; font-size: 22px; line-height: 1; color: var(--ink-2);
+  background: none; border: 0; border-radius: 9px; cursor: pointer;
+}
+.dl-stepper button:hover:not(:disabled) { background: rgba(37, 99, 235, 0.1); color: var(--brand-ink); }
+.dl-stepper button:disabled { opacity: 0.25; cursor: default; }
+#dl-month-label { min-width: 112px; padding: 0 2px; text-align: center; font-size: 14.5px; font-weight: 600; color: var(--ink); white-space: nowrap; }
 .dl-card #dl-site {
-  width: 100%; font-size: 16px; padding: 12px 14px; min-height: 48px; color: var(--ink);
-  background: #fff; border: 1.5px solid var(--line-strong); border-radius: var(--r-md);
+  width: 100%; height: 40px; padding: 0 10px; font-size: 14.5px; color: var(--ink);
+  background: #fff; border: 1px solid var(--line-strong); border-radius: 12px;
 }
-.dl-hint { min-height: 20px; margin: 0 0 12px; font-size: 14.5px; color: var(--danger-ink); }
-.dl-actions { display: flex; gap: 12px; }
-.dl-actions button {
-  font-size: 16px; padding: 12px 28px; min-height: 48px; border-radius: var(--r-pill); cursor: pointer;
-  color: var(--ink); background: #fff; border: 1px solid var(--line-strong);
+.dl-hint { min-height: 0; margin: 10px 0 0; font-size: 13.5px; line-height: 1.4; color: var(--danger-ink); }
+.dl-hint:empty { display: none; }
+.dl-actions { display: flex; justify-content: flex-end; margin-top: 14px; }
+.dl-actions .btn-primary, .dl-actions .btn-primary:hover {
+  min-height: 40px; padding: 0 24px; font-size: 15px; font-weight: 600; color: #fff; cursor: pointer;
+  background: var(--brand); border: 1px solid var(--brand); border-radius: 999px;
 }
-.dl-actions button:hover { background: var(--surface-2); }
-.dl-actions .btn-primary, .dl-actions .btn-primary:hover { color: #fff; font-weight: 600; background: var(--brand); border-color: var(--brand); }
 .dl-actions .btn-primary:hover { filter: brightness(0.93); }
-.dl-actions .btn-primary:disabled { opacity: 0.45; cursor: default; filter: none; }
+.dl-actions .btn-primary:disabled { opacity: 0.4; cursor: default; filter: none; }
+@media (prefers-reduced-motion: reduce) { .dl-card { animation: none; } }
 @media print { #dl-back { display: none !important; } }
