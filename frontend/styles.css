@@ -3212,9 +3212,12 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
 .att-readable .pl-where { font-size: 14.5px; color: var(--ink-2); }
 .att-readable .month-days { font-size: 15.5px; }
 .att-readable .month-days th { font-size: 13px; }
-/* the drill-down's In column inherited the outer table's left-aligned 2nd column;
-   centred like Out, so a time and its Office tag line up */
-.att-readable .month-days th:nth-child(2), .att-readable .month-days td:nth-child(2) { text-align: center; min-width: 0; }
+/* the drill-down's 2nd column is Site (DB 0102) — words, so it reads from the
+   left like the outer table's Site column and may wrap: "A → B" on the day a
+   man moved would otherwise push the Attention column off the page. In and
+   Out (3rd, 4th) keep the table's default centring, so a time and its Office
+   tag line up. */
+.att-readable .month-days td:nth-child(2) { white-space: normal; max-width: 250px; }
 .att-readable .month-days th, .att-readable .month-days td { padding: 9px var(--sp-2); }
 /* Sundays stand out in the month drill-down: they are not an ordinary day */
 .att-readable .month-days tr.is-sunday td:first-child { color: var(--danger-ink); font-weight: 600; }

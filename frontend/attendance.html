@@ -420,10 +420,20 @@
         .filter(Boolean).join(" - ").replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim();
     }
 
+    // A day's site, in words. A day is one row per worker (DB 0102) whatever
+    // site each punch carried, so a man moved between his punch-in and his
+    // punch-out reads "Nara Impian → MCS Sik": where it started, where it
+    // ended. out_project_name is set only when the two differ; before 0102 is
+    // live it is simply absent and this is the site as before.
+    function siteText(r) {
+      var a = r.project_name || "";
+      return r.out_project_name ? (a || "—") + " → " + r.out_project_name : a;
+    }
+
     // the text one row answers to in the Find box
     function findKey(r, sites) {
       return [r.full_name || r.name, CODES[r.staff_id] || "", companyName(COMPANY[r.staff_id]),
-              sites || r.project_name || ""].join(" ").toLowerCase();
+              sites || r.project_name || "", r.out_project_name || ""].join(" ").toLowerCase();
     }
 
     // Filters what is already on screen — no reload, so it is instant and the
@@ -876,7 +886,7 @@
                    'aria-expanded="false" aria-controls="d' + i + '">' +
                  '<span class="who-line"><strong>' + esc(s.full_name) + "</strong>" + codeTag(s.staff_id) +
                  "</span></button></td>" +
-              "<td>" + esc(s.project_name || "—") + "</td>" +
+              "<td>" + esc(siteText(s) || "—") + "</td>" +
               // The IN/OUT columns show the time the day is PAID from, which on
               // an amended day is the office's, not the worker's. It is marked
               // as theirs rather than left to look like a tap (0092) — the tap
@@ -1455,7 +1465,7 @@
                      : (r.has_anomaly ? "Location Not Confirmed" : ""));
           daily.push([CODES[w.staff_id] || "", w.name, companyFull(COMPANY[w.staff_id]),
             { v: r.work_date, date: true }, DAY_NAMES[new Date(String(r.work_date).slice(0, 10) + "T00:00:00Z").getUTCDay()],
-            r.project_name || "", T(effIn(r)), T(effOut(r)),
+            siteText(r), T(effIn(r)), T(effOut(r)),
             counted ? H(wm) : "", counted ? H(om) : "", counted ? H(wm + om) : "",
             counted ? "Yes" : "No", r.has_correction ? "Yes" : "No", r.correction_reason || "", note]);
         });
@@ -1646,6 +1656,7 @@
           sites: {}, days: 0, normal: 0, ot: 0, wm: 0, om: 0, broken: 0, open: 0, rows: []
         });
         if (r.project_name) w.sites[r.project_name] = true;
+        if (r.out_project_name) w.sites[r.out_project_name] = true;   // a day that ended elsewhere (0102)
         // the database's price for the day, or null — never re-worked-out here
         var h = hoursOf(r);
         if (r.overlong_shift) w.broken++;
@@ -1679,6 +1690,9 @@
             "&open=" + encodeURIComponent(w.staff_id || "") + '">Correct This Day</a>' : "";
         return "<tr" + (isSunday(r.work_date) ? ' class="is-sunday"' : "") + ">" +
           "<td>" + esc(friendlyDate(r.work_date)) + "</td>" +
+          // per-day site (owner, 2026-09-22): the one place a month's "A, B"
+          // list says WHICH day the man moved
+          "<td>" + esc(siteText(r) || "—") + "</td>" +
           // the times the day is PAID from, marked when the office set them —
           // the same two the day view shows, so the month never argues with it
           "<td>" + timeCell(effIn(r),  r.corrected_in_at)  + "</td>" +
@@ -1698,7 +1712,7 @@
         "</tr>";
       }).join("");
       return '<div class="detail-box"><table class="att-table month-days"><thead><tr>' +
-        "<th>Date</th><th>In</th><th>Out</th><th class=\"num\">Working Hours</th>" +
+        "<th>Date</th><th>Site</th><th>In</th><th>Out</th><th class=\"num\">Working Hours</th>" +
         "<th class=\"num\">Over Time</th><th>Attention</th>" + (canFix ? "<th></th>" : "") + "</tr></thead><tbody>" +
         lines + "</tbody></table></div>";
     }
