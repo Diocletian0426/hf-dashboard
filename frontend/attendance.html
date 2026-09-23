@@ -63,6 +63,8 @@
           <path d="M6 9V3h12v6M6 18H4a1 1 0 0 1-1-1v-6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v6a1 1 0 0 1-1 1h-2"></path>
           <rect x="6" y="14" width="12" height="7"></rect>
         </svg>Print</button>
+      <!-- Download Excel opens a small dialog that asks its own three questions
+           (company, month, site) — see DOWNLOAD ATTENDANCE in the script. -->
       <button type="button" class="btn att-btn" id="btn-excel" hidden>
         <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor"
              stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -75,6 +77,17 @@
       <label>Site
         <select id="f-site"><option value="">All Sites</option></select>
       </label>
+      <!-- HF Bored Piles and Hai Fu are paid separately, so the office prints and
+           downloads them separately. This narrows the table — and Print and
+           Download Excel both hand over exactly what the table is showing. Hidden
+           until the staff list has told the page who works for whom. -->
+      <label id="lbl-company" hidden>Company
+        <select id="f-company">
+          <option value="">All Companies</option>
+          <option value="HF-BP">HF Bored Piles Malaysia Sdn Bhd</option>
+          <option value="Hai Fu">Hai Fu Sheet Piles Sdn Bhd</option>
+        </select>
+      </label>
       <label>Find
         <input type="search" id="f-find" class="filter-box" autocomplete="off"
                placeholder="Name, employee code or site…">
@@ -86,11 +99,11 @@
       <table class="att-table">
         <thead>
           <tr>
-            <th>Worker</th><th>Site</th><th>In</th><th>Out</th>
+            <th>Employee Code</th><th>Worker</th><th>Site</th><th>In</th><th>Out</th>
             <th class="num">Working Hours</th><th class="num">Over Time</th><th>Attention</th>
           </tr>
         </thead>
-        <tbody id="rows"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+        <tbody id="rows"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
       </table>
     </div>
 
@@ -99,25 +112,19 @@
          line as a tooltip. Hidden until there are rows to explain. -->
     <div class="table-legend legend-list" id="legend" hidden>
       <div class="legend-title">What The Labels Mean</div>
-      <span><span class="badge badge-anomaly">Forgot To Punch Out</span> the shift ran far too long
-        to be real, so its hours are not counted until the office corrects it</span>
-      <span><span class="badge badge-anomaly">Location Not Confirmed</span> at least one punch that
-        day could not be matched to the site — taken outside the site area, a weak GPS signal, or
-        the site has no GPS area set yet</span>
-      <span><span class="badge badge-gray">Still Working</span> punched in, no punch out yet</span>
-      <span><span class="badge badge-amended">Corrected By Office</span> the office set this day's
-        hours — click the worker's row to see their own times and the reason</span>
-      <span><span class="badge badge-anomaly">Closed By Office</span> the office entered this
-        punch-out for the worker</span>
-      <span><span class="badge badge-anomaly">Auto Closed</span> no punch-out by 6 AM the next day,
-        so the system closed the shift at 5:00 PM with no overtime</span>
+      <span><span class="badge badge-anomaly">Forgot To Punch Out</span> Hours not counted until corrected</span>
+      <span><span class="badge badge-anomaly">Location Not Confirmed</span> Punch could not be matched to the site</span>
+      <span><span class="badge badge-gray">Still Working</span> No punch out yet</span>
+      <span><span class="badge badge-amended">Corrected By Office</span> Click the row for details</span>
+      <span><span class="badge badge-anomaly">Closed By Office</span> Punch out entered by the office</span>
+      <span><span class="badge badge-anomaly">Auto Closed</span> Closed by the system at 5:00 PM, no overtime</span>
     </div>
 
     <div class="table-wrap" id="month-wrap" hidden>
       <table class="att-table">
         <thead>
           <tr>
-            <th>Worker</th><th>Sites</th>
+            <th>Employee Code</th><th>Worker</th><th>Sites</th>
             <th class="num">Days Worked</th>
             <th class="num">Working Hours</th><th class="num">Over Time</th>
             <th>Attention</th>
@@ -144,6 +151,42 @@
 
     <div id="error"></div>
   </main>
+
+  <!-- A PANEL, NOT A CURTAIN (owner, 2026-09-21): it used to be a centred box over a
+       darkened page — a lot of drama for three small questions, and it hid the very
+       table the office was looking at. It now drops from the Download Excel button,
+       the page stays lit behind it, and a press anywhere else puts it away. -->
+  <div class="dl-back" id="dl-back" hidden>
+    <div class="dl-card" id="dl-card" role="dialog" aria-modal="false" aria-labelledby="dl-title">
+      <div class="dl-head">
+        <h3 id="dl-title">Download Attendance</h3>
+        <button type="button" class="dl-x" id="dl-cancel" aria-label="Close" title="Close">&times;</button>
+      </div>
+
+      <div class="dl-label">Company</div>
+      <div class="dl-group" id="dl-companies" role="radiogroup" aria-label="Company"></div>
+
+      <div class="dl-row">
+        <div class="dl-col">
+          <div class="dl-label">Month</div>
+          <span class="dl-stepper">
+            <button type="button" id="dl-prev" aria-label="Previous Month" title="Previous Month">&lsaquo;</button>
+            <span id="dl-month-label" aria-live="polite"></span>
+            <button type="button" id="dl-next" aria-label="Next Month" title="Next Month">&rsaquo;</button>
+          </span>
+        </div>
+        <div class="dl-col dl-col-grow">
+          <label class="dl-label" for="dl-site">Site <span class="dl-optional">Optional</span></label>
+          <select id="dl-site"></select>
+        </div>
+      </div>
+
+      <p class="dl-hint" id="dl-hint" aria-live="polite"></p>
+      <div class="dl-actions">
+        <button type="button" class="btn-primary" id="dl-go">Download</button>
+      </div>
+    </div>
+  </div>
 
   <script src="vendor/supabase.js"></script>
   <script src="config.js"></script>
@@ -249,6 +292,10 @@
       return (m < 10000 ? (m / 1000).toFixed(1) : Math.round(m / 1000)) + " km";
     }
 
+    // A reason or a note somebody typed, shown starting with a capital. Display
+    // only — what they typed is stored, and sent back into the form, untouched.
+    function capFirst(t) { t = String(t || "").trim(); return t ? t.charAt(0).toUpperCase() + t.slice(1) : ""; }
+
     // The database's location-check codes, in words the office uses. The code
     // stays the code everywhere it is COMPARED; this is only what gets printed.
     var CHECK_WORDS = {
@@ -328,15 +375,65 @@
       var tr = ev.target.closest("tr.shift-row");
       return tr ? tr.querySelector(".worker-btn") : null;
     }
+    // the company's name as the office says it (the database keeps a short code)
+    var COMPANY_NAME = { "HF-BP": "HF Bored Piles", "Hai Fu": "Hai Fu" };
+    function companyName(code) { return COMPANY_NAME[code] || code || ""; }
+    // ...and the full legal name (owner, 2026-09-21): used wherever the company is
+    // NAMED ONCE — the download dialog, the Company filter, the Excel sheet, the
+    // printed heading. The short name stays where it would repeat or must be brief:
+    // under every worker's name, and in file names. Kept here because the page has
+    // no read of the companies table; two legal entities, and they do not change often.
+    var COMPANY_FULL = { "HF-BP": "HF Bored Piles Malaysia Sdn Bhd", "Hai Fu": "Hai Fu Sheet Piles Sdn Bhd" };
+    function companyFull(code) { return COMPANY_FULL[code] || companyName(code); }
+    function companyLabel() {
+      var el = document.getElementById("f-company");
+      return (el && el.value) ? companyName(el.value) : "All Companies";
+    }
+
+    // EMPLOYEE CODE HAS ITS OWN COLUMN (owner, 2026-09-21) — it is what payroll
+    // looks a worker up by, so it leads the row, the way it leads a salary
+    // listing. The chevron that says "this row opens" sits in front of it.
+    function codeCell(staffId) {
+      return '<td class="code-cell"><span class="caret" aria-hidden="true"></span>' +
+             '<span class="emp-code">' + esc(CODES[staffId] || "—") + "</span></td>";
+    }
+    // under the name: whose payroll the worker is on (short name — it repeats on every row)
     function codeTag(staffId) {
-      var c = CODES[staffId];
+      var c = companyName(COMPANY[staffId]);
       return c ? ' <span class="muted">' + esc(c) + "</span>" : "";
+    }
+
+    // Malaysia's clock, now — for stamping a printout or a download to the minute
+    function klNow() {
+      var d = new Date(Date.now() + 8 * 3600 * 1000), iso = d.toISOString();   // shifted, then read as UTC
+      var h = d.getUTCHours(), m = iso.slice(14, 16);
+      return {
+        file:  iso.slice(0, 10) + " at " + iso.slice(11, 13) + "." + m,        // 2026-09-21 at 14.32 — sorts, and no ":" (Windows refuses it)
+        words: d.getUTCDate() + " " + MONTH_NAMES[d.getUTCMonth()] + " " + d.getUTCFullYear() + ", " +
+               ((h % 12) || 12) + ":" + m + " " + (h < 12 ? "AM" : "PM")
+      };
+    }
+    // "Attendance August 2026 - HF Bored Piles - Downloaded 2026-09-21 at 14.32"
+    function fileName(verb, whenText, now, company, siteName) {
+      var site = siteName || siteLabel();
+      return ["Attendance " + whenText, company || companyLabel(), site === "All Sites" ? "" : site, verb + " " + now.file]
+        .filter(Boolean).join(" - ").replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim();
+    }
+
+    // A day's site, in words. A day is one row per worker (DB 0102) whatever
+    // site each punch carried, so a man moved between his punch-in and his
+    // punch-out reads "Nara Impian → MCS Sik": where it started, where it
+    // ended. out_project_name is set only when the two differ; before 0102 is
+    // live it is simply absent and this is the site as before.
+    function siteText(r) {
+      var a = r.project_name || "";
+      return r.out_project_name ? (a || "—") + " → " + r.out_project_name : a;
     }
 
     // the text one row answers to in the Find box
     function findKey(r, sites) {
-      return [r.full_name || r.name, CODES[r.staff_id] || "", sites || r.project_name || ""]
-        .join(" ").toLowerCase();
+      return [r.full_name || r.name, CODES[r.staff_id] || "", companyName(COMPANY[r.staff_id]),
+              sites || r.project_name || "", r.out_project_name || ""].join(" ").toLowerCase();
     }
 
     // Filters what is already on screen — no reload, so it is instant and the
@@ -344,11 +441,13 @@
     function applyFind(tbodyId, cols) {
       var q = document.getElementById("f-find").value.trim().toLowerCase();
       var words = q ? q.split(/\s+/) : [];
+      var company = document.getElementById("f-company").value;
       var body = document.getElementById(tbodyId), shown = 0, total = 0;
       Array.prototype.forEach.call(body.querySelectorAll("tr.shift-row"), function (tr) {
         total++;
         var key = tr.getAttribute("data-find") || "";
-        var hit = words.every(function (w) { return key.indexOf(w) !== -1; });
+        var hit = words.every(function (w) { return key.indexOf(w) !== -1; }) &&
+                  (!company || tr.getAttribute("data-company") === company);
         tr.hidden = !hit;
         var drawer = tr.nextElementSibling;
         if (drawer && drawer.classList.contains("detail-row")) {
@@ -364,7 +463,9 @@
           none.innerHTML = '<td colspan="' + cols + '" class="empty"></td>';
           body.appendChild(none);
         }
-        none.firstChild.textContent = "No worker here matches \u201C" + q + "\u201D.";
+        none.firstChild.textContent = q
+          ? "No " + (company ? companyName(company) + " " : "") + "worker here matches \u201C" + q + "\u201D."
+          : "No " + companyName(company) + " workers here.";
         none.hidden = false;
       } else if (none) {
         none.hidden = true;
@@ -373,6 +474,7 @@
       // keep the search across a date or site change, without a reload
       var p = new URLSearchParams(location.search);
       if (q) p.set("find", q); else p.delete("find");
+      if (company) p.set("company", company); else p.delete("company");
       history.replaceState(null, "", location.pathname + (p.toString() ? "?" + p : ""));
     }
 
@@ -681,15 +783,23 @@
         writePrintHead(view, view === "month" ? friendlyMonth(month) : friendlyDate(date));
         window.print();
       });
-      window.addEventListener("beforeprint", function () {       // Ctrl+P gets the heading too
-        writePrintHead(view, view === "month" ? friendlyMonth(month) : friendlyDate(date));
+      // Ctrl+P gets the heading too. And "Save as PDF" names the file after the
+      // page title — so for the length of the print the title IS the file name.
+      var pageTitle = document.title;
+      window.addEventListener("beforeprint", function () {
+        var when = view === "month" ? friendlyMonth(month) : friendlyDate(date);
+        writePrintHead(view, when);
+        document.title = fileName("Printed", when, klNow());
       });
+      window.addEventListener("afterprint", function () { document.title = pageTitle; });
 
       var findEl = document.getElementById("f-find");
       findEl.value = params.get("find") || "";
-      findEl.addEventListener("input", function () {
-        applyFind(view === "month" ? "month-rows" : "rows", view === "month" ? 6 : 7);
-      });
+      function refilter() { applyFind(view === "month" ? "month-rows" : "rows", view === "month" ? 7 : 8); }
+      findEl.addEventListener("input", refilter);
+      var companyEl = document.getElementById("f-company");
+      companyEl.value = params.get("company") || "";
+      companyEl.addEventListener("change", refilter);
 
       var tbody = document.getElementById("rows");
       try {
@@ -710,6 +820,8 @@
           loadCodes()
         ]);
         var shifts = results[0], missing = results[1], projects = results[2], punches = results[3];
+        // the Company filter only makes sense once the page knows who works for whom
+        document.getElementById("lbl-company").hidden = !Object.keys(COMPANY).length;
 
         // site dropdown (active BP sites)
         siteEl.innerHTML = '<option value="">All Sites</option>' + projects.map(function (p) {
@@ -728,6 +840,7 @@
 
         // ---- month view: one row per worker, his own numbers ---------------
         if (view === "month") { await renderMonth(month, site); return; }
+        wireDownloadDialog(date.slice(0, 7), site, null);      // from the day view: that day's month, read when asked for
 
         // ---- the shift table ----------------------------------------------
         // One row per worker. The NAME is a button: it opens a detail row
@@ -736,7 +849,7 @@
         // checked out. That detail is the answer to "why is this flagged",
         // which is the only reason anyone opens this page twice.
         if (!shifts.length) {
-          tbody.innerHTML = '<tr><td colspan="7" class="empty">No punches on ' + esc(friendlyDate(date)) +
+          tbody.innerHTML = '<tr><td colspan="8" class="empty">No punches on ' + esc(friendlyDate(date)) +
             ". The punch app pilot hasn't started at the sites yet.</td></tr>";
         } else {
           tbody.innerHTML = shifts.map(function (s, i) {
@@ -766,13 +879,14 @@
                 '">Corrected By Office</span>');
             }
             var h = hoursOf(s);
-            return '<tr class="shift-row" data-i="' + i + '" data-find="' + esc(findKey(s)) + '">' +
+            return '<tr class="shift-row" data-i="' + i + '" data-company="' + esc(COMPANY[s.staff_id] || "") +
+                   '" data-find="' + esc(findKey(s)) + '">' +
+              codeCell(s.staff_id) +
               '<td><button type="button" class="worker-btn" data-i="' + i + '" ' +
                    'aria-expanded="false" aria-controls="d' + i + '">' +
-                 '<span class="caret" aria-hidden="true"></span>' +
                  '<span class="who-line"><strong>' + esc(s.full_name) + "</strong>" + codeTag(s.staff_id) +
                  "</span></button></td>" +
-              "<td>" + esc(s.project_name || "—") + "</td>" +
+              "<td>" + esc(siteText(s) || "—") + "</td>" +
               // The IN/OUT columns show the time the day is PAID from, which on
               // an amended day is the office's, not the worker's. It is marked
               // as theirs rather than left to look like a tap (0092) — the tap
@@ -789,10 +903,10 @@
                   : "—") + "</td>" +
               "<td>" + (flags.join(" ") || "—") + "</td>" +
             "</tr>" +
-            '<tr class="detail-row" id="d' + i + '" hidden><td colspan="7"></td></tr>';
+            '<tr class="detail-row" id="d' + i + '" hidden><td colspan="8"></td></tr>';
           }).join("");
           document.getElementById("legend").hidden = false;
-          if (findEl.value) applyFind("rows", 7);
+          if (findEl.value || companyEl.value) applyFind("rows", 8);
         }
 
         /* ---- the detail drawer ---------------------------------------------
@@ -854,131 +968,156 @@
           // the line as a tooltip for whoever is chasing a location dispute.
           var hasLoc = lat !== null && lat !== undefined && lng !== null && lng !== undefined;
           var coords = hasLoc ? Number(lat).toFixed(5) + ", " + Number(lng).toFixed(5) : "";
+          // Only a distance is worth words here: whether a location was caught
+          // at all is what the Location badge beside it already says. A worker
+          // with no site of their own gets no distance: "From Nearest Site" was
+          // built (hf-database PR #12) and put ON HOLD by the owner — the nearest
+          // site is not always the one he was at. See HF Roadmap for its trigger.
           var d = plainDistance(p.distance_m);
-          var where = d ? d + " from the site" : (hasLoc ? "location recorded" : "no location recorded");
-          return '<li><span class="pl-type">' + esc((p.punch_type || "").toUpperCase()) + "</span>" +
+          var where = d ? d + " From Site" : "";
+          if (coords) coords = "GPS " + coords;
+          // The system's own note on a shift it closed only spells out what
+          // "Auto Closed" means, and the badge's hover says that. A note a
+          // PERSON typed is the one thing on this line found nowhere else.
+          var note = (p.punched_by === "system" || v === "auto_closed") ? "" : capFirst(p.entry_note);
+          var tail = [where, note ? "Note: " + note : ""].filter(Boolean).join(" · ");
+          return "<li" + (coords ? ' title="' + esc(coords) + '"' : "") + ">" +
+                 '<span class="pl-type">' + esc((p.punch_type || "").toUpperCase()) + "</span>" +
                  '<span class="pl-time">' + Dash.klTime(p.punched_at) + "</span>" +
-                 '<span class="badge badge-' + vCls + '">' + esc(checkWords(v)) + "</span> " +
+                 // A shift the office or the system closed has no location to check —
+                 // its "status" IS who closed it, and the who-made-it badge says that.
+                 // Printing both gave "Auto Closed  Auto Closed" on one line.
+                 ((p.punched_by && (v === "office_closed" || v === "auto_closed")) ? ""
+                   : '<span class="badge badge-' + vCls + '">' + esc(checkWords(v)) + "</span> ") +
                  provenance(p) +
-                 '<span class="pl-where"' + (coords ? ' title="GPS ' + esc(coords) + '"' : "") + ">" + esc(where) +
-                   (p.entry_note ? " · note: " + esc(p.entry_note) : "") + "</span></li>";
+                 (tail ? '<span class="pl-where">' + esc(tail) + "</span>" : "") + "</li>";
         }
 
-        /* ---- Edit Hours (DB 0090–0092) -------------------------------------
+        /* ---- Correct Hours (DB 0090–0092) ----------------------------------
            The office's ruling on a day's true hours. It NEVER edits or deletes
            a worker's punch — "else they would say we are taking advantage" —
            it lays a decision on top, keeps the reason beside it, and shows the
            two together from then on. So this block always reads "he tapped X,
            we set Y, because Z", never just Y. */
 
-        function provLine(label, tapped, ruled) {
+        // Only the end the office ruled on gets a line. What the worker tapped
+        // is not repeated here — it is in the punch list directly underneath,
+        // under its own "Original Punches" heading — and an end the office left
+        // alone has nothing to say.
+        function provLine(label, ruled) {
+          if (!ruled) return "";
           return '<li><span class="pl-type">' + label + "</span>" +
-            '<span class="pl-time">' +
-              esc(ruled ? Dash.klTime(ruled) : (tapped ? Dash.klTime(tapped) : "—")) + "</span>" +
-            (ruled
-              ? '<span class="badge badge-amended">Set By Office</span>' +
-                '<span class="pl-where">' +
-                  (tapped ? "the worker tapped " + esc(Dash.klTime(tapped))
-                          : "the worker never tapped this end") + "</span>"
-              : '<span class="badge badge-verified">Worker</span>' +
-                '<span class="pl-where">left as tapped</span>') +
-          "</li>";
+            '<span class="pl-time">' + esc(Dash.klTime(ruled)) + "</span>" +
+            '<span class="badge badge-amended">Set By Office</span></li>';
         }
 
         function correctionBlock(s) {
           if (!s.has_correction) return "";
-          var by = s.corrected_by_name ? " by " + s.corrected_by_name : "";
-          var at = s.corrected_at ? " on " + Dash.klDateTime(s.corrected_at) : "";
+          var by = s.corrected_by_name ? " · " + s.corrected_by_name : "";
+          var at = s.corrected_at ? " · " + Dash.klDateTime(s.corrected_at) : "";
           return '<div class="amend-note">' +
-            '<p class="detail-note"><strong>Hours amended by the office</strong>' + esc(by + at) +
-              ". The punches below are untouched — this is the ruling laid over them. " +
-              "The worker reads this reason in their own app.</p>" +
+            '<p class="detail-note"><strong>Hours Corrected By The Office</strong>' + esc(by + at) + "</p>" +
             '<ul class="punch-lines">' +
-              provLine("IN",  s.first_in_at,  s.corrected_in_at) +
-              provLine("OUT", s.last_out_at,  s.corrected_out_at) +
+              provLine("IN",  s.corrected_in_at) +
+              provLine("OUT", s.corrected_out_at) +
             "</ul>" +
-            '<p class="detail-note">Reason: <em>' + esc(s.correction_reason || "—") + "</em></p>" +
+            '<p class="detail-note">Reason: <em>' + esc(capFirst(s.correction_reason) || "—") + "</em></p>" +
           "</div>";
         }
+
+        // The reasons the office actually gives, one press each. They FILL the box —
+        // the office can still change the words, and the worker reads whatever is
+        // left in it. Typing the same sentence forty times a month is how reasons
+        // turn into "ok" and "fix".
+        var REASONS = ["Forgot To Punch Out", "Forgot To Punch In", "Phone Problem", "Punched At The Wrong Time"];
+
+        // "HH:MM" (Malaysia wall time) for a time input, from a timestamp
+        function klHHMM(ts) { var v = klInputValue(ts); return v ? v.slice(11, 16) : ""; }
+        // was this punch-out on the day AFTER the work-day? (a shift that ran past midnight)
+        function outIsNextDay(ts) { var v = klInputValue(ts); return !!v && v.slice(0, 10) > date; }
 
         function amendForm(s, i) {
           // Reading the day is one permission, ruling on it is another.
           if (!Dash.can("attendance.edit")) return "";
-          // WHICH DAYS MAY BE AMENDED IS THE DATABASE'S RULE, NOT THIS PAGE'S.
+          // WHICH DAYS MAY BE CORRECTED IS THE DATABASE'S RULE, NOT THIS PAGE'S.
           // set_day_correction refuses a day that is not over yet and answers
           // with the reason in words the office can read, so the button stays
           // live and that answer is what gets shown. The client used to repeat
           // the rule and grey the button out; it hid the whole feature on the
           // date this page opens on, and it meant one rule living in two places
           // — the same trap 0091 pulled the hours calculation out of.
+          //
+          // THE FORM ASKS FOR TWO TIMES, NOT TWO DATE-AND-TIMES. The date is
+          // almost never what is wrong, and one box holding "17/08/2026 03:16 PM"
+          // made the hour hard to hit and the date easy to bump — which the
+          // database then refuses ("not on that work-day"). The work-day is
+          // written out as text; the one real exception, a shift that ran past
+          // midnight, is a tick-box.
+          var inAt = s.corrected_in_at || s.first_in_at, outAt = s.corrected_out_at || s.last_out_at;
           return '<div class="amend-wrap">' +
-            '<button type="button" data-amend="' + i + '">' +
-              (s.has_correction ? "Edit the amendment" : "Amend hours") + "</button>" +
-            (s.has_correction
-              ? ' <button type="button" data-amend-clear="' + i + '">Remove amendment</button>'
-              : "") +
-            // Stacked, not the usual one-line filter row: the two times are a
-            // pair and read side by side, but the reason is a sentence someone
-            // has to write and the worker has to live with — it gets its own
-            // full width, and the button sits under the thing it commits.
+            '<button type="button" class="amend-open" data-amend="' + i + '">' +
+              (s.has_correction ? "Change Correction" : "Correct Hours") + "</button>" +
             '<div class="claim-form amend-form" id="amend' + i + '" hidden>' +
+              '<div class="amend-title">Correcting <strong>' + esc(s.full_name) + "</strong> — " +
+                esc(friendlyDate(date)) + "</div>" +
               '<div class="amend-times">' +
-                '<label>Punch in <input type="datetime-local" id="amend-in' + i + '" value="' +
-                  esc(klInputValue(s.corrected_in_at || s.first_in_at)) + '"></label>' +
-                '<label>Punch out <input type="datetime-local" id="amend-out' + i + '" value="' +
-                  esc(klInputValue(s.corrected_out_at || s.last_out_at)) + '"></label>' +
+                '<label>Punch In <input type="time" id="amend-in' + i + '" value="' + esc(klHHMM(inAt)) + '"></label>' +
+                '<label>Punch Out <input type="time" id="amend-out' + i + '" value="' + esc(klHHMM(outAt)) + '"></label>' +
+                '<label class="amend-next"><input type="checkbox" id="amend-next' + i + '"' +
+                  (outIsNextDay(outAt) ? " checked" : "") + "> Punch Out Was The Next Day</label>" +
               "</div>" +
-              '<label class="amend-reason">Reason' +
-                '<input type="text" id="amend-why' + i + '" ' +
-                'placeholder="e.g. forgot to punch out, supervisor confirmed 6 pm" value="' +
-                esc(s.correction_reason || "") + '"></label>' +
+              '<div class="amend-reason">' +
+                '<label for="amend-why' + i + '">Reason</label>' +
+                '<div class="reason-chips">' + REASONS.map(function (r) {
+                  return '<button type="button" class="reason-chip" data-reason="' + esc(r) + '" data-for="' + i + '">' +
+                         esc(r) + "</button>";
+                }).join("") + "</div>" +
+                '<input type="text" id="amend-why' + i + '" placeholder="Press a reason above, or type your own" value="' +
+                  esc(s.correction_reason || "") + '">' +
+              "</div>" +
+              '<div id="amend-msg' + i + '" class="amend-msg"></div>' +
               '<div class="amend-actions">' +
-                '<button type="button" data-amend-save="' + i + '">Update</button>' +
+                '<button type="button" class="btn-primary" data-amend-save="' + i + '">Save Correction</button>' +
+                '<button type="button" data-amend-cancel="' + i + '">Cancel</button>' +
+                (s.has_correction
+                  ? '<button type="button" class="amend-remove" data-amend-clear="' + i + '">Remove Correction</button>'
+                  : "") +
               "</div>" +
-              '<span class="muted-line">Malaysia time. Updating sends BOTH times and replaces any ' +
-              'earlier amendment for this day, so leave the end you are not changing as it is. ' +
-              'The reason is required and the worker sees it.</span>' +
+              '<span class="muted-line">The worker will see this reason. Malaysia time.</span>' +
             "</div>" +
-            '<div id="amend-msg' + i + '"></div>' +
           "</div>";
         }
 
+        // THE DRAWER SAYS ONLY WHAT THE ROW CANNOT. It used to open with a
+        // sentence restating the row's own hours and a count of the punches
+        // listed right under it — the owner: "doing the job double… more words
+        // do not mean better". The row has the figures and the badges; this has
+        // the office's ruling, the punches themselves, and the form.
         function detailHtml(s, punches, i) {
-          var h = hoursOf(s);
-          var sum = s.overlong_shift
-            ? "This shift is longer than the system allows (" + hm(Number(s.hours_on_site || 0)) +
-              " on site), so its hours are not counted. Almost always a missing punch-out — " +
-              "check the punches below, then have the office correct the record."
-            : h
-            ? "On site " + hm(h.gross) + " · counted by the company hours rule: " +
-              hm(h.normal) + " Working Hours" +
-              (h.ot > 0 ? " + " + hm(h.ot) + " overtime" : ", no overtime")
-            : "Still on site — no punch out yet, so the day is not counted.";
-          var extra = "";
-          if (s.in_count > 1 || s.out_count > 1) {
-            extra = '<p class="detail-note">' + s.in_count + " punch-in(s), " + s.out_count +
-                    " punch-out(s) — the table shows the first in and the last out.</p>";
-          }
           return '<div class="detail-box">' +
-            '<p class="detail-sum">' + esc(sum) + "</p>" + extra +
             correctionBlock(s) +
             (punches.length
-              ? '<ul class="punch-lines">' + punches.map(punchLine).join("") + "</ul>"
-              : '<p class="detail-note">No raw punch rows came back for this worker.</p>') +
+              ? (s.has_correction ? '<p class="detail-head">Original Punches</p>' : "") +
+                '<ul class="punch-lines">' + punches.map(punchLine).join("") + "</ul>"
+              : '<p class="detail-note">No Punches Found</p>') +
             amendForm(s, i) +
           "</div>";
         }
 
-        tbody.addEventListener("click", async function (ev) {
-          var btn = rowButton(ev);
-          if (!btn) return;
-          var i = btn.getAttribute("data-i");
+        /* ---- opening a worker's row -----------------------------------------
+           Split in two so the page can open a row ITSELF — after a save, and
+           when the month view sends the office here to correct one day. */
+        function setOpen(i, isOpen) {
+          var btn = tbody.querySelector('.worker-btn[data-i="' + i + '"]');
           var row = document.getElementById("d" + i);
-          var open = btn.getAttribute("aria-expanded") === "true";
-          btn.setAttribute("aria-expanded", open ? "false" : "true");
-          btn.parentNode.parentNode.classList.toggle("open", !open);
-          row.hidden = open;
-          if (open || row.dataset.loaded) return;
+          if (!btn || !row) return;
+          btn.setAttribute("aria-expanded", isOpen ? "true" : "false");
+          btn.parentNode.parentNode.classList.toggle("open", isOpen);
+          row.hidden = !isOpen;
+        }
+        async function loadDrawer(i) {
+          var row = document.getElementById("d" + i);
+          if (!row || row.dataset.loaded) return;
           var cell = row.querySelector("td");
           cell.innerHTML = '<div class="detail-box"><p class="detail-note">Loading…</p></div>';
           try {
@@ -993,9 +1132,18 @@
             cell.innerHTML = '<div class="banner banner-red">Could not load this worker\'s punches: ' +
                              esc(e.message || e) + "</div>";
           }
+        }
+
+        tbody.addEventListener("click", async function (ev) {
+          var btn = rowButton(ev);
+          if (!btn) return;
+          var i = btn.getAttribute("data-i");
+          var open = btn.getAttribute("aria-expanded") === "true";
+          setOpen(i, !open);
+          if (!open) await loadDrawer(i);
         });
 
-        /* ---- Edit Hours: open, save, remove ---------------------------------
+        /* ---- Correct Hours: open, save, remove -------------------------------
            Its own delegated listener rather than more branches inside the
            drawer's: opening a name and ruling on a day are different jobs, and
            a throw in one should not take the other down with it.
@@ -1003,22 +1151,54 @@
            Both writes reload the page on success. The ruling changes the hours
            column, the badges and the day's totals at once, and re-deriving all
            of that by hand is exactly how a screen ends up disagreeing with the
-           database it just wrote to. */
+           database it just wrote to. What the reload used to LOSE was the
+           answer to "did that work?": the row closed and nothing said so. So a
+           note is left for the reloaded page (sessionStorage — this tab only,
+           gone once shown), which re-opens the row and says what was saved. */
+        function leaveNote(note) {
+          try { sessionStorage.setItem("att.saved", JSON.stringify(note)); } catch (e) { /* private mode */ }
+        }
+        function closeForm(i) {
+          var form = document.getElementById("amend" + i), opener = tbody.querySelector('[data-amend="' + i + '"]');
+          if (form) form.hidden = true;
+          if (opener) opener.hidden = false;
+          var m = document.getElementById("amend-msg" + i); if (m) m.innerHTML = "";
+        }
+        function openForm(i) {
+          var form = document.getElementById("amend" + i), opener = tbody.querySelector('[data-amend="' + i + '"]');
+          if (!form) return;
+          form.hidden = false;
+          // the form has its own Save and Cancel; the button that opened it steps aside
+          if (opener) opener.hidden = true;
+          document.getElementById("amend-in" + i).focus();
+        }
+        function formError(i, text, focusId) {
+          // one problem at a time: the outline left by an earlier message goes first
+          Array.prototype.forEach.call(document.querySelectorAll("#amend" + i + " .field-error"), function (x) { x.classList.remove("field-error"); });
+          document.getElementById("amend-msg" + i).innerHTML = '<div class="banner banner-red">' + esc(text) + "</div>";
+          var el = focusId && document.getElementById(focusId);
+          if (el) { el.classList.add("field-error"); el.focus(); }
+        }
+
+        tbody.addEventListener("input", function (ev) {           // the red outline leaves once they start fixing it
+          if (ev.target.classList && ev.target.classList.contains("field-error")) ev.target.classList.remove("field-error");
+        });
+
         tbody.addEventListener("click", async function (ev) {
           if (!ev.target.closest) return;
 
           var toggle = ev.target.closest("[data-amend]");
-          if (toggle) {
-            var ti = toggle.getAttribute("data-amend");
-            var form = document.getElementById("amend" + ti);
-            form.hidden = !form.hidden;
-            toggle.textContent = form.hidden
-              ? (shifts[Number(ti)].has_correction ? "Edit the amendment" : "Amend hours")
-              : "Cancel";
-            // an open form already has its own blue Update — two filled blue
-            // buttons in one box is two invitations to the same act
-            toggle.classList.toggle("btn-quiet", !form.hidden);
-            if (!form.hidden) document.getElementById("amend-in" + ti).focus();
+          if (toggle) { openForm(toggle.getAttribute("data-amend")); return; }
+
+          var cancel = ev.target.closest("[data-amend-cancel]");
+          if (cancel) { closeForm(cancel.getAttribute("data-amend-cancel")); return; }
+
+          var chip = ev.target.closest(".reason-chip");
+          if (chip) {
+            var box = document.getElementById("amend-why" + chip.getAttribute("data-for"));
+            box.value = chip.getAttribute("data-reason");
+            box.classList.remove("field-error");
+            box.focus();                                          // they can add "— supervisor confirmed 6 pm"
             return;
           }
 
@@ -1026,52 +1206,105 @@
           if (save) {
             var i   = save.getAttribute("data-amend-save");
             var s   = shifts[Number(i)];
-            var msg = document.getElementById("amend-msg" + i);
             var why = document.getElementById("amend-why" + i).value.trim();
-            // Checked here as well as in the database because this one is not
-            // an error, it is the point: the worker is owed the reason.
-            if (!why) {
-              msg.innerHTML = '<div class="banner banner-red">Give a reason — the worker ' +
-                              "reads it in their app.</div>";
+            var tIn  = document.getElementById("amend-in" + i).value;      // "HH:MM" or ""
+            var tOut = document.getElementById("amend-out" + i).value;
+            var next = document.getElementById("amend-next" + i).checked;
+            document.getElementById("amend-msg" + i).innerHTML = "";
+
+            // Send ONLY the end that was changed. The form used to send both
+            // times every time, so correcting a punch-out also recorded the
+            // punch-in as "set by the office" — and the drawer then told the
+            // worker the office had changed a time it never touched. An end left
+            // alone goes as null ("keep the worker's own tap"), or as the ruling
+            // already standing on it, since a save replaces the whole correction.
+            var hadIn = s.corrected_in_at || s.first_in_at, hadOut = s.corrected_out_at || s.last_out_at;
+            var inISO  = (tIn && tIn !== klHHMM(hadIn))
+              ? date + "T" + tIn + ":00+08:00" : (s.corrected_in_at || null);
+            var outISO = (tOut && (tOut !== klHHMM(hadOut) || next !== outIsNextDay(hadOut)))
+              ? (next ? shiftDay(date, 1) : date) + "T" + tOut + ":00+08:00" : (s.corrected_out_at || null);
+
+            if (!inISO && !outISO) {
+              formError(i, "Nothing has been changed yet — change the time that is wrong, then save.", "amend-in" + i);
               return;
             }
-            save.disabled = true; save.textContent = "Updating…";
-            try {
-              var res = await Dash.setDayCorrection(
-                s.staff_id, date,
-                klInputToISO(document.getElementById("amend-in" + i).value),
-                klInputToISO(document.getElementById("amend-out" + i).value),
-                why);
-              if (res && res.ok) { location.reload(); return; }
-              // the database's messages are written for the office to read
-              msg.innerHTML = '<div class="banner banner-red">Could not amend: ' +
-                esc((res && res.message) || (res && res.code) || "unknown error") + "</div>";
-            } catch (e) {
-              msg.innerHTML = '<div class="banner banner-red">Could not amend: ' +
-                esc(e.message || e) + "</div>";
+            // a plain slip worth catching here, in words that say what to do about it
+            if (tIn && tOut && !next && tOut <= tIn) {
+              formError(i, "Punch Out is not after Punch In. If the worker finished after midnight, " +
+                           "tick “Punch Out Was The Next Day”.", "amend-out" + i);
+              return;
             }
-            save.disabled = false; save.textContent = "Update";
+            // Checked here as well as in the database because this one is not
+            // an error, it is the point: the worker is owed the reason.
+            if (!why) { formError(i, "Give a reason — the worker reads it in their app.", "amend-why" + i); return; }
+
+            save.disabled = true; save.textContent = "Saving…";
+            try {
+              var res = await Dash.setDayCorrection(s.staff_id, date, inISO, outISO, why);
+              if (res && res.ok) {
+                leaveNote({ date: date, staffId: s.staff_id, text: "Saved — " + s.full_name + "’s hours for " +
+                  friendlyDate(date) + " are now " + String(res.in_at_local || "").slice(11) + " to " +
+                  String(res.out_at_local || "").slice(11) + ". The worker will see the reason in their app." });
+                location.reload(); return;
+              }
+              // the database's messages are written for the office to read
+              formError(i, "Could not save the correction: " + ((res && res.message) || (res && res.code) || "unknown error"));
+            } catch (e) {
+              formError(i, "Could not save the correction: " + (e.message || e));
+            }
+            save.disabled = false; save.textContent = "Save Correction";
             return;
           }
 
           var drop = ev.target.closest("[data-amend-clear]");
           if (drop) {
-            if (!confirm("Remove this amendment? The worker's own punch times stand again.")) return;
-            var ci = drop.getAttribute("data-amend-clear");
+            var ci = drop.getAttribute("data-amend-clear"), cs = shifts[Number(ci)];
+            if (!confirm("Remove this correction? " + cs.full_name + "’s own punch times will stand again.")) return;
             drop.disabled = true;
             try {
-              var r = await Dash.clearDayCorrection(shifts[Number(ci)].staff_id, date);
-              if (r && r.ok) { location.reload(); return; }
-              document.getElementById("amend-msg" + ci).innerHTML =
-                '<div class="banner banner-red">Could not remove: ' +
-                esc((r && r.message) || (r && r.code) || "unknown error") + "</div>";
+              var r = await Dash.clearDayCorrection(cs.staff_id, date);
+              if (r && r.ok) {
+                leaveNote({ date: date, staffId: cs.staff_id, text: "Correction removed — " + cs.full_name +
+                  "’s own punch times for " + friendlyDate(date) + " stand again." });
+                location.reload(); return;
+              }
+              formError(ci, "Could not remove the correction: " + ((r && r.message) || (r && r.code) || "unknown error"));
             } catch (e2) {
-              document.getElementById("amend-msg" + ci).innerHTML =
-                '<div class="banner banner-red">Could not remove: ' + esc(e2.message || e2) + "</div>";
+              formError(ci, "Could not remove the correction: " + (e2.message || e2));
             }
             drop.disabled = false;
           }
         });
+
+        /* ---- arriving with something to show ----------------------------------
+           Either a note left by a save just before the reload, or ?open=<worker>
+           from the month view's "Correct This Day". Both open that worker's row;
+           the second also opens the form, since correcting is why they came. */
+        var note = null;
+        try { note = JSON.parse(sessionStorage.getItem("att.saved") || "null"); sessionStorage.removeItem("att.saved"); }
+        catch (e) { note = null; }
+        if (note && note.date !== date) note = null;
+        var wantOpen = note ? note.staffId : params.get("open");
+        if (wantOpen) {
+          var idx = -1;
+          shifts.forEach(function (x, k) { if (x.staff_id === wantOpen) idx = k; });
+          if (idx >= 0) {
+            var tr = tbody.querySelector('tr.shift-row[data-i="' + idx + '"]');
+            if (tr && tr.hidden) { findEl.value = ""; applyFind("rows", 8); }   // never open a row the Find box is hiding
+            setOpen(idx, true);
+            await loadDrawer(idx);
+            var box = document.querySelector("#d" + idx + " .detail-box");
+            if (note && box) box.insertAdjacentHTML("afterbegin", '<div class="banner banner-green saved-note">' + esc(note.text) + "</div>");
+            if (!note && Dash.can("attendance.edit")) openForm(idx);
+            if (tr && tr.scrollIntoView) tr.scrollIntoView({ block: "center" });
+          } else if (note) {
+            document.getElementById("error").innerHTML = '<div class="banner banner-green">' + esc(note.text) + "</div>";
+          }
+          if (params.has("open")) {                     // used once — stepping to another day must not re-open it
+            params.delete("open");
+            history.replaceState(null, "", location.pathname + (params.toString() ? "?" + params : ""));
+          }
+        }
 
         // raw punches
         if (showRaw && punches) {
@@ -1135,7 +1368,7 @@
       });
       var all = document.querySelectorAll("#month-rows tr.shift-row").length;
       foot.hidden = false;
-      foot.innerHTML = '<tr class="total-row"><td colspan="2"><strong>Total</strong> ' +
+      foot.innerHTML = '<tr class="total-row"><td colspan="3"><strong>Total</strong> ' +
         '<span class="muted">' + rows.length + (rows.length === all ? "" : " of " + all) +
         " worker" + (all === 1 ? "" : "s") + "</span></td>" +
         '<td class="num"><strong>' + days + "</strong></td>" +
@@ -1155,67 +1388,220 @@
       var find = document.getElementById("f-find").value.trim();
       document.getElementById("print-head").innerHTML =
         "<h2>Attendance — " + esc(view === "month" ? "Month Of " + whenText : whenText) + "</h2>" +
-        "<p>Site: " + esc(siteLabel()) + (find ? " · Showing: “" + esc(find) + "”" : "") +
-        " · Printed " + esc(Dash.klDateTime(new Date().toISOString())) + "</p>";
+        "<p>Company: " + esc(document.getElementById("f-company").value ? companyFull(document.getElementById("f-company").value) : "All Companies") +
+        " · Site: " + esc(siteLabel()) +
+        (find ? " · Showing: “" + esc(find) + "”" : "") +
+        " · Printed " + esc(klNow().words) + "</p>";
     }
 
     // ---- Download Excel ---------------------------------------------------
+    // The sheet holds what the DOWNLOAD DIALOG chose — a company (or all), a month,
+    // a site (or all) — and says all three at the top. (Print is the other way round:
+    // it prints what the table is showing, so the Company filter stays in the bar.)
+    //
     // Two sheets: Summary (one row per worker — what payroll keys in) and Daily
     // (every day behind those totals, for when a worker asks "which day?").
-    // Hours are real NUMBERS in decimal hours (7.50), because a payroll sheet
-    // multiplies them; the spelled-out form sits beside them for the eye.
+    //
+    // EVERY FIGURE IS A NUMBER HR CAN COMPUTE WITH (owner, 2026-09-21). Hours are
+    // decimal hours (7.50), never "7 Hours 30 Mins"; In and Out are real Excel
+    // times; dates are real dates; and the total row is =SUM(...), so it follows
+    // the rows if HR edits or deletes one. Hours are stored EXACT and only SHOWN
+    // to 2 places — rounding each row first made a column add up to 19.44 under
+    // a total that said 19.45.
+    //
+    // The file name and the sheet both carry WHEN it was downloaded, to the
+    // minute: corrections keep landing after a download, and "which of these
+    // two files is the newer one" has to be answerable from the file itself.
     // Nothing is fetched here — it is exactly what the screen already holds.
-    function downloadMonthExcel(workers, month, site) {
+    async function downloadMonthExcel(workers, month, companyCode, siteName) {
       function B(v) { return { v: v, bold: true }; }
-      // Hours are stored EXACT and only SHOWN to 2 places. Rounding each row first made
-      // the column add up to 19.44 under a total that said 19.45 - and a payroll sheet
-      // that disagrees with itself by a cent is a sheet nobody trusts.
       function H(min) { return { v: min / 60, hours: true }; }
-      function byCompanyThenName(a, b) {
-        var ca = COMPANY[a.staff_id] || "", cb = COMPANY[b.staff_id] || "";
-        return ca < cb ? -1 : ca > cb ? 1 : (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
-      }
-      var list = workers.slice().sort(byCompanyThenName);
-      var title = "Attendance — " + friendlyMonth(month);
-      var stamp = "Site: " + siteLabel() + " · Downloaded " + Dash.klDateTime(new Date().toISOString());
+      function T(ts) { var v = klInputValue(ts); return v ? { v: v.slice(11, 16), time: true } : ""; }
 
-      var sum = [[B(title)], [stamp],
-        ["Days marked To Fix or Still Open are NOT in these totals — correct them on the Attendance page first."], [],
-        [B("Employee Code"), B("Name"), B("Company"), B("Sites"), B("Days Worked"),
-         B("Working Hours"), B("Over Time Hours"), B("Working Hours (Words)"), B("Over Time (Words)"),
-         B("Days To Fix"), B("Days Still Open")]];
-      var tDays = 0, tWm = 0, tOm = 0;
-      list.forEach(function (w) {
-        tDays += w.days; tWm += w.wm; tOm += w.om;
-        sum.push([CODES[w.staff_id] || "", w.name, COMPANY[w.staff_id] || "", Object.keys(w.sites).join(", "),
-                  w.days, H(w.wm), H(w.om), hm(w.wm / 60), hm(w.om / 60), w.broken || "", w.open || ""]);
+      // the company chosen in the menu — the WHOLE month of it, in company-then-name order
+      var chosen = companyCode ? companyName(companyCode) : "All Companies";          // short — for the file name
+      var chosenFull = companyCode ? companyFull(companyCode) : "All Companies";     // legal — for the sheet
+      siteName = siteName || "All Sites";
+      var list = workers.filter(function (w) { return !companyCode || COMPANY[w.staff_id] === companyCode; }).sort(function (a, b) {
+        var ca = companyName(COMPANY[a.staff_id]), cb = companyName(COMPANY[b.staff_id]);
+        return ca < cb ? -1 : ca > cb ? 1 : (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
       });
+      if (!list.length) { alert(chosen + " is unavailable for this month — there are no attendance records."); return; }
+
+      var now = klNow(), who = "";
+      try { var acc = await Dash.getMyAccess(); who = (acc && acc.ok && acc.access && acc.access.full_name) || ""; } catch (e) { who = ""; }
+      var HEAD = 7;                               // the row the column headings sit on
+      var sum = [
+        [B("Attendance — " + friendlyMonth(month))],
+        [B("Company"), chosenFull],
+        [B("Site"), siteName],
+        [B("Workers"), list.length],
+        [B("Downloaded"), now.words + (who ? " by " + who : "")],
+        ["Days marked To Fix or Still Open are NOT in these totals — correct them on the Attendance page, then download again."],
+        [B("Employee Code"), B("Name"), B("Company"), B("Sites"), B("Days Worked"), B("Working Hours"),
+         B("Over Time Hours"), B("Total Hours"), B("Days To Fix"), B("Days Still Open")]];
+      var tDays = 0, tWm = 0, tOm = 0, tFix = 0, tOpen = 0;
+      list.forEach(function (w) {
+        tDays += w.days; tWm += w.wm; tOm += w.om; tFix += w.broken; tOpen += w.open;
+        sum.push([CODES[w.staff_id] || "", w.name, companyFull(COMPANY[w.staff_id]), Object.keys(w.sites).join(", "),
+                  w.days, H(w.wm), H(w.om), H(w.wm + w.om), w.broken, w.open]);
+      });
+      var first = HEAD + 1, last = HEAD + list.length;
+      function S(col, cached, hours) {            // =SUM down one column, with the value to show meanwhile
+        return { f: "SUM(" + col + first + ":" + col + last + ")", v: cached, hours: !!hours, bold: true };
+      }
       sum.push([B("Total"), B(list.length + " worker" + (list.length === 1 ? "" : "s")), null, null,
-                B(tDays), { v: tWm / 60, hours: true, bold: true },
-                { v: tOm / 60, hours: true, bold: true }, B(hm(tWm / 60)), B(hm(tOm / 60))]);
+                S("E", tDays), S("F", tWm / 60, true), S("G", tOm / 60, true), S("H", (tWm + tOm) / 60, true),
+                S("I", tFix), S("J", tOpen)]);
 
       var daily = [[B("Employee Code"), B("Name"), B("Company"), B("Date"), B("Day"), B("Site"),
-                    B("In"), B("Out"), B("Working Hours"), B("Over Time Hours"),
+                    B("In"), B("Out"), B("Working Hours"), B("Over Time Hours"), B("Total Hours"),
                     B("Counted In Totals"), B("Corrected By Office"), B("Reason"), B("Note")]];
       list.forEach(function (w) {
         w.rows.slice().sort(function (a, b) { return a.work_date < b.work_date ? -1 : 1; }).forEach(function (r) {
           var h = hoursOf(r), counted = !r.overlong_shift && !!h;
+          var wm = Number(r.working_minutes) || 0, om = Number(r.ot_minutes) || 0;
           var note = r.overlong_shift ? "Forgot To Punch Out" : (!effOut(r) ? "No Punch Out"
                      : (r.has_anomaly ? "Location Not Confirmed" : ""));
-          daily.push([CODES[w.staff_id] || "", w.name, COMPANY[w.staff_id] || "",
+          daily.push([CODES[w.staff_id] || "", w.name, companyFull(COMPANY[w.staff_id]),
             { v: r.work_date, date: true }, DAY_NAMES[new Date(String(r.work_date).slice(0, 10) + "T00:00:00Z").getUTCDay()],
-            r.project_name || "", effIn(r) ? Dash.klTime(effIn(r)) : "", effOut(r) ? Dash.klTime(effOut(r)) : "",
-            counted ? H(Number(r.working_minutes) || 0) : "", counted ? H(Number(r.ot_minutes) || 0) : "",
-            counted ? "Yes" : "No", r.has_correction ? "Yes" : "", r.correction_reason || "", note]);
+            siteText(r), T(effIn(r)), T(effOut(r)),
+            counted ? H(wm) : "", counted ? H(om) : "", counted ? H(wm + om) : "",
+            counted ? "Yes" : "No", r.has_correction ? "Yes" : "No", r.correction_reason || "", note]);
         });
       });
 
       var blob = XlsxLite.build([
-        { name: "Summary", freezeRows: 5, widths: [16, 34, 12, 34, 13, 15, 17, 24, 22, 13, 16], rows: sum },
-        { name: "Daily",   freezeRows: 1, widths: [16, 34, 12, 14, 7, 30, 11, 11, 15, 17, 18, 20, 50, 26], rows: daily }
+        { name: "Summary", freezeRows: HEAD, widths: [16, 34, 17, 34, 13, 15, 17, 13, 13, 16], rows: sum },
+        { name: "Daily",   freezeRows: 1,    widths: [16, 34, 17, 14, 7, 30, 11, 11, 15, 17, 13, 18, 20, 50, 26], rows: daily }
       ]);
-      var where = siteLabel().replace(/[\\/:*?"<>|]+/g, " ").trim();
-      XlsxLite.download(blob, "Attendance " + month + " " + where + ".xlsx");
+      XlsxLite.download(blob, fileName("Downloaded", friendlyMonth(month), now, chosen, siteName) + ".xlsx");
+    }
+
+    /* =======================================================================
+       DOWNLOAD ATTENDANCE — the dialog behind the Download Excel button
+       -----------------------------------------------------------------------
+       LOOKING at attendance and PRODUCING a payroll file are different jobs
+       (owner, 2026-09-21). The download used to take whatever the page was
+       showing, so getting Hai Fu's June file meant steering the whole page to
+       Hai Fu and June first. Now the button asks its own three questions —
+       which company, which month, which site (optional) — and the page behind
+       it does not matter.
+
+       It opens ALREADY FILLED IN from the page (its month, its site, its
+       company filter), so the everyday case is still: press, pick the company,
+       Download. Each company shows how many workers it has for the month and
+       site chosen; one with none reads "Unavailable" and cannot be picked.
+
+       The month is read through the same door the month view uses
+       (fetchMonth -> get_shifts_range), and kept, so stepping back to a month
+       already looked at is instant. Nothing here writes anything.
+       ======================================================================= */
+    var DL = { month: "", site: "", company: "", cache: {}, ticket: 0 };
+
+    function dlKey() { return DL.month + "|" + DL.site; }
+    function dlSiteName() {
+      var el = document.getElementById("dl-site");
+      return (el && el.value && el.selectedIndex >= 0) ? el.options[el.selectedIndex].text : "All Sites";
+    }
+    function dlCount(workers, code) {
+      return workers.filter(function (w) { return !code || COMPANY[w.staff_id] === code; }).length;
+    }
+
+    function dlRender() {
+      var thisMonth = Dash.todayKL().slice(0, 7), workers = DL.cache[dlKey()];
+      document.getElementById("dl-month-label").textContent = friendlyMonth(DL.month);
+      document.getElementById("dl-next").disabled = DL.month >= thisMonth;
+      var choices = [["", "All Companies"], ["HF-BP", companyFull("HF-BP")], ["Hai Fu", companyFull("Hai Fu")]];
+      document.getElementById("dl-companies").innerHTML = choices.map(function (c) {
+        var k = workers ? dlCount(workers, c[0]) : null, off = (k === 0);
+        return '<label class="dl-choice' + (off ? " is-off" : "") + '">' +
+          '<input type="radio" name="dl-company" value="' + esc(c[0]) + '"' +
+            (DL.company === c[0] ? " checked" : "") + (off ? " disabled" : "") + ">" +
+          '<span class="dl-name">' + esc(c[1]) + "</span>" +
+          '<span class="dl-count">' + (k === null ? "Checking…" : off ? "Unavailable"
+            : k + " worker" + (k === 1 ? "" : "s")) + "</span></label>";
+      }).join("");
+      var can = !!workers && dlCount(workers, DL.company) > 0;
+      document.getElementById("dl-go").disabled = !can;
+      document.getElementById("dl-hint").className = "dl-hint";
+      document.getElementById("dl-hint").textContent = !workers ? ""
+        : can ? "" : "No Data Available";
+    }
+
+    async function dlLoad() {
+      var key = dlKey(), mine = ++DL.ticket;
+      dlRender();
+      if (DL.cache[key]) return;
+      try {
+        var rows = await fetchMonth(DL.month, DL.site);
+        DL.cache[key] = byWorker(rows);
+      } catch (e) {
+        if (mine === DL.ticket) { document.getElementById("dl-hint").className = "dl-hint is-error"; document.getElementById("dl-hint").textContent = "Could Not Load — Try Again"; }
+        return;
+      }
+      if (mine === DL.ticket) dlRender();          // a slower, older answer never overwrites a newer choice
+    }
+
+    function dlOpen(month, site, company) {
+      DL.month = month; DL.site = site || ""; DL.company = company || "";
+      var src = document.getElementById("f-site"), dst = document.getElementById("dl-site");
+      dst.innerHTML = src.innerHTML; dst.value = DL.site;
+      document.getElementById("dl-back").hidden = false;
+      dlPlace();
+      dlLoad().then(function () {
+        var first = document.querySelector("#dl-companies input:checked:not(:disabled)") ||
+                    document.querySelector("#dl-companies input:not(:disabled)");
+        if (first) first.focus();
+      });
+    }
+    function dlPlace() {
+      var btn = document.getElementById("btn-excel"), card = document.getElementById("dl-card");
+      if (!btn || !card) return;
+      var r = btn.getBoundingClientRect(), gap = 10, w = card.offsetWidth || 428;
+      var right = Math.max(12, window.innerWidth - r.right);
+      if (window.innerWidth - right - w < 12) right = Math.max(12, window.innerWidth - w - 12);   // narrow screens
+      card.style.right = right + "px";
+      card.style.top = Math.max(12, r.bottom + gap) + "px";
+      card.style.maxHeight = Math.max(260, window.innerHeight - r.bottom - gap - 16) + "px";
+    }
+
+    function dlClose() {
+      document.getElementById("dl-back").hidden = true;
+      var b = document.getElementById("btn-excel"); if (b) b.focus();
+    }
+
+    function wireDownloadDialog(startMonth, startSite, loadedWorkers) {
+      var btn = document.getElementById("btn-excel");
+      if (!Dash.can("attendance.export") || !window.XlsxLite) return;     // an export answers to attendance.export
+      btn.hidden = false;
+      if (loadedWorkers) DL.cache[startMonth + "|" + (startSite || "")] = loadedWorkers;   // the month view already has it
+      btn.addEventListener("click", function () {
+        dlOpen(startMonth, startSite, document.getElementById("f-company").value);
+      });
+      document.getElementById("dl-prev").addEventListener("click", function () { DL.month = shiftMonth(DL.month, -1); dlLoad(); });
+      document.getElementById("dl-next").addEventListener("click", function () {
+        if (DL.month < Dash.todayKL().slice(0, 7)) { DL.month = shiftMonth(DL.month, 1); dlLoad(); }
+      });
+      document.getElementById("dl-site").addEventListener("change", function () { DL.site = this.value; dlLoad(); });
+      document.getElementById("dl-companies").addEventListener("change", function (ev) {
+        if (ev.target.name === "dl-company") { DL.company = ev.target.value; dlRender();
+          var again = document.querySelector('#dl-companies input[value="' + DL.company + '"]'); if (again) again.focus(); }
+      });
+      document.getElementById("dl-cancel").addEventListener("click", dlClose);
+      window.addEventListener("resize", function () { if (!document.getElementById("dl-back").hidden) dlPlace(); });
+      window.addEventListener("scroll", function () { if (!document.getElementById("dl-back").hidden) dlPlace(); }, { passive: true });
+      document.getElementById("dl-back").addEventListener("click", function (ev) { if (ev.target.id === "dl-back") dlClose(); });
+      document.addEventListener("keydown", function (ev) {
+        if (ev.key === "Escape" && !document.getElementById("dl-back").hidden) dlClose();
+      });
+      document.getElementById("dl-go").addEventListener("click", async function () {
+        var workers = DL.cache[dlKey()]; if (!workers) return;
+        this.disabled = true; this.textContent = "Preparing…";
+        try { await downloadMonthExcel(workers, DL.month, DL.company, dlSiteName()); dlClose(); }
+        catch (e) { document.getElementById("dl-hint").className = "dl-hint is-error"; document.getElementById("dl-hint").textContent = "Download Failed — Try Again"; }
+        this.textContent = "Download"; dlRender();
+      });
     }
 
     function daysOfMonth(month) {
@@ -1270,6 +1656,7 @@
           sites: {}, days: 0, normal: 0, ot: 0, wm: 0, om: 0, broken: 0, open: 0, rows: []
         });
         if (r.project_name) w.sites[r.project_name] = true;
+        if (r.out_project_name) w.sites[r.out_project_name] = true;   // a day that ended elsewhere (0102)
         // the database's price for the day, or null — never re-worked-out here
         var h = hoursOf(r);
         if (r.overlong_shift) w.broken++;
@@ -1287,13 +1674,25 @@
     }
 
     function monthDetail(w) {
+      var canFix = Dash.can("attendance.edit") && !!w.staff_id, todayIso = Dash.todayKL();
       var lines = w.rows.slice().sort(function (a, b) {
         return a.work_date < b.work_date ? -1 : 1;
       }).map(function (r) {
         var h = hoursOf(r);
         var counted = !r.overlong_shift && h;
+        // THE WAY FROM "1 To Fix" TO THE FIX. The month view is where the office
+        // finds a wrong day; correcting it used to mean switching to Day, picking
+        // the date, finding the worker, opening the row and pressing the button.
+        // One link does all five. Not offered for today — the database will not
+        // correct a day that is not over.
+        var fixLink = (canFix && String(r.work_date) < todayIso)
+          ? '<a class="fix-link" href="attendance.html?date=' + encodeURIComponent(r.work_date) +
+            "&open=" + encodeURIComponent(w.staff_id || "") + '">Correct This Day</a>' : "";
         return "<tr" + (isSunday(r.work_date) ? ' class="is-sunday"' : "") + ">" +
           "<td>" + esc(friendlyDate(r.work_date)) + "</td>" +
+          // per-day site (owner, 2026-09-22): the one place a month's "A, B"
+          // list says WHICH day the man moved
+          "<td>" + esc(siteText(r) || "—") + "</td>" +
           // the times the day is PAID from, marked when the office set them —
           // the same two the day view shows, so the month never argues with it
           "<td>" + timeCell(effIn(r),  r.corrected_in_at)  + "</td>" +
@@ -1309,27 +1708,29 @@
                     (r.correction_reason ? " — " + r.correction_reason : "") + ".") +
                 '">Corrected By Office</span>' : ""
             ].filter(Boolean).join(" ") || "—") + "</td>" +
+          (canFix ? "<td>" + fixLink + "</td>" : "") +
         "</tr>";
       }).join("");
       return '<div class="detail-box"><table class="att-table month-days"><thead><tr>' +
-        "<th>Date</th><th>In</th><th>Out</th><th class=\"num\">Working Hours</th>" +
-        "<th class=\"num\">Over Time</th><th>Attention</th></tr></thead><tbody>" +
+        "<th>Date</th><th>Site</th><th>In</th><th>Out</th><th class=\"num\">Working Hours</th>" +
+        "<th class=\"num\">Over Time</th><th>Attention</th>" + (canFix ? "<th></th>" : "") + "</tr></thead><tbody>" +
         lines + "</tbody></table></div>";
     }
 
     async function renderMonth(month, site) {
       var tbody = document.getElementById("month-rows");
       var note = document.getElementById("month-note");
-      tbody.innerHTML = '<tr><td colspan="6" class="empty">Reading the month…</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" class="empty">Reading the month…</td></tr>';
 
       var rows = await fetchMonth(month, site, function (done, total) {
-        tbody.innerHTML = '<tr><td colspan="6" class="empty">Reading the month… ' +
+        tbody.innerHTML = '<tr><td colspan="7" class="empty">Reading the month… ' +
                           done + " of " + total + " days</td></tr>";
       });
       var workers = byWorker(rows);
+      wireDownloadDialog(month, site, workers);      // opens pre-filled with this month; reuses what was just read
 
       if (!workers.length) {
-        tbody.innerHTML = '<tr><td colspan="6" class="empty">No punches in ' + esc(month) +
+        tbody.innerHTML = '<tr><td colspan="7" class="empty">No punches in ' + esc(friendlyMonth(month)) +
           ". The punch app pilot hasn't started at the sites yet.</td></tr>";
         note.hidden = true;
         return;
@@ -1342,11 +1743,12 @@
           'in this worker\'s totals until corrected.">' + w.broken + " To Fix</span>");
         if (w.open) att.push('<span class="badge badge-gray" title="Day(s) with a punch in and ' +
           'no punch out. No hours to count yet.">' + w.open + " Still Open</span>");
-        return '<tr class="shift-row" data-i="' + i + '" data-days="' + w.days + '" data-wm="' + w.wm +
+        return '<tr class="shift-row" data-i="' + i + '" data-company="' + esc(COMPANY[w.staff_id] || "") +
+                 '" data-days="' + w.days + '" data-wm="' + w.wm +
                  '" data-om="' + w.om + '" data-find="' +
                  esc(findKey(w, Object.keys(w.sites).join(" "))) + '">' +
+          codeCell(w.staff_id) +
           '<td><button type="button" class="worker-btn" data-i="' + i + '" aria-expanded="false">' +
-            '<span class="caret" aria-hidden="true"></span>' +
             '<span class="who-line"><strong>' + esc(w.name) + "</strong>" + codeTag(w.staff_id) + "</span>" +
             "</button></td>" +
           "<td>" + esc(Object.keys(w.sites).join(", ") || "—") + "</td>" +
@@ -1354,24 +1756,15 @@
           '<td class="num">' + hm(w.normal) + "</td>" +
           '<td class="num">' + (w.ot > 0 ? '<span class="ot-on">' + hm(w.ot) + "</span>" : hm(0)) + "</td>" +
           "<td>" + (att.join(" ") || "—") + "</td></tr>" +
-          '<tr class="detail-row" id="m' + i + '" hidden><td colspan="6"></td></tr>';
+          '<tr class="detail-row" id="m' + i + '" hidden><td colspan="7"></td></tr>';
       }).join("");
 
       note.hidden = false;
-      note.innerHTML = '<span class="legend-prose">Days a worker was on site with a completed punch out. ' +
-        "Overtime is counted per day, by the company hours rule, never from the " +
-        "monthly total — a 12-hour Monday and a 4-hour Tuesday is 4 hours of overtime, not none. " +
-        "Days marked <strong>To Fix</strong> or <strong>Still Open</strong> are left out of the totals.</span>";
+      note.innerHTML = '<span class="legend-prose">Overtime is counted per day. ' +
+        "Days marked <strong>To Fix</strong> or <strong>Still Open</strong> are excluded from totals.</span>";
 
-      if (document.getElementById("f-find").value) applyFind("month-rows", 6);
+      if (document.getElementById("f-find").value || document.getElementById("f-company").value) applyFind("month-rows", 7);
       updateMonthTotals();
-
-      // Download Excel — an export, so it answers to attendance.export
-      var xBtn = document.getElementById("btn-excel");
-      if (Dash.can("attendance.export") && window.XlsxLite) {
-        xBtn.hidden = false;
-        xBtn.addEventListener("click", function () { downloadMonthExcel(workers, month, site); });
-      }
 
       tbody.addEventListener("click", function (ev) {
         var btn = rowButton(ev);

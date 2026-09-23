@@ -15,6 +15,8 @@
 //     bold            — headings and the total row
 //     0.00            — hours as real NUMBERS, so they can be summed and multiplied
 //     dd mmm yyyy     — real DATES, so they sort and filter as dates
+//     h:mm AM/PM      — real TIMES, so a punch-out minus a punch-in is arithmetic
+//     formulas        — a total that is =SUM(...), so it follows the rows if HR edits them
 //     frozen top rows, column widths
 //
 // USE
@@ -26,8 +28,10 @@
 //     ]);
 //     XlsxLite.download(blob, "Attendance 2026-08.xlsx");
 //
-// A cell is a string, a number, null, or {v, bold?, hours?, date?}. `date` takes
-// an ISO "YYYY-MM-DD" string. Nothing here touches the network or the database.
+// A cell is a string, a number, null, or {v, bold?, hours?, date?, time?, f?}.
+// `date` takes an ISO "YYYY-MM-DD" string; `time` takes "HH:MM" (24 h); `f` is a
+// formula without the "=" and `v` beside it is the value to show until Excel
+// recalculates. Nothing here touches the network or the database.
 // -----------------------------------------------------------------------------
 (function () {
   "use strict";
@@ -103,7 +107,15 @@
     return Math.round((Date.UTC(+m[1], +m[2] - 1, +m[3]) - Date.UTC(1899, 11, 30)) / 86400000);
   }
 
+  // "HH:MM" -> the fraction of a day Excel stores a time as
+  function timeFraction(hhmm) {
+    var m = /^(\d{1,2}):(\d{2})/.exec(String(hhmm || ""));
+    if (!m) return null;
+    return (Number(m[1]) * 60 + Number(m[2])) / 1440;
+  }
+
   // cellXfs, by index: 0 plain · 1 bold · 2 hours · 3 bold hours · 4 date · 5 bold date
+  //                    6 time · 7 bold time      (18 is Excel's built-in "h:mm AM/PM")
   var STYLES =
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
     '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
@@ -114,13 +126,15 @@
       '<fill><patternFill patternType="gray125"/></fill></fills>' +
     '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
     '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
-    '<cellXfs count="6">' +
+    '<cellXfs count="8">' +
       '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
       '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>' +
       '<xf numFmtId="2" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>' +
       '<xf numFmtId="2" fontId="1" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/>' +
       '<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>' +
       '<xf numFmtId="164" fontId="1" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/>' +
+      '<xf numFmtId="18" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>' +
+      '<xf numFmtId="18" fontId="1" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/>' +
     '</cellXfs>' +
     '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' +
     '</styleSheet>';
@@ -128,8 +142,16 @@
   function cellXml(cell, ref) {
     if (cell === null || cell === undefined || cell === "") return "";
     var c = (typeof cell === "object") ? cell : { v: cell };
-    if (c.v === null || c.v === undefined || c.v === "") return "";
     var bold = c.bold ? 1 : 0;
+    if (c.f) {                                  // a formula, with the value to show until Excel recalculates
+      return '<c r="' + ref + '" s="' + ((c.hours ? 2 : 0) + bold) + '"><f>' + esc(c.f) + "</f>" +
+             ((typeof c.v === "number" && isFinite(c.v)) ? "<v>" + c.v + "</v>" : "") + "</c>";
+    }
+    if (c.v === null || c.v === undefined || c.v === "") return "";
+    if (c.time) {
+      var t = timeFraction(c.v);
+      if (t !== null) return '<c r="' + ref + '" s="' + (6 + bold) + '"><v>' + t + "</v></c>";
+    }
     if (c.date) {
       var n = dateSerial(c.v);
       if (n !== null) return '<c r="' + ref + '" s="' + (4 + bold) + '"><v>' + n + "</v></c>";
@@ -214,5 +236,5 @@
     setTimeout(function () { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
   }
 
-  window.XlsxLite = { build: build, download: download };
+  window.XlsxLite = { build: build, download: download, colName: colName };
 })();

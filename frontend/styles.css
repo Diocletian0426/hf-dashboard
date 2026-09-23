@@ -2925,7 +2925,11 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
   background: var(--surface-2);
   border-bottom: 1px solid var(--line-strong);
 }
-.detail-sum { margin: 0 0 var(--sp-2); font-size: var(--fs-sm); }
+/* names the worker's own punches once an office ruling sits above them */
+.detail-head {
+  margin: var(--sp-3) 0 var(--sp-1); font-size: var(--fs-xs); font-weight: 700;
+  letter-spacing: 0.04em; color: var(--ink-3);
+}
 .detail-note { margin: 0 0 var(--sp-2); font-size: var(--fs-xs); color: var(--ink-3); }
 
 /* one line per punch: what it was, when, whether the location held up */
@@ -3158,10 +3162,17 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
    with one-word badges. With readable type and badges that say what they mean,
    the table outgrew the page and the Attention column slid off the right edge.
    The two columns made of WORDS may wrap; the columns made of numbers stay put. */
-.att-readable .att-table td:nth-child(2),
+.att-readable .att-table:not(.month-days) > tbody > tr > td:nth-child(3),
 .att-readable .att-table td:last-child { white-space: normal; }
 .att-readable .att-table td:last-child .badge { margin: 2px 1px; }
-.att-readable .att-table > tbody > tr > td:nth-child(2) { min-width: 190px; }
+/* With Employee Code as its own column the row ran out of width again. A badge is one
+   unbreakable word by default; in THIS column a long label may take two lines instead
+   of pushing the column off the page. Holds for any code length, not just short ones. */
+.att-readable .att-table:not(.month-days) > tbody > tr > td:last-child { max-width: 190px; }
+.att-readable .att-table:not(.month-days) > tbody > tr > td:last-child .badge {
+  white-space: normal; text-align: center; line-height: 1.25; padding-top: 4px; padding-bottom: 4px; border-radius: 14px;
+}
+.att-readable .att-table:not(.month-days) > tbody > tr > td:nth-child(3) { min-width: 190px; }
 .att-readable .att-table .empty { font-size: 16px; color: var(--ink-2); }
 /* employee codes were --ink-3 at 12px — present, but not readable */
 .att-readable .att-table .muted { font-size: 13.5px; color: var(--ink-2); }
@@ -3193,7 +3204,7 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
 }
 
 /* the drawer */
-.att-readable .detail-sum { font-size: 16px; }
+.att-readable .detail-head { font-size: 13px; color: var(--ink-2); }
 .att-readable .detail-note { font-size: 14.5px; color: var(--ink-2); }
 .att-readable .punch-lines li { font-size: 15.5px; padding: 8px 0; }
 .att-readable .pl-type { font-size: 13px; flex-basis: 48px; }
@@ -3201,9 +3212,12 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
 .att-readable .pl-where { font-size: 14.5px; color: var(--ink-2); }
 .att-readable .month-days { font-size: 15.5px; }
 .att-readable .month-days th { font-size: 13px; }
-/* the drill-down's In column inherited the outer table's left-aligned 2nd column;
-   centred like Out, so a time and its Office tag line up */
-.att-readable .month-days th:nth-child(2), .att-readable .month-days td:nth-child(2) { text-align: center; min-width: 0; }
+/* the drill-down's 2nd column is Site (DB 0102) — words, so it reads from the
+   left like the outer table's Site column and may wrap: "A → B" on the day a
+   man moved would otherwise push the Attention column off the page. In and
+   Out (3rd, 4th) keep the table's default centring, so a time and its Office
+   tag line up. */
+.att-readable .month-days td:nth-child(2) { white-space: normal; max-width: 250px; }
 .att-readable .month-days th, .att-readable .month-days td { padding: 9px var(--sp-2); }
 /* Sundays stand out in the month drill-down: they are not an ordinary day */
 .att-readable .month-days tr.is-sunday td:first-child { color: var(--danger-ink); font-weight: 600; }
@@ -3330,3 +3344,169 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
   body.att-readable .table-legend.legend-list > span { margin-bottom: 3px; }
   body.att-readable .att-table tfoot .total-row td { background: #fff !important; border-top: 1.5px solid #000; font-size: 13px; }
 }
+
+/* ---- attendance: the Correct Hours form ----------------------------------
+   The one place on this page where the office TYPES was the smallest thing on
+   it: 12.5px inputs, 12px labels, 30px buttons. Sized here to be read and hit.
+   Save and Cancel sit together under the thing they act on; Remove Correction
+   is the destructive one, so it stands apart and looks it. */
+.att-readable .amend-wrap { margin-top: var(--sp-4); }
+.att-readable .amend-wrap > .amend-open {
+  font-size: 15px; padding: 10px 20px; color: var(--ink);
+}
+.att-readable .amend-form {
+  display: block; padding: var(--sp-4); margin-top: var(--sp-2);
+  background: rgba(255, 255, 255, 0.85); border: 1px solid var(--line-strong); border-radius: var(--r-lg);
+}
+.att-readable .amend-title { font-size: 16px; color: var(--ink); margin: 0 0 var(--sp-4); }
+.att-readable .amend-times { display: flex; align-items: flex-end; flex-wrap: wrap; gap: var(--sp-4) var(--sp-5); margin: 0 0 var(--sp-4); }
+.att-readable .amend-form label { font-size: 14.5px; font-weight: 600; color: var(--ink); }
+.att-readable .amend-times label { display: flex; flex-direction: column; gap: 6px; }
+.att-readable .amend-form input[type="time"],
+.att-readable .amend-form input[type="text"] {
+  font-size: 17px; padding: 10px 14px; min-height: 46px; color: var(--ink);
+  background: #fff; border: 1.5px solid var(--line-strong); border-radius: var(--r-md);
+}
+.att-readable .amend-form input[type="time"] { width: 170px; }
+.att-readable .amend-form input[type="text"] { width: 100%; max-width: 760px; box-sizing: border-box; }
+.att-readable .amend-form input:focus { outline: 2px solid var(--brand); outline-offset: 1px; border-color: var(--brand); }
+.att-readable .amend-form input.field-error { border-color: var(--danger-ink); outline: 2px solid rgba(220, 38, 38, 0.35); }
+.att-readable .amend-times label.amend-next {
+  flex-direction: row; align-items: center; gap: 10px; font-weight: 400; min-height: 46px; cursor: pointer;
+}
+.att-readable .amend-next input { width: 20px; height: 20px; }
+.att-readable .amend-reason { display: block; margin: 0 0 var(--sp-3); }
+.att-readable .amend-reason > label { display: block; margin: 0 0 6px; }
+.reason-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 10px; }
+.att-readable .amend-form .reason-chip {
+  font-size: 14.5px; padding: 8px 16px; color: var(--ink);
+  background: rgba(37, 99, 235, 0.07); border: 1px solid rgba(37, 99, 235, 0.3); border-radius: 999px; cursor: pointer;
+}
+.att-readable .amend-form .reason-chip:hover { background: rgba(37, 99, 235, 0.16); color: var(--brand-ink); }
+.att-readable .amend-msg:not(:empty) { margin: 0 0 var(--sp-3); }
+.att-readable .amend-msg .banner { font-size: 15px; margin: 0; }
+.att-readable .amend-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); margin: var(--sp-2) 0 var(--sp-3); }
+.att-readable .amend-actions button { font-size: 15.5px; padding: 11px 24px; min-height: 46px; }
+/* Save is the ONE filled button. The shared .claim-form button rule fills every button
+   blue and turns its text dark on hover - so Cancel looked like a second Save, and Save's
+   own label went dark-on-blue under the mouse, exactly when someone is about to press it. */
+.att-readable .amend-actions .btn-primary,
+.att-readable .amend-actions .btn-primary:hover,
+.att-readable .amend-actions .btn-primary:focus { font-weight: 600; color: #fff; background: var(--brand); border-color: var(--brand); }
+.att-readable .amend-actions .btn-primary:hover { filter: brightness(0.93); }
+.att-readable .amend-actions .btn-primary:disabled { opacity: 0.6; cursor: default; }
+.att-readable .amend-actions [data-amend-cancel],
+.att-readable .amend-actions [data-amend-cancel]:hover { color: var(--ink); background: #fff; border: 1px solid var(--line-strong); }
+.att-readable .amend-actions [data-amend-cancel]:hover { background: var(--surface-2); }
+.att-readable .amend-actions .amend-remove {
+  margin-left: auto; color: var(--danger-ink); border-color: #fecaca; background: #fff;
+}
+.att-readable .amend-actions .amend-remove:hover { background: var(--danger-soft); border-color: var(--danger-ink); color: var(--danger-ink); }
+.att-readable .amend-form .muted-line { display: block; font-size: 14px; color: var(--ink-2); }
+.att-readable .saved-note { font-size: 15.5px; margin: 0 0 var(--sp-3); }
+/* the month drill-down's way to the fix */
+.att-readable .fix-link { font-size: 14.5px; font-weight: 600; color: var(--brand-ink); text-decoration: none; white-space: nowrap; }
+.att-readable .fix-link:hover { text-decoration: underline; }
+@media print { body.att-readable .fix-link { display: none !important; } }
+
+/* the Company filter is a short list - it does not need the Site box's width */
+.att-narrow #f-company { width: 210px; }
+
+/* ---- attendance: the Employee Code column --------------------------------
+   Code | Worker | Site read as text, left-aligned; everything after is a fact
+   about the day, centred under its heading. The chevron that says "this row
+   opens" leads the row, in front of the code. */
+.att-table:not(.month-days) > thead > tr > th:nth-child(3),
+.att-table:not(.month-days) > tbody > tr > td:nth-child(3) { text-align: left; }
+.att-readable .code-cell { white-space: nowrap; }
+.att-readable .code-cell .emp-code { font-variant-numeric: tabular-nums; color: var(--ink); }
+.code-cell .caret {
+  display: inline-block; width: 0; height: 0; margin-right: 10px; vertical-align: 1px;
+  border-left: 7px solid var(--ink-2);
+  border-top: 5px solid transparent; border-bottom: 5px solid transparent;
+  transition: transform 0.15s ease;
+}
+.shift-row.open .code-cell .caret { transform: rotate(90deg) translateX(1px); }
+.att-readable tr.shift-row:hover .code-cell .caret { border-left-color: var(--brand-ink); }
+@media print { body.att-readable .code-cell .caret { display: none !important; } }
+
+/* ---- attendance: the Download Attendance panel -----------------------------
+   A panel that hangs from its button, not a box over a darkened page. Three
+   questions deserve a quiet surface: no curtain, the page stays lit, a soft
+   shadow does the lifting. Compact, but nothing under 40px to press and
+   nothing under 14px to read — the people using it are not young. */
+.dl-back { position: fixed; inset: 0; z-index: 300; background: transparent; }
+.dl-card {
+  position: fixed; top: 80px; right: 24px; width: 428px; max-width: calc(100vw - 24px);
+  overflow: auto; padding: 16px 18px 16px;
+  background: #fff; border: 1px solid rgba(22, 32, 58, 0.1); border-radius: 18px;
+  box-shadow: 0 1px 2px rgba(22, 32, 58, 0.06), 0 18px 44px -8px rgba(22, 32, 58, 0.28);
+  animation: dl-in 0.16s ease-out;
+}
+@keyframes dl-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+.dl-head { display: flex; align-items: center; justify-content: space-between; margin: 0 0 12px; }
+.dl-card h3 { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -0.01em; color: var(--ink); }
+.dl-x {
+  width: 30px; height: 30px; margin: -4px -6px -4px 0; padding: 0 0 2px; font-size: 22px; line-height: 1;
+  color: var(--ink-3); background: none; border: 0; border-radius: 50%; cursor: pointer;
+}
+.dl-x:hover, .dl-x:focus-visible { color: var(--ink); background: var(--surface-2); outline: none; }
+.dl-label {
+  display: block; margin: 0 0 6px; font-size: 11.5px; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.dl-optional { margin-left: 6px; font-weight: 400; letter-spacing: 0; text-transform: none; }
+
+/* the companies: ONE quiet list with hairlines, not three boxes */
+.dl-group { margin: 0 0 14px; border: 1px solid var(--line-strong); border-radius: 12px; overflow: hidden; }
+.dl-choice {
+  display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 6px 12px; margin: 0;
+  font-size: 14.5px; color: var(--ink); cursor: pointer; background: #fff;
+  border: 0; border-top: 1px solid var(--line); border-radius: 0;
+  transition: background 0.12s ease;
+}
+.dl-choice:first-child { border-top: 0; }
+.dl-choice:hover:not(.is-off) { background: rgba(37, 99, 235, 0.05); }
+.dl-choice:has(input:checked) { background: rgba(37, 99, 235, 0.08); }
+.dl-choice:has(input:checked) .dl-name { color: var(--brand-ink); }
+.dl-choice:has(input:focus-visible) { box-shadow: inset 0 0 0 2px var(--brand); }
+.dl-choice input { width: 16px; height: 16px; flex: 0 0 auto; margin: 0; accent-color: var(--brand); }
+/* a legal name is never cut short with an ellipsis - if it cannot fit on one line it takes two */
+.dl-name { flex: 1 1 auto; min-width: 0; font-weight: 600; line-height: 1.25; }
+.dl-count { flex: 0 0 auto; font-size: 13px; color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dl-choice.is-off { cursor: default; background: #fff; }
+.dl-choice.is-off .dl-name { color: var(--ink-3); font-weight: 400; }
+.dl-choice.is-off .dl-count { color: var(--ink-3); font-style: italic; }
+
+/* month and site share a line */
+.dl-row { display: flex; gap: 12px; align-items: flex-end; margin: 0 0 4px; }
+.dl-col { flex: 0 0 auto; min-width: 0; }
+.dl-col-grow { flex: 1 1 auto; }
+.dl-stepper {
+  display: inline-flex; align-items: center; height: 40px; padding: 0 2px;
+  border: 1px solid var(--line-strong); border-radius: 12px; background: #fff;
+}
+.dl-stepper button {
+  width: 32px; height: 34px; padding: 0 0 3px; font-size: 22px; line-height: 1; color: var(--ink-2);
+  background: none; border: 0; border-radius: 9px; cursor: pointer;
+}
+.dl-stepper button:hover:not(:disabled) { background: rgba(37, 99, 235, 0.1); color: var(--brand-ink); }
+.dl-stepper button:disabled { opacity: 0.25; cursor: default; }
+#dl-month-label { min-width: 112px; padding: 0 2px; text-align: center; font-size: 14.5px; font-weight: 600; color: var(--ink); white-space: nowrap; }
+.dl-card #dl-site {
+  width: 100%; height: 40px; padding: 0 10px; font-size: 14.5px; color: var(--ink);
+  background: #fff; border: 1px solid var(--line-strong); border-radius: 12px;
+}
+/* a STATE (no data) is said quietly; only a FAILURE is red */
+.dl-hint { min-height: 0; margin: 10px 0 0; font-size: 13.5px; line-height: 1.4; color: var(--ink-2); }
+.dl-hint.is-error { color: var(--danger-ink); }
+.dl-hint:empty { display: none; }
+.dl-actions { display: flex; justify-content: flex-end; margin-top: 14px; }
+.dl-actions .btn-primary, .dl-actions .btn-primary:hover {
+  min-height: 40px; padding: 0 24px; font-size: 15px; font-weight: 600; color: #fff; cursor: pointer;
+  background: var(--brand); border: 1px solid var(--brand); border-radius: 999px;
+}
+.dl-actions .btn-primary:hover { filter: brightness(0.93); }
+.dl-actions .btn-primary:disabled { opacity: 0.4; cursor: default; filter: none; }
+@media (prefers-reduced-motion: reduce) { .dl-card { animation: none; } }
+@media print { #dl-back { display: none !important; } }

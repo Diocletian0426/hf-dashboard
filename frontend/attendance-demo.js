@@ -115,6 +115,12 @@
     }
     // punched from outside the fence
     if (dom % 7 === 3 && w.site === 2) row.has_anomaly = true;
+    // moved to another site during the day (DB 0102): the day stays ONE row,
+    // started here, ended there
+    if (dom === 14 && w.name.indexOf("Iron") === 0) {
+      var other = SITES[(w.site + 1) % SITES.length];
+      row.out_project_id = other.id; row.out_project_name = other.name;
+    }
     // still on site right now (today only)
     if (iso === Dash.todayKL() && w.name.indexOf("Falcon") === 0) {
       row.last_out_at = null; row.out_count = 0; row.hours_on_site = null;
