@@ -118,6 +118,7 @@
       <span><span class="badge badge-gray">Still Working</span> No punch out yet</span>
       <span><span class="badge badge-gray">Rest Day</span> The site's weekly rest day — Hai Fu counts the whole day as Over Time</span>
       <span><span class="badge badge-gray">Public Holiday</span> Penang calendar — Hai Fu counts the whole day as Over Time</span>
+      <span><span class="badge badge-gray">No OT</span> Not paid overtime — every hour counts as a normal hour</span>
       <span><span class="badge badge-amended">Corrected By Office</span> Click the row for details</span>
       <span><span class="badge badge-anomaly">Closed By Office</span> Punch out entered by the office</span>
       <span><span class="badge badge-anomaly">Auto Closed</span> Closed by the system at 5:00 PM, no overtime</span>
@@ -443,13 +444,23 @@
     function kindWords(r) {
       return r.day_kind === "normal" ? "Normal" : (KIND_WORDS[r.day_kind] || "");
     }
+    // A worker the company does not pay overtime to (DB 0106): every hour is
+    // counted, all as normal hours, so Over Time reads 0 for him by design.
+    function otBadge(r) {
+      return r.ot_eligible === false
+        ? '<span class="badge badge-gray" title="Not paid overtime: every worked hour counts as a normal hour.">No OT</span>'
+        : "";
+    }
     function kindBadge(r) {
       var w = KIND_WORDS[r.day_kind];
-      if (!w) return "";
-      var why = r.company_code === "Hai Fu"
+      if (!w) return otBadge(r);
+      var why = r.ot_eligible === false
+        ? "Not paid overtime: the day counts as normal hours."
+        : r.company_code === "Hai Fu"
         ? "Hai Fu: the whole day counts at 1.5×, so it sits under Over Time."
         : "HF Bored Piles: paid as an ordinary day; only work beyond 8 hours is overtime.";
-      return '<span class="badge badge-gray" title="' + esc(why) + '">' + w + "</span>";
+      return '<span class="badge badge-gray" title="' + esc(why) + '">' + w + "</span>" +
+             (otBadge(r) ? " " + otBadge(r) : "");
     }
 
     // the text one row answers to in the Find box
