@@ -3219,8 +3219,9 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
    tag line up. */
 .att-readable .month-days td:nth-child(2) { white-space: normal; max-width: 250px; }
 .att-readable .month-days th, .att-readable .month-days td { padding: 9px var(--sp-2); }
-/* Sundays stand out in the month drill-down: they are not an ordinary day */
-.att-readable .month-days tr.is-sunday td:first-child { color: var(--danger-ink); font-weight: 600; }
+/* the site's rest day stands out in the month drill-down (Sunday, or Friday at
+   a Kelantan-type site — DB 0103): it is not an ordinary day */
+.att-readable .month-days tr.is-rest td:first-child { color: var(--danger-ink); font-weight: 600; }
 
 /* the legend: one label per line, in type you can read, right under the table */
 .att-readable .table-legend { font-size: 14.5px; color: var(--ink-2); }

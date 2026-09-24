@@ -115,6 +115,8 @@
       <span><span class="badge badge-anomaly">Forgot To Punch Out</span> Hours not counted until corrected</span>
       <span><span class="badge badge-anomaly">Location Not Confirmed</span> Punch could not be matched to the site</span>
       <span><span class="badge badge-gray">Still Working</span> No punch out yet</span>
+      <span><span class="badge badge-gray">Rest Day</span> The site's weekly rest day — Hai Fu counts the whole day as Over Time</span>
+      <span><span class="badge badge-gray">Public Holiday</span> Penang calendar — Hai Fu counts the whole day as Over Time</span>
       <span><span class="badge badge-amended">Corrected By Office</span> Click the row for details</span>
       <span><span class="badge badge-anomaly">Closed By Office</span> Punch out entered by the office</span>
       <span><span class="badge badge-anomaly">Auto Closed</span> Closed by the system at 5:00 PM, no overtime</span>
@@ -428,6 +430,25 @@
     function siteText(r) {
       var a = r.project_name || "";
       return r.out_project_name ? (a || "—") + " → " + r.out_project_name : a;
+    }
+
+    // WHAT KIND OF DAY IT WAS (DB 0103/0104): a public holiday, the site's
+    // rest day, or an ordinary day. Shown for BOTH companies as a fact about
+    // the day; what it does to the pay differs — Hai Fu pays the whole of a
+    // rest day or holiday at 1.5x (the database then puts the day under Over
+    // Time), HF-BP pays it as any other day. The rule itself lives in the
+    // database; this only names the day. Absent before 0104 is live.
+    var KIND_WORDS = { rest: "Rest Day", holiday: "Public Holiday" };
+    function kindWords(r) {
+      return r.day_kind === "normal" ? "Normal" : (KIND_WORDS[r.day_kind] || "");
+    }
+    function kindBadge(r) {
+      var w = KIND_WORDS[r.day_kind];
+      if (!w) return "";
+      var why = r.company_code === "Hai Fu"
+        ? "Hai Fu: the whole day counts at 1.5×, so it sits under Over Time."
+        : "HF Bored Piles: paid as an ordinary day; only work beyond 8 hours is overtime.";
+      return '<span class="badge badge-gray" title="' + esc(why) + '">' + w + "</span>";
     }
 
     // the text one row answers to in the Find box
@@ -866,6 +887,7 @@
             if (s.in_count && !s.out_count) {
               flags.push('<span class="badge badge-gray" title="Punched in, no punch out yet.">Still Working</span>');
             }
+            flags.push(kindBadge(s));
             // The office overruled the clock for this day. It sits with the
             // other badges because this column is "what should I know about
             // this row before I pay it", and a changed time is top of that
@@ -1437,7 +1459,8 @@
         [B("Site"), siteName],
         [B("Workers"), list.length],
         [B("Downloaded"), now.words + (who ? " by " + who : "")],
-        ["Days marked To Fix or Still Open are NOT in these totals — correct them on the Attendance page, then download again."],
+        ["Over Time Hours = every hour at 1.5× (work beyond 8 hours; for Hai Fu the whole of a rest day or public holiday). " +
+         "Days marked To Fix or Still Open are NOT in these totals — correct them on the Attendance page, then download again."],
         [B("Employee Code"), B("Name"), B("Company"), B("Sites"), B("Days Worked"), B("Working Hours"),
          B("Over Time Hours"), B("Total Hours"), B("Days To Fix"), B("Days Still Open")]];
       var tDays = 0, tWm = 0, tOm = 0, tFix = 0, tOpen = 0;
@@ -1454,26 +1477,34 @@
                 S("E", tDays), S("F", tWm / 60, true), S("G", tOm / 60, true), S("H", (tWm + tOm) / 60, true),
                 S("I", tFix), S("J", tOpen)]);
 
-      var daily = [[B("Employee Code"), B("Name"), B("Company"), B("Date"), B("Day"), B("Site"),
-                    B("In"), B("Out"), B("Working Hours"), B("Over Time Hours"), B("Total Hours"),
+      // The Daily sheet carries the 1.5x hours BY KIND (DB 0104): weekday
+      // overtime, a Hai Fu rest day, a Hai Fu public holiday — three columns
+      // that add up to the Summary's Over Time, so HR can filter a kind out.
+      // Before 0104 the breakdown is absent and Over Time is the whole figure.
+      var daily = [[B("Employee Code"), B("Name"), B("Company"), B("Date"), B("Day"), B("Day Kind"), B("Site"),
+                    B("In"), B("Out"), B("Working Hours"), B("Over Time Hours"), B("Rest Day Hours"),
+                    B("Public Holiday Hours"), B("Total Hours"),
                     B("Counted In Totals"), B("Corrected By Office"), B("Reason"), B("Note")]];
       list.forEach(function (w) {
         w.rows.slice().sort(function (a, b) { return a.work_date < b.work_date ? -1 : 1; }).forEach(function (r) {
           var h = hoursOf(r), counted = !r.overlong_shift && !!h;
           var wm = Number(r.working_minutes) || 0, om = Number(r.ot_minutes) || 0;
+          var split = r.weekday_ot_minutes !== undefined && r.weekday_ot_minutes !== null;
+          var wo = split ? Number(r.weekday_ot_minutes) || 0 : om;
+          var rm = split ? Number(r.rest_minutes) || 0 : 0, hmn = split ? Number(r.holiday_minutes) || 0 : 0;
           var note = r.overlong_shift ? "Forgot To Punch Out" : (!effOut(r) ? "No Punch Out"
                      : (r.has_anomaly ? "Location Not Confirmed" : ""));
           daily.push([CODES[w.staff_id] || "", w.name, companyFull(COMPANY[w.staff_id]),
             { v: r.work_date, date: true }, DAY_NAMES[new Date(String(r.work_date).slice(0, 10) + "T00:00:00Z").getUTCDay()],
-            siteText(r), T(effIn(r)), T(effOut(r)),
-            counted ? H(wm) : "", counted ? H(om) : "", counted ? H(wm + om) : "",
+            kindWords(r), siteText(r), T(effIn(r)), T(effOut(r)),
+            counted ? H(wm) : "", counted ? H(wo) : "", counted ? H(rm) : "", counted ? H(hmn) : "", counted ? H(wm + om) : "",
             counted ? "Yes" : "No", r.has_correction ? "Yes" : "No", r.correction_reason || "", note]);
         });
       });
 
       var blob = XlsxLite.build([
         { name: "Summary", freezeRows: HEAD, widths: [16, 34, 17, 34, 13, 15, 17, 13, 13, 16], rows: sum },
-        { name: "Daily",   freezeRows: 1,    widths: [16, 34, 17, 14, 7, 30, 11, 11, 15, 17, 13, 18, 20, 50, 26], rows: daily }
+        { name: "Daily",   freezeRows: 1,    widths: [16, 34, 17, 14, 7, 15, 30, 11, 11, 15, 17, 16, 21, 13, 18, 20, 50, 26], rows: daily }
       ]);
       XlsxLite.download(blob, fileName("Downloaded", friendlyMonth(month), now, chosen, siteName) + ".xlsx");
     }
@@ -1688,7 +1719,11 @@
         var fixLink = (canFix && String(r.work_date) < todayIso)
           ? '<a class="fix-link" href="attendance.html?date=' + encodeURIComponent(r.work_date) +
             "&open=" + encodeURIComponent(w.staff_id || "") + '">Correct This Day</a>' : "";
-        return "<tr" + (isSunday(r.work_date) ? ' class="is-sunday"' : "") + ">" +
+        // the site's REST DAY stands out (Friday at a Kelantan site, Sunday
+        // elsewhere — DB 0103); before 0104 is live the database does not say,
+        // and a Sunday is the best guess
+        var isRest = r.day_kind ? r.day_kind === "rest" : isSunday(r.work_date);
+        return "<tr" + (isRest ? ' class="is-rest"' : "") + ">" +
           "<td>" + esc(friendlyDate(r.work_date)) + "</td>" +
           // per-day site (owner, 2026-09-22): the one place a month's "A, B"
           // list says WHICH day the man moved
@@ -1703,6 +1738,7 @@
               r.overlong_shift ? '<span class="badge badge-anomaly">Forgot To Punch Out</span>'
                 : (!effOut(r) ? '<span class="badge badge-gray">No Punch Out</span>'
                 : (r.has_anomaly ? '<span class="badge badge-anomaly">Location Not Confirmed</span>' : "")),
+              kindBadge(r),
               r.has_correction ? '<span class="badge badge-amended" title="' +
                 esc("The office corrected this day" +
                     (r.correction_reason ? " — " + r.correction_reason : "") + ".") +
@@ -1760,7 +1796,10 @@
       }).join("");
 
       note.hidden = false;
-      note.innerHTML = '<span class="legend-prose">Overtime is counted per day. ' +
+      // what the two figures ARE — the one sentence the office needs when a
+      // Hai Fu Sunday shows 0 working hours and a full day of Over Time
+      note.innerHTML = '<span class="legend-prose">Over Time is every hour at 1.5×: work beyond 8 hours, ' +
+        "and for Hai Fu the whole of a rest day or public holiday. " +
         "Days marked <strong>To Fix</strong> or <strong>Still Open</strong> are excluded from totals.</span>";
 
       if (document.getElementById("f-find").value || document.getElementById("f-company").value) applyFind("month-rows", 7);

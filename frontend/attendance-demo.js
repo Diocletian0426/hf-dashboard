@@ -65,10 +65,12 @@
   // second copy of the rule for the app: nothing outside ?demo=1 can reach it.
   function fakeServerPrice(inHours, outHours) {
     var start = Math.round(inHours * 60), end = Math.round(outHours * 60);
-    if (end - start > 16 * 60) return null;                  // over the limit: unpriced
-    var normal = Math.max(0, Math.min(end, 17 * 60) - Math.max(start, 8 * 60 + 30));
-    if (normal > 6 * 60) normal -= 60;
-    return { working: normal, ot: Math.max(0, end - Math.max(start, 17 * 60)) };
+    if (end - start > 22 * 60) return null;                  // over the limit: unpriced
+    // DB 0104: count from 08:00 (or the later punch-in), lunch out past 6 h,
+    // 8 h normal, the rest overtime — by the total
+    var span = Math.max(0, end - Math.max(start, 8 * 60));
+    var worked = span > 6 * 60 ? span - 60 : span;
+    return { working: Math.min(worked, 8 * 60), ot: Math.max(0, worked - 8 * 60) };
   }
 
   // One worker's day. Sundays off, and a handful of scripted problem days so
@@ -88,6 +90,8 @@
       staff_id: "demo-" + w.name,      // real rows carry a uuid; the page keys on it
       working_minutes: price ? price.working : null,
       ot_minutes: price ? price.ot : null,
+      company_code: "HF-BP",
+      day_kind: dayOf(iso) === 6 && dom % 9 === 4 ? "rest" : "normal",   // the odd Saturday stands in for a rest day
       full_name: w.name,
       project_id: siteRow.id,
       project_name: siteRow.name,
