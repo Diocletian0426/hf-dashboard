@@ -627,6 +627,7 @@
                mlDate(t.effective_date) + "</strong> " +
                escHtml(t.from_project) + " &rarr; " + escHtml(t.to_project) +
                (t.source === "backfill" ? ' <span class="badge badge-gray">backfill</span>' : "") +
+               (t.source === "punch" ? ' <span class="badge badge-gray" title="Moved by a punch the worker made inside the fence of this site (DB 0105).">By Punch</span>' : "") +
                (t.remarks ? ' <span class="muted">(' + escHtml(t.remarks) + ")</span>" : "") +
                ' <span class="muted">by ' + escHtml(t.moved_by_name || t.source) + "</span>" +
                ' <span class="move-ctl">' +
@@ -837,6 +838,7 @@
                  "<td><strong>" + escHtml(t.subject_name) + "</strong></td>" +
                  "<td>" + escHtml(t.from_project) + " &rarr; " + escHtml(t.to_project) +
                  (t.source === "backfill" ? ' <span class="badge badge-gray">backfill</span>' : "") +
+               (t.source === "punch" ? ' <span class="badge badge-gray" title="Moved by a punch the worker made inside the fence of this site (DB 0105).">By Punch</span>' : "") +
                  (t.remarks ? ' <span class="muted">(' + escHtml(t.remarks) + ")</span>" : "") + "</td>" +
                  "<td>" + escHtml(t.moved_by_name || t.source) + "</td>" +
                  '<td><span class="move-ctl">' +
