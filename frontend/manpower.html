@@ -26,8 +26,16 @@
          which applies it through the same validated move path and logs it).
          All of it database-enforced; the buttons are convenience. -->
     <div class="page-eyebrow">Manpower</div>
-    <h1>Site manpower</h1>
-    <p id="manpower-sub" class="page-caption"></p>
+    <h1>Site Manpower</h1>
+    <!-- This page is the ROSTER: where each worker is allocated, kept by the
+         office (and, since DB 0105, by a punch made inside another site's
+         fence). Who actually punched in today is the Attendance page's
+         question, and it is deliberately not answered here. -->
+    <p id="manpower-sub" class="page-caption">Where each worker is allocated. For who punched in, see Attendance.</p>
+
+    <!-- the answer first: three allocation counts, then one card per site -->
+    <div id="mp-summary" class="mp-summary" hidden></div>
+    <div id="mp-cards" class="mp-cards" hidden></div>
 
     <div id="error"></div>
     <div id="housekeeping"></div>
@@ -106,7 +114,9 @@
                machinesBySite: {},           // project_code -> [{code,type}]
                canDevices: false, canDevicesView: false,   // 0082 punch-app enrolment
                devByStaff: {},               // staff_id -> enrolment state row
-               shownCode: {} };              // staff_id -> the code just issued (shown ONCE)
+               shownCode: {},                // staff_id -> the code just issued (shown ONCE)
+               noPinByPid: {},               // project_id -> true when the site has no GPS pin (read may be refused: then empty)
+               sitesWithWorkers: {} };       // project_code -> group, for the summary tile
 
     // machine type -> the trade that runs it (crew-vs-plant hint)
     var MACHINE_TRADE = {
@@ -272,7 +282,9 @@
 
     function groupBlock(key, title, list, mode) {
       var byRole = mode === "role";
-      var isOpen = MP.open[key] !== false;   // default open
+      // site rosters start CLOSED — the cards above are the way in (press one);
+      // role groups keep opening by default, they have no card
+      var isOpen = byRole ? MP.open[key] !== false : MP.open[key] === true;
       var rows = list.map(function (r) {
         var tr = '<tr data-staffrow="' + r.staff_id + '" data-search="' + rowSearchAttr(r) +
                '" data-hk="' + rowHkAttr(r) +
@@ -654,15 +666,84 @@
              "</div></td></tr>";
     }
 
+    /* ---- the answer first (owner, 2026-09-24) -------------------------------
+       Three allocation counts, then one card per site. The counts are about
+       ALLOCATION only — "punched in today" belongs to the Attendance page and
+       is kept off this one on purpose. A card is the site's name-card: who
+       supervises it, how many are allocated, what plant is there, and what is
+       missing (no supervisor, no GPS pin, no operator for a machine, roster
+       drift). Pressing a card opens that site's roster below. */
+    function renderSummary(act, unassigned, hfbp) {
+      var el = document.getElementById("mp-summary");
+      var onSite = act.length - unassigned.length;
+      function tile(n, label, sub) {
+        return '<div class="mp-tile"><div class="mp-tile-n">' + n + "</div>" +
+               '<div class="mp-tile-l">' + label + "</div>" +
+               (sub ? '<div class="mp-tile-s">' + sub + "</div>" : "") + "</div>";
+      }
+      el.innerHTML =
+        tile(act.length, "Active Workers", "HF-BP " + hfbp + " · Hai Fu " + (act.length - hfbp)) +
+        tile(onSite, "On Sites", Object.keys(MP.sitesWithWorkers || {}).length + " sites") +
+        tile(unassigned.length, "Not On A Site", "");
+      el.hidden = false;
+    }
+
+    function renderCards(bySite, unassignedN) {
+      var el = document.getElementById("mp-cards");
+      MP.sitesWithWorkers = bySite;
+      var keys = Object.keys(bySite).sort();
+      el.innerHTML = keys.map(function (k) {
+        var list = bySite[k].list, pid = list[0].current_project_id;
+        var name = list[0].project_name || k;
+        var sv = MP.supervisorsByPid[pid];
+        var mach = MP.machinesBySite[k] || [];
+        var tags = [];
+        if (!sv) tags.push('<span class="chip chip-warn">No Supervisor</span>');
+        if (MP.noPinByPid[pid]) tags.push('<span class="chip">No Pin</span>');
+        var missing = {};
+        mach.forEach(function (m) {
+          var trade = MACHINE_TRADE[m.type];
+          if (trade && !list.some(function (r) { return r.role === trade; })) missing[trade] = true;
+        });
+        Object.keys(missing).forEach(function (t) {
+          tags.push('<span class="chip chip-warn">No ' + escHtml(UI.label(t)) + "</span>");
+        });
+        var driftN = list.filter(isDrift).length;
+        if (driftN) tags.push('<span class="chip chip-warn">' + driftN + " Drift</span>");
+        var bpN = list.filter(function (r) { return r.company === "HF-BP"; }).length;
+        var split = bpN && bpN < list.length ? "HF-BP " + bpN + " · Hai Fu " + (list.length - bpN)
+                  : bpN ? "HF-BP" : "Hai Fu";
+        return '<button type="button" class="mp-card' + (MP.open[k] ? " open" : "") + '" data-card="' + esc(k) + '">' +
+          '<div class="mp-card-code">' + escHtml(k) + "</div>" +
+          '<div class="mp-card-name">' + escHtml(name) + "</div>" +
+          '<div class="mp-card-n"><strong>' + list.length + "</strong> worker" + (list.length === 1 ? "" : "s") +
+            ' <span class="muted">· ' + split + "</span></div>" +
+          '<div class="mp-card-meta">' + (sv ? "Supervisor " + escHtml(sv) : "") +
+            (mach.length ? (sv ? " · " : "") + "Machines " + mach.map(function (m) { return escHtml(m.code); }).join(", ") : "") +
+          "</div>" +
+          (tags.length ? '<div class="mp-card-tags">' + tags.join(" ") + "</div>" : "") +
+        "</button>";
+      }).join("") +
+      (unassignedN ? '<button type="button" class="mp-card mp-card-plain' + (MP.open.__unassigned ? " open" : "") + '" data-card="__unassigned">' +
+          '<div class="mp-card-name">Not On A Site</div>' +
+          '<div class="mp-card-n"><strong>' + unassignedN + "</strong> worker" + (unassignedN === 1 ? "" : "s") + "</div>" +
+          '<div class="mp-card-meta">Office staff and workers awaiting a site</div>' +
+        "</button>" : "");
+      el.hidden = !keys.length;
+      // the summary's "sites" count reads MP.sitesWithWorkers, set just above
+      var t = el.previousElementSibling && document.querySelector("#mp-summary .mp-tile:nth-child(2) .mp-tile-s");
+      if (t) t.textContent = keys.length + " site" + (keys.length === 1 ? "" : "s");
+    }
+
     function render() {
       var act = activeRows();
       var unassigned = act.filter(function (r) { return !r.current_project_id; });
       var hfbp = act.filter(function (r) { return r.company === "HF-BP"; }).length;
 
       document.getElementById("manpower-sub").innerHTML =
-        act.length + " active workers · HF-BP " + hfbp + " · Hai Fu " + (act.length - hfbp) +
-        " · " + unassigned.length + " unassigned" +
+        "Where each worker is allocated. For who punched in, see Attendance." +
         (MP.canMove ? "" : ' <span class="muted">(view only — changes are office/management)</span>');
+      renderSummary(act, unassigned, hfbp);
 
       document.getElementById("error").innerHTML =
         (MP.err ? '<div class="banner banner-red">Could not save: ' + escHtml(MP.err) + "</div>" : "") +
@@ -700,7 +781,9 @@
           return groupBlock(k, bySite[k].title, bySite[k].list, "site");
         }).join("");
         if (shownUnassigned.length) html += groupBlock("__unassigned", "Unassigned", shownUnassigned, "site");
+        renderCards(bySite, shownUnassigned.length);
       }
+      document.getElementById("mp-cards").hidden = MP.groupMode !== "site";
       html += upcomingMovesBlock();     // 0048: the office's move to-do list
       html += recentlyLeftBlock();
       document.getElementById("groups").innerHTML =
@@ -966,10 +1049,17 @@
           Dash.getProjectSupervisors(),   // site headers: SV name
           Dash.getMachines(),             // site headers: plant + crew-vs-plant hint
           Dash.getMovementPlans(),        // 0048: planned moves (never auto-applied)
-          loadTranslog()                  // 0051: history feed (panel + worker cards)
+          loadTranslog(),                 // 0051: history feed (panel + worker cards)
+          // site cards: "No Pin" tag. The read is gated (attendance.manage), so
+          // only a login that may see it asks; a refusal means no tag, never a
+          // broken page.
+          Dash.can("attendance.manage")
+            ? Dash.getSitesMissingGeofence().catch(function () { return []; })
+            : Promise.resolve([])
         ]);
         MP.rows = res[0]; MP.projects = res[1];
         setPlans(res[4]);
+        (res[6] || []).forEach(function (s) { if (s.project_id) MP.noPinByPid[s.project_id] = true; });
         MP.dirByPid = {};
         MP.projects.forEach(function (p) { MP.dirByPid[p.project_id] = p; });
         res[2].forEach(function (s) { MP.supervisorsByPid[s.project_id] = s.supervisors; });
@@ -982,6 +1072,27 @@
         renderMoveLog();
 
         document.getElementById("mp-search").addEventListener("input", applyFilter);
+
+        // a site card is the way into its roster: press to open (and scroll
+        // to) it, press again to close. The card mirrors the roster's state.
+        document.getElementById("mp-cards").addEventListener("click", function (ev) {
+          var card = ev.target.closest("button[data-card]");
+          if (!card) return;
+          var key = card.getAttribute("data-card");
+          var det = document.querySelector('#groups details.zone[data-group="' + key.replace(/"/g, '\\"') + '"]');
+          if (!det) return;
+          det.open = !det.open;
+          MP.open[key] = det.open;
+          card.classList.toggle("open", det.open);
+          if (det.open) det.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+        // …and closing a roster by its own header un-highlights its card
+        document.getElementById("groups").addEventListener("toggle", function (ev) {
+          var det = ev.target;
+          if (!det.matches || !det.matches("details.zone[data-group]")) return;
+          var card = document.querySelector('#mp-cards button[data-card="' + det.getAttribute("data-group").replace(/"/g, '\\"') + '"]');
+          if (card) card.classList.toggle("open", det.open);
+        }, true);
 
         // history-maintenance buttons inside the Recent moves panel (0050) —
         // delegated on the static #movelog container, survives re-renders
