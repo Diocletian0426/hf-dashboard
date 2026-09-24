@@ -3511,3 +3511,49 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
 .dl-actions .btn-primary:disabled { opacity: 0.4; cursor: default; filter: none; }
 @media (prefers-reduced-motion: reduce) { .dl-card { animation: none; } }
 @media print { #dl-back { display: none !important; } }
+
+/* ---- attendance: back to the site's own scale (owner, 2026-09-24) ---------
+   The att-readable block above grew every control and cell on this page, and
+   next to Manpower and the rest it read as a different, oversized app. This
+   puts the SCREEN view back on the shared sizes (same pills, same table type
+   as Manpower). Layout, columns and behaviour are untouched; paper is too —
+   everything here is @media screen, so the print rules still apply as before. */
+@media screen {
+  .att-readable .page-caption { font-size: var(--fs-sm); }
+  .att-readable .filters { font-size: 12.5px; row-gap: var(--sp-2); }
+  .att-readable .filters label { color: var(--ink-2); }
+  .att-readable .filters select,
+  .att-readable .filters .filter-box { font-size: 13px; padding: 7px 14px; }
+  .att-readable .att-narrow select { width: 220px; }
+  .att-readable .att-narrow #f-company { width: 190px; }
+  .att-readable .att-narrow .filter-box { width: 260px; }
+
+  /* row 1: Day/Month, the stepper and the buttons, at Manpower's pill size */
+  .att-when { gap: var(--sp-2); }
+  .att-readable .view-switch a { font-size: 12.5px; padding: 5px 14px; }
+  .stepper { padding: 2px; }
+  .step-btn { width: 30px; height: 30px; font-size: 22px; padding: 0 0 3px; }
+  .step-label { min-width: 150px; font-size: 14px; }
+  .att-btn { gap: 6px; font-size: 12.5px; padding: 6px 14px; color: var(--ink-2); }
+  .att-btn svg { width: 14px; height: 14px; }
+  .att-readable .filters a.att-btn { font-size: 12.5px; color: var(--ink-2); }
+
+  /* the tables: the shared 11.5px heading / 13.5px cell */
+  .att-readable .att-table th { font-size: 11.5px; }
+  .att-readable .att-table td { font-size: 13.5px; padding-top: 11px; padding-bottom: 11px; }
+  .att-readable .att-table .empty { font-size: var(--fs-md); }
+  .att-readable .att-table .muted { font-size: var(--fs-xs); }
+  .att-readable .badge { font-size: 11.5px; padding: 2px 9px; }
+  .att-table tfoot .total-row td { font-size: 14px; padding-top: 12px; padding-bottom: 12px; }
+
+  /* the drawer and the legend */
+  .att-readable .detail-note { font-size: var(--fs-xs); }
+  .att-readable .punch-lines li { font-size: 13.5px; padding: 6px 0; }
+  .att-readable .pl-type { font-size: var(--fs-xs); }
+  .att-readable .pl-where { font-size: var(--fs-xs); }
+  .att-readable .month-days { font-size: var(--fs-sm); }
+  .att-readable .month-days th { font-size: var(--fs-xs); }
+  .att-readable .month-days th, .att-readable .month-days td { padding: 6px var(--sp-2); }
+  .att-readable .table-legend { font-size: var(--fs-sm); }
+  .att-readable .fix-link { font-size: var(--fs-sm); }
+}
