@@ -33,33 +33,30 @@
          question, and it is deliberately not answered here. -->
     <p id="manpower-sub" class="page-caption">Where each worker is allocated. For who punched in, see Attendance.</p>
 
-    <!-- the answer first: one row per site, one column per trade (owner's
-         concept, 2026-09-24). Press a row to open that site's roster below. -->
+    <!-- TWO THINGS, NAMED (owner's concept, 2026-09-24): the overview — one row
+         per site, one column per trade — and ONE list of workers under it.
+         Pressing a site row filters the list to that site; the list's own bar
+         (Site · Company · Role · Find) does the rest. No stacked groups. -->
+    <h2 class="mp-h2">Manpower By Site</h2>
     <div id="mp-matrix" class="mp-matrix" hidden></div>
 
     <div id="error"></div>
+
+    <h2 class="mp-h2">Workers <span id="mp-count" class="mp-h2-count"></span></h2>
     <div id="housekeeping"></div>
-    <div class="mp-controls">
-      <span>Group:
-        <button type="button" data-mode="site" class="active">By site</button>
-        <button type="button" data-mode="role">By role</button>
-      </span>
-      <span>Company:
+    <div class="mp-controls mp-bar">
+      <span class="mp-bar-item">Site <select id="mp-site"></select></span>
+      <span class="mp-bar-item">Company
         <button type="button" data-co="all" class="active">All</button>
         <button type="button" data-co="HF-BP">HF-BP</button>
         <button type="button" data-co="Hai Fu">Hai Fu</button>
       </span>
-      <span id="mp-extra"></span>
-    </div>
-    <div class="filter-wrap">
-      <input type="search" id="mp-search" class="filter-box"
-             placeholder="Search name, employee code or site…" autocomplete="off">
-    </div>
-    <div class="pipe-note" style="margin:-6px 0 10px">
-      "Last reported" comes from the WhatsApp bot's attendance — the bot skips
-      sites and days, so no recent report does <strong>not</strong> mean absent.
-      An amber ⚠ means the bot recently placed the worker on a different site
-      than this roster — check, then use Move to correct whichever is wrong.
+      <span class="mp-bar-item">Role <select id="mp-role"></select></span>
+      <span class="mp-bar-item" id="mp-extra"></span>
+      <span class="mp-bar-item mp-bar-find">Find
+        <input type="search" id="mp-search" class="filter-box"
+               placeholder="Name, employee code or site…" autocomplete="off">
+      </span>
     </div>
     <div id="groups"></div>
     <div id="movelog"></div>
@@ -107,7 +104,7 @@
                editing: null, planning: null, plans: [],   // 0048 movement planning
                cardOpen: null, cardCache: {},              // worker record card (0051)
                translog: [], histByStaff: {},              // transfer feed, keyed by staff_id
-               groupMode: "site", companyFilter: "all", err: "", okMsg: "",
+               companyFilter: "all", err: "", okMsg: "",
                hkFilter: null,               // 'joined' | 'code' | 'contact' | null
                roleFilter: "all", siteFilter: "all", driftOnly: false,
                supervisorsByPid: {},         // project_id -> "Name, Name"
@@ -163,14 +160,6 @@
       return MP.rows.filter(function (r) { return !r.is_active; })
         .sort(function (a, b) { return a.updated_at < b.updated_at ? 1 : -1; })
         .slice(0, LEFT_GROUP_MAX);
-    }
-
-    function roleSummary(list) {
-      var counts = {};
-      list.forEach(function (r) { var k = r.role || "?"; counts[k] = (counts[k] || 0) + 1; });
-      return Object.keys(counts).sort().map(function (k) {
-        return counts[k] + " " + k.replace(/_/g, " ");
-      }).join(" · ");
     }
 
     function moveTargets() {
@@ -231,21 +220,6 @@
         : "unassigned";
     }
 
-    // per-site counts, for the by-role group headers
-    function siteSummary(list) {
-      var counts = {};
-      list.forEach(function (r) {
-        var k = r.project_code || "unassigned";
-        counts[k] = (counts[k] || 0) + 1;
-      });
-      return Object.keys(counts).sort().map(function (k) {
-        return counts[k] + " " + k;
-      }).join(" · ");
-    }
-
-    // one collapsible group. In "site" mode the third column is Role and the
-    // header summarises roles; in "role" mode the third column is Site and
-    // the header summarises sites.
     // which housekeeping gaps a row has, for the strip's click-to-filter
     function rowHkAttr(r) {
       return ((r.has_date_joined ? "" : "joined ") +
@@ -253,107 +227,60 @@
               (r.has_contact ? "" : "contact")).trim();
     }
 
-    // extra filter selects + drift chip (options depend on loaded data)
+    // the Workers bar: Site and Role options come from the loaded data; the
+    // drift chip only appears when there is drift to show
     function renderExtraFilters() {
-      var el = document.getElementById("mp-extra");
-      if (!el) return;
       var act = activeRows();
       var driftN = act.filter(isDrift).length;
-      var roleOpts = ['<option value="all">any role</option>'].concat(ROLES.filter(function (ro) {
-        return act.some(function (r) { return r.role === ro; });
-      }).map(function (ro) {
-        return '<option value="' + ro + '"' + (MP.roleFilter === ro ? " selected" : "") + ">" +
-               UI.label(ro) + "</option>";
-      })).join("");
+      document.getElementById("mp-role").innerHTML =
+        ['<option value="all">All Roles</option>'].concat(ROLES.filter(function (ro) {
+          return act.some(function (r) { return r.role === ro; });
+        }).map(function (ro) {
+          return '<option value="' + ro + '"' + (MP.roleFilter === ro ? " selected" : "") + ">" +
+                 UI.label(ro) + "</option>";
+        })).join("");
       var siteKeys = {};
       act.forEach(function (r) { if (r.project_code) siteKeys[r.project_code] = r.project_name || ""; });
-      var siteOptsF = ['<option value="all">any site</option>',
-                       '<option value="__none"' + (MP.siteFilter === "__none" ? " selected" : "") + ">— unassigned —</option>"]
+      document.getElementById("mp-site").innerHTML =
+        ['<option value="all">All Sites</option>',
+         '<option value="__none"' + (MP.siteFilter === "__none" ? " selected" : "") + ">Not On A Site</option>"]
         .concat(Object.keys(siteKeys).sort().map(function (k) {
           return '<option value="' + esc(k) + '"' + (MP.siteFilter === k ? " selected" : "") + ">" +
-                 escHtml(k + " — " + siteKeys[k]) + "</option>";
+                 escHtml(siteKeys[k] || k) + "</option>";
         })).join("");
-      el.innerHTML =
-        '<select id="mp-role">' + roleOpts + "</select>" +
-        '<select id="mp-site">' + siteOptsF + "</select>" +
-        '<button type="button" data-chip="drift"' + (MP.driftOnly ? ' class="active"' : "") +
-        ' title="bot recently reported them at a DIFFERENT site than the roster">' + driftN + " drift</button>";
+      document.getElementById("mp-extra").innerHTML = driftN
+        ? '<button type="button" data-chip="drift"' + (MP.driftOnly ? ' class="active"' : "") +
+          ' title="Recently placed at a different site than this roster — check, then Move whichever is wrong">' + driftN + " Drift</button>"
+        : "";
     }
 
-    function groupBlock(key, title, list, mode) {
-      var byRole = mode === "role";
-      // site rosters start CLOSED — the cards above are the way in (press one);
-      // role groups keep opening by default, they have no card
-      var isOpen = byRole ? MP.open[key] !== false : MP.open[key] === true;
-      var rows = list.map(function (r) {
+    // ONE table of workers, sorted by site then name. The bar above filters it;
+    // pressing a site row in the overview sets the Site filter.
+    function workersTable(list) {
+      var sorted = list.slice().sort(function (a, b) {
+        var sa = a.project_code || "~", sb = b.project_code || "~";   // no site sorts last
+        return sa < sb ? -1 : sa > sb ? 1 : (a.full_name < b.full_name ? -1 : a.full_name > b.full_name ? 1 : 0);
+      });
+      var rows = sorted.map(function (r) {
         var tr = '<tr data-staffrow="' + r.staff_id + '" data-search="' + rowSearchAttr(r) +
                '" data-hk="' + rowHkAttr(r) +
                '" data-role="' + esc(r.role || "") + '" data-site="' + esc(r.project_code || "__none") +
                '" data-drift="' + (isDrift(r) ? "1" : "") + '"' +
                (MP.canMove ? ' style="cursor:pointer" title="Click for the worker record"' : "") + ">" +
-               UI.td("Code", r.employee_code ? escHtml(r.employee_code) : "—") +
-               UI.td("Name", "<strong>" + escHtml(r.full_name) + "</strong>") +
-               UI.td(byRole ? "Site" : "Role",
-                     byRole ? siteLabel(r) : escHtml(UI.label(r.role))) +
-               UI.td("Company", escHtml(r.company)) +
+               UI.td("Employee Code", r.employee_code ? escHtml(r.employee_code) : "—") +
+               UI.td("Worker", "<strong>" + escHtml(r.full_name) + '</strong><div class="muted-line">' + escHtml(r.company) + "</div>") +
+               UI.td("Role", escHtml(UI.label(r.role))) +
+               UI.td("Site", r.current_project_id ? escHtml(r.project_name || r.project_code || "") : '<span class="muted">Not On A Site</span>') +
                lastReportedCell(r) +
                actionCell(r) + "</tr>";
-        // record card sits right under its worker row (0051, office only)
-        if (MP.canMove && MP.cardOpen === r.staff_id) tr += workerCard(r);
+        if (MP.canMove && MP.cardOpen === r.staff_id) tr += workerCard(r);   // record card under its row (0051)
         return tr;
       }).join("");
-
-      // header: a scannable chip row (scope tag, headcount, warnings) plus one
-      // muted meta line (supervisor, company split, role/site mix, machines) —
-      // replaces the old run-on one-liner
-      var chips = [], metaBits = [];
-      if (!byRole && key !== "__unassigned") {
-        var dir = MP.dirByPid[list[0].current_project_id];
-        if (dir) {
-          var scopeT = dir.has_bored_scope && dir.has_sheet_scope ? "BP+SP"
-                     : dir.has_bored_scope ? "BP"
-                     : dir.has_sheet_scope ? "SP" : "";
-          if (scopeT) chips.push('<span class="chip chip-tag">' + scopeT + "</span>");
-        }
-      }
-      chips.push('<span class="chip">' + list.length + " worker" + (list.length === 1 ? "" : "s") + "</span>");
-
-      if (!byRole && key !== "__unassigned") {
-        var sv = MP.supervisorsByPid[list[0].current_project_id];
-        if (sv) metaBits.push("Supervisor " + escHtml(sv));
-        var bpN = list.filter(function (r) { return r.company === "HF-BP"; }).length;
-        if (bpN && bpN < list.length) {
-          metaBits.push("HF-BP " + bpN + " · Hai Fu " + (list.length - bpN));
-        }
-      }
-      metaBits.push(byRole ? siteSummary(list) : roleSummary(list));
-      if (!byRole && key !== "__unassigned") {
-        var mach = MP.machinesBySite[key] || [];
-        if (mach.length) {
-          metaBits.push("Machines " + mach.map(function (m) { return escHtml(m.code); }).join(", "));
-          var missing = {};
-          mach.forEach(function (m) {
-            var trade = MACHINE_TRADE[m.type];
-            if (trade && !list.some(function (r) { return r.role === trade; })) missing[trade] = true;
-          });
-          Object.keys(missing).forEach(function (t) {
-            chips.push('<span class="chip chip-warn">no ' + t.replace(/_/g, " ") + "</span>");
-          });
-        }
-      }
-      var driftN = list.filter(isDrift).length;
-      if (driftN) chips.push('<span class="chip chip-warn">' + driftN + " drift &#9888;</span>");
-
-      return '<details class="zone" data-group="' + esc(key) + '"' + (isOpen ? " open" : "") + ">" +
-             '<summary class="zone-rich">' +
-             '<div class="group-head"><span class="zone-name">' + escHtml(title) + "</span> " +
-             chips.join(" ") + "</div>" +
-             '<div class="group-meta">' + metaBits.join(" · ") + "</div></summary>" +
-             '<div class="table-wrap table-stack"><table class="mp-table">' +
-             "<thead><tr><th>Code</th><th>Name</th><th>" + (byRole ? "Site" : "Role") + "</th><th>Company</th>" +
-             "<th>Last reported</th>" +
-             (MP.canMove ? "<th>Actions</th>" : "") + "</tr></thead>" +
-             "<tbody>" + rows + "</tbody></table></div></details>";
+      return '<div class="table-wrap table-stack" id="mp-workers"><table class="mp-table">' +
+             "<thead><tr><th>Employee Code</th><th>Worker</th><th>Role</th><th>Site</th>" +
+             '<th title="' + esc("From the worker's last punch (GPS) or the WhatsApp bot's report. No report does not mean absent.") + '">Last Reported</th>' +
+             (MP.canMove ? "<th></th>" : "") + "</tr></thead>" +
+             "<tbody>" + rows + "</tbody></table></div>";
     }
 
     function recentlyLeftBlock() {
@@ -694,13 +621,14 @@
         tot.other += other; tot.total += list.length;
         var cells = TRADES.map(function (t) {
           var n = counts[t[0]] || 0, gap = gaps && gaps[t[0]] && !n;
-          return '<td class="num' + (gap ? " gap" : "") + '"' + (gap ? ' title="A machine on this site needs a ' + esc(UI.label(t[0]).toLowerCase()) + '"' : "") + ">" + (n || (gap ? "0" : '<span class="zero">0</span>')) + "</td>";
+          // an empty cell stays EMPTY — only numbers and gaps should draw the eye
+          return '<td class="num' + (gap ? " gap" : "") + '"' + (gap ? ' title="A machine on this site needs a ' + esc(UI.label(t[0]).toLowerCase()) + '"' : "") + ">" + (n || (gap ? "0" : "")) + "</td>";
         }).join("");
-        return '<tr class="mp-row' + (extraCls ? " " + extraCls : "") + (MP.open[key] ? " open" : "") + '" data-card="' + esc(key) + '" tabindex="0">' +
-          '<td class="site"><span class="caret"></span><strong>' + escHtml(title) + "</strong>" + (sub ? '<div class="muted-line">' + sub + "</div>" : "") + "</td>" +
+        return '<tr class="mp-row' + (extraCls ? " " + extraCls : "") + '" data-card="' + esc(key) + '" tabindex="0" title="Press to list this site\'s workers">' +
+          '<td class="site"><strong>' + escHtml(title) + "</strong>" + (sub ? '<div class="muted-line">' + sub + "</div>" : "") + "</td>" +
           '<td class="sv' + (sv === null ? " gap" : "") + '"' + (sv === null ? ' title="No supervisor of record for this site"' : "") + ">" + (sv === null ? "None" : (sv || "")) + "</td>" +
           cells +
-          '<td class="num">' + (other || '<span class="zero">0</span>') + "</td>" +
+          '<td class="num">' + (other || "") + "</td>" +
           '<td class="num total">' + list.length + "</td></tr>";
       }
 
@@ -730,8 +658,6 @@
     }
     function render() {
       var act = activeRows();
-      var unassigned = act.filter(function (r) { return !r.current_project_id; });
-      var hfbp = act.filter(function (r) { return r.company === "HF-BP"; }).length;
 
       document.getElementById("manpower-sub").innerHTML =
         "Where each worker is allocated. For who punched in, see Attendance." +
@@ -741,70 +667,59 @@
         (MP.err ? '<div class="banner banner-red">Could not save: ' + escHtml(MP.err) + "</div>" : "") +
         (MP.okMsg ? UI.okBanner(MP.okMsg) : "");
 
-      // company chips narrow the lists (the headline totals above stay global)
+      // the company chips narrow BOTH the overview and the list
       var shown = MP.companyFilter === "all" ? act
         : act.filter(function (r) { return r.company === MP.companyFilter; });
+
+      var bySite = {};
+      var shownUnassigned = shown.filter(function (r) { return !r.current_project_id; });
+      shown.forEach(function (r) {
+        if (!r.current_project_id) return;
+        var k = r.project_code || "?";
+        (bySite[k] = bySite[k] || { title: r.project_code + " — " + (r.project_name || ""), list: [] })
+          .list.push(r);
+      });
+      renderMatrix(bySite, shownUnassigned);
 
       var html = MP.editing ? editWorkerForm()
                : MP.planning ? planWorkerForm()
                : addWorkerForm();
-      if (MP.groupMode === "role") {
-        var byRole = {};
-        shown.forEach(function (r) {
-          var k = r.role || "other";
-          (byRole[k] = byRole[k] || []).push(r);
-        });
-        html += Object.keys(byRole).sort(function (a, b) {
-          var ia = ROLES.indexOf(a), ib = ROLES.indexOf(b);
-          return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
-        }).map(function (k) {
-          return groupBlock("role:" + k, UI.label(k), byRole[k], "role");
-        }).join("");
-      } else {
-        var bySite = {};
-        var shownUnassigned = shown.filter(function (r) { return !r.current_project_id; });
-        shown.forEach(function (r) {
-          if (!r.current_project_id) return;
-          var k = r.project_code || "?";
-          (bySite[k] = bySite[k] || { title: r.project_code + " — " + (r.project_name || ""), list: [] })
-            .list.push(r);
-        });
-        html += Object.keys(bySite).sort().map(function (k) {
-          return groupBlock(k, bySite[k].title, bySite[k].list, "site");
-        }).join("");
-        if (shownUnassigned.length) html += groupBlock("__unassigned", "Unassigned", shownUnassigned, "site");
-        renderMatrix(bySite, shownUnassigned);
-      }
-      document.getElementById("mp-matrix").hidden = MP.groupMode !== "site";
+      html += shown.length ? workersTable(shown) : '<div class="muted-line">No active workers found.</div>';
       html += upcomingMovesBlock();     // 0048: the office's move to-do list
       html += recentlyLeftBlock();
-      document.getElementById("groups").innerHTML =
-        html || '<div class="muted-line">No active workers found.</div>';
+      document.getElementById("groups").innerHTML = html;
       renderHousekeeping();
       renderExtraFilters();
       applyFilter();
     }
 
-    // type-to-filter + housekeeping filter: hides non-matching rows and empty
-    // groups — a lens, not a recount (group headers keep their true totals)
+    // the Workers bar + the overview's pressed row: a lens on the one table —
+    // rows that miss are hidden, the count says how many are shown
     function applyFilter() {
       var qstr = (document.getElementById("mp-search").value || "").trim().toLowerCase();
       var hk = MP.hkFilter;
-      var filtering = qstr || hk || MP.roleFilter !== "all" ||
-                      MP.siteFilter !== "all" || MP.driftOnly;
-      document.querySelectorAll("#groups details.zone").forEach(function (det) {
-        var any = false;
-        det.querySelectorAll("tbody tr").forEach(function (tr) {
-          var hit = (!qstr || (tr.getAttribute("data-search") || "").indexOf(qstr) !== -1) &&
-                    (!hk || (tr.getAttribute("data-hk") || "").indexOf(hk) !== -1) &&
-                    (MP.roleFilter === "all" || tr.getAttribute("data-role") === MP.roleFilter) &&
-                    (MP.siteFilter === "all" || tr.getAttribute("data-site") === MP.siteFilter) &&
-                    (!MP.driftOnly || tr.getAttribute("data-drift") === "1");
-          tr.style.display = hit ? "" : "none";
-          if (hit) any = true;
-        });
-        det.style.display = any ? "" : "none";
-        if (filtering && any) det.open = true;
+      var total = 0, shown = 0, lastHit = false;
+      document.querySelectorAll("#mp-workers tbody tr").forEach(function (tr) {
+        if (!tr.hasAttribute("data-staffrow")) {           // a record card follows its row
+          tr.style.display = lastHit ? "" : "none";
+          return;
+        }
+        total++;
+        var hit = (!qstr || (tr.getAttribute("data-search") || "").indexOf(qstr) !== -1) &&
+                  (!hk || (tr.getAttribute("data-hk") || "").indexOf(hk) !== -1) &&
+                  (MP.roleFilter === "all" || tr.getAttribute("data-role") === MP.roleFilter) &&
+                  (MP.siteFilter === "all" || tr.getAttribute("data-site") === MP.siteFilter) &&
+                  (!MP.driftOnly || tr.getAttribute("data-drift") === "1");
+        tr.style.display = hit ? "" : "none";
+        lastHit = hit;
+        if (hit) shown++;
+      });
+      var c = document.getElementById("mp-count");
+      if (c) c.textContent = total ? (shown === total ? total + " workers" : shown + " of " + total + " workers") : "";
+      // the overview row that matches the Site filter stays lit
+      document.querySelectorAll("#mp-matrix tr[data-card]").forEach(function (row) {
+        var k = row.getAttribute("data-card");
+        row.classList.toggle("open", k === MP.siteFilter || (MP.siteFilter === "__none" && k === "__unassigned"));
       });
     }
 
@@ -1065,29 +980,23 @@
 
         document.getElementById("mp-search").addEventListener("input", applyFilter);
 
-        // a site ROW is the way into its roster: press to open (and scroll
-        // to) it, press again to close. The row stays lit while it is open.
+        // pressing a site row in the overview = the Site filter on the list
+        // (press again, or pick All Sites, to clear); the row stays lit
         document.getElementById("mp-matrix").addEventListener("click", function (ev) {
           var row = ev.target.closest("tr[data-card]");
           if (!row) return;
           var key = row.getAttribute("data-card");
-          var det = document.querySelector('#groups details.zone[data-group="' + key.replace(/"/g, '\\"') + '"]');
-          if (!det) return;
-          det.open = !det.open;
-          MP.open[key] = det.open;
-          row.classList.toggle("open", det.open);
-          if (det.open) det.scrollIntoView({ behavior: "smooth", block: "start" });
+          var val = key === "__unassigned" ? "__none" : key;
+          MP.siteFilter = MP.siteFilter === val ? "all" : val;
+          document.getElementById("mp-site").value = MP.siteFilter;
+          applyFilter();
+          if (MP.siteFilter !== "all") {
+            document.querySelector(".mp-bar").scrollIntoView({ behavior: "smooth", block: "start" });
+          }
         });
         document.getElementById("mp-matrix").addEventListener("keydown", function (ev) {
           if ((ev.key === "Enter" || ev.key === " ") && ev.target.matches("tr[data-card]")) { ev.preventDefault(); ev.target.click(); }
         });
-        // …and closing a roster by its own header un-lights its row
-        document.getElementById("groups").addEventListener("toggle", function (ev) {
-          var det = ev.target;
-          if (!det.matches || !det.matches("details.zone[data-group]")) return;
-          var row = document.querySelector('#mp-matrix tr[data-card="' + det.getAttribute("data-group").replace(/"/g, '\\"') + '"]');
-          if (row) row.classList.toggle("open", det.open);
-        }, true);
 
         // history-maintenance buttons inside the Recent moves panel (0050) —
         // delegated on the static #movelog container, survives re-renders
@@ -1159,7 +1068,7 @@
           applyFilter();
         });
 
-        // group-mode + company chips + drift chip: set state, restyle, re-render
+        // company chips (narrow the overview AND the list) + drift chip
         document.querySelector(".mp-controls").addEventListener("click", function (ev) {
           var b = ev.target.closest("button");
           if (!b) return;
@@ -1169,14 +1078,9 @@
             applyFilter();
             return;
           }
-          var wrap = b.parentElement;
-          if (b.getAttribute("data-mode")) {
-            MP.groupMode = b.getAttribute("data-mode");
-            MP.open = {};                     // grouping changed — fresh open states
-          } else if (b.getAttribute("data-co")) {
-            MP.companyFilter = b.getAttribute("data-co");
-          } else return;
-          wrap.querySelectorAll("button").forEach(function (x) { x.classList.remove("active"); });
+          if (!b.getAttribute("data-co")) return;
+          MP.companyFilter = b.getAttribute("data-co");
+          b.parentElement.querySelectorAll("button").forEach(function (x) { x.classList.remove("active"); });
           b.classList.add("active");
           render();
         });

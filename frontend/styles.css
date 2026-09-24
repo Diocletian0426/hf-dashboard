@@ -2108,15 +2108,23 @@ button.chip.active { background: var(--ink); color: #fff; }
 .mp-matrix-table tr.mp-row { cursor: pointer; }
 .mp-matrix-table tr.mp-row:hover { background: rgba(37, 99, 235, 0.06); }
 .mp-matrix-table tr.mp-row:focus { outline: 2px solid var(--brand-ink); outline-offset: -2px; }
-.mp-matrix-table tr.mp-row.open { box-shadow: inset 3px 0 0 var(--brand-ink); }
+/* the pressed row = the Site filter on the Workers list; it stays lit */
+.mp-matrix-table tr.mp-row.open { box-shadow: inset 3px 0 0 var(--brand-ink); background: rgba(37, 99, 235, 0.06); }
 .mp-matrix-table tr.mp-row.plain td.site strong { font-weight: 600; color: var(--ink-2); }
 .mp-matrix-table tr.mp-total td { border-top: 2px solid var(--line-strong); font-weight: 700; background: var(--surface-2); }
-.mp-matrix-table .caret {
-  display: inline-block; width: 0; height: 0; margin-right: 8px; vertical-align: 2px;
-  border-left: 7px solid var(--ink-2); border-top: 5px solid transparent; border-bottom: 5px solid transparent;
-  transition: transform .12s;
-}
-.mp-matrix-table tr.mp-row.open .caret { transform: rotate(90deg); }
+
+/* the two sections, named */
+.mp-h2 { font-size: 19px; font-weight: 700; margin: var(--sp-5) 0 var(--sp-2); letter-spacing: -0.01em; }
+.mp-h2:first-of-type { margin-top: var(--sp-3); }
+.mp-h2-count { font-size: 14px; font-weight: 400; color: var(--ink-3); margin-left: 8px; }
+
+/* the Workers bar: one row of controls with a label each, Find at the end */
+.mp-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; margin: var(--sp-2) 0 var(--sp-3); }
+.mp-bar-item { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; color: var(--ink-2); }
+.mp-bar-item select { min-height: 36px; }
+.mp-bar-find { flex: 1 1 260px; }
+.mp-bar-find .filter-box { flex: 1 1 auto; min-height: 36px; }
+#mp-workers .mp-table td .muted-line { font-size: 12.5px; margin-top: 1px; }
 /* structured group headers (manpower / machines site blocks) */
 .group-head {
   display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap;
@@ -3116,14 +3124,14 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
    worker. The Actions cell wraps onto a second line instead (see below),
    which costs a little height and saves the horizontal scrollbar. */
 .mp-table { table-layout: fixed; }
-.mp-table th:nth-child(1) { width: 10%; }   /* Code          */
-.mp-table th:nth-child(2) { width: 28%; }   /* Name          */
-.mp-table th:nth-child(3) { width: 17%; }   /* Role / Site   */
-.mp-table th:nth-child(4) { width: 12%; }   /* Company       */
-.mp-table th:nth-child(5) { width: 21%; }   /* Last reported */
-.mp-table th:nth-child(6) { width: 12%; }   /* Actions       */
+.mp-table th:nth-child(1) { width: 11%; }   /* Employee Code                   */
+.mp-table th:nth-child(2) { width: 25%; }   /* Worker (short company under)    */
+.mp-table th:nth-child(3) { width: 13%; }   /* Role                            */
+.mp-table th:nth-child(4) { width: 21%; }   /* Site                            */
+.mp-table th:nth-child(5) { width: 20%; }   /* Last Reported                   */
+.mp-table th:nth-child(6) { width: 10%; }   /* Manage                          */
 /* long names and site names wrap rather than push the column wider */
-.mp-table td { overflow-wrap: anywhere; }
+.mp-table td { overflow-wrap: anywhere; white-space: normal; }
 
 /* The one button the Actions column now holds. It carries .btn for the shared
    pill geometry — without it a bare <button> falls back to the browser's own
