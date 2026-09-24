@@ -1320,7 +1320,9 @@
       p_date_joined: o.dateJoined || null,
       p_contact_number: o.contactNumber || null,
       p_country_origin: o.countryOrigin || null,
-      p_allow_duplicate: !!o.allowDuplicate
+      p_allow_duplicate: !!o.allowDuplicate,
+      // DB 0106: true / false sets "paid overtime"; anything else leaves it as it is
+      p_ot_eligible: typeof o.otEligible === "boolean" ? o.otEligible : null
     }));
   }
 
