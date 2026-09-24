@@ -2081,47 +2081,42 @@ button.chip { cursor: pointer; border: 1px solid transparent; }
 button.chip:hover { border-color: var(--line-strong); }
 button.chip.active { background: var(--ink); color: #fff; }
 
-/* ---- Manpower: the answer first (owner, 2026-09-24) ----------------------
-   Three allocation tiles, then one card per site. Cards are BUTTONS: press
-   one and its roster opens below; the card stays lit while it is open. Quiet
-   surfaces, hairlines, no dark overlays — the page's own language. */
-.mp-summary {
-  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-3);
-  margin: var(--sp-3) 0 var(--sp-4);
+/* ---- Manpower: the answer first (owner's concept, 2026-09-24) ---------------
+   One row per site, one column per trade, a Total row. Rows are the way into
+   the rosters below: press one, it opens and the row stays lit. A gap — no
+   supervisor of record, or a trade a machine needs and nobody holds — reads
+   in amber. Quiet surfaces, hairlines; the page's own language. */
+.mp-matrix { margin: var(--sp-3) 0 var(--sp-5); }
+.mp-matrix-table { font-size: 14.5px; table-layout: fixed; width: 100%; }
+.mp-matrix-table th { font-size: 12.5px; color: var(--ink-2); white-space: normal; line-height: 1.2; }
+.mp-matrix-table th.site, .mp-matrix-table td.site,
+.mp-matrix-table th.sv,   .mp-matrix-table td.sv { text-align: left; }
+.mp-matrix-table th.site { width: 30%; }
+.mp-matrix-table th.sv   { width: 15%; }
+.mp-matrix-table td.site { padding-left: 4px; white-space: normal; }
+.mp-matrix-table td.site strong { line-height: 1.25; }
+.mp-matrix-table td.site .muted-line { font-size: 12.5px; margin-top: 2px; white-space: normal; }
+.mp-matrix-table td.sv { white-space: normal; font-size: 13.5px; }
+.mp-matrix-table td.num { font-variant-numeric: tabular-nums; }
+.mp-matrix-table td.total, .mp-matrix-table th.total { font-weight: 700; }
+.mp-matrix-table .zero { color: var(--ink-3); }
+/* a gap: a trade a machine on the site needs and nobody holds — filled amber,
+   there are few; a site with no supervisor of record — amber TEXT only, there
+   are many today and a wall of amber would say nothing */
+.mp-matrix-table td.num.gap { background: var(--warn-soft); color: var(--warn-ink); font-weight: 700; }
+.mp-matrix-table td.sv.gap  { color: var(--warn-ink); font-weight: 700; }
+.mp-matrix-table tr.mp-row { cursor: pointer; }
+.mp-matrix-table tr.mp-row:hover { background: rgba(37, 99, 235, 0.06); }
+.mp-matrix-table tr.mp-row:focus { outline: 2px solid var(--brand-ink); outline-offset: -2px; }
+.mp-matrix-table tr.mp-row.open { box-shadow: inset 3px 0 0 var(--brand-ink); }
+.mp-matrix-table tr.mp-row.plain td.site strong { font-weight: 600; color: var(--ink-2); }
+.mp-matrix-table tr.mp-total td { border-top: 2px solid var(--line-strong); font-weight: 700; background: var(--surface-2); }
+.mp-matrix-table .caret {
+  display: inline-block; width: 0; height: 0; margin-right: 8px; vertical-align: 2px;
+  border-left: 7px solid var(--ink-2); border-top: 5px solid transparent; border-bottom: 5px solid transparent;
+  transition: transform .12s;
 }
-.mp-tile {
-  background: var(--surface-solid); border: 1px solid var(--line); border-radius: var(--r-md);
-  padding: 12px 16px;
-}
-.mp-tile-n { font-size: 26px; font-weight: 700; line-height: 1.1; color: var(--ink); font-variant-numeric: tabular-nums; }
-.mp-tile-l { font-size: 12.5px; font-weight: 600; letter-spacing: 0.03em; color: var(--ink-2); margin-top: 3px; }
-.mp-tile-s { font-size: 12.5px; color: var(--ink-3); margin-top: 2px; min-height: 1em; }
-
-.mp-cards {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: var(--sp-3);
-  margin: 0 0 var(--sp-5);
-}
-.mp-card {
-  display: block; text-align: left; width: 100%; min-height: 96px;
-  background: var(--surface-solid); border: 1px solid var(--line); border-radius: var(--r-md);
-  padding: 12px 14px; cursor: pointer; font: inherit; color: var(--ink);
-  transition: border-color .12s, box-shadow .12s;
-}
-.mp-card:hover { border-color: var(--line-strong); box-shadow: 0 1px 4px rgba(15, 23, 42, 0.06); }
-.mp-card.open { border-color: var(--brand-ink); box-shadow: inset 3px 0 0 var(--brand-ink); }
-.mp-card-code { font-size: 11.5px; font-weight: 700; letter-spacing: 0.05em; color: var(--ink-3); }
-.mp-card-name { font-size: 15px; font-weight: 700; line-height: 1.25; margin-top: 2px; }
-.mp-card-n { font-size: 13.5px; margin-top: 6px; }
-.mp-card-n strong { font-size: 17px; }
-.mp-card-meta { font-size: 12.5px; color: var(--ink-3); margin-top: 4px; line-height: 1.4; }
-.mp-card-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
-.mp-card-plain { border-style: dashed; }
-@media (max-width: 720px) {
-  .mp-summary { grid-template-columns: 1fr 1fr 1fr; gap: var(--sp-2); }
-  .mp-tile { padding: 10px 12px; }
-  .mp-tile-n { font-size: 22px; }
-}
-
+.mp-matrix-table tr.mp-row.open .caret { transform: rotate(90deg); }
 /* structured group headers (manpower / machines site blocks) */
 .group-head {
   display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap;

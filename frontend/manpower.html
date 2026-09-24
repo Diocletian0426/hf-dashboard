@@ -33,9 +33,9 @@
          question, and it is deliberately not answered here. -->
     <p id="manpower-sub" class="page-caption">Where each worker is allocated. For who punched in, see Attendance.</p>
 
-    <!-- the answer first: three allocation counts, then one card per site -->
-    <div id="mp-summary" class="mp-summary" hidden></div>
-    <div id="mp-cards" class="mp-cards" hidden></div>
+    <!-- the answer first: one row per site, one column per trade (owner's
+         concept, 2026-09-24). Press a row to open that site's roster below. -->
+    <div id="mp-matrix" class="mp-matrix" hidden></div>
 
     <div id="error"></div>
     <div id="housekeeping"></div>
@@ -666,75 +666,68 @@
              "</div></td></tr>";
     }
 
-    /* ---- the answer first (owner, 2026-09-24) -------------------------------
-       Three allocation counts, then one card per site. The counts are about
-       ALLOCATION only — "punched in today" belongs to the Attendance page and
-       is kept off this one on purpose. A card is the site's name-card: who
-       supervises it, how many are allocated, what plant is there, and what is
-       missing (no supervisor, no GPS pin, no operator for a machine, roster
-       drift). Pressing a card opens that site's roster below. */
-    function renderSummary(act, unassigned, hfbp) {
-      var el = document.getElementById("mp-summary");
-      var onSite = act.length - unassigned.length;
-      function tile(n, label, sub) {
-        return '<div class="mp-tile"><div class="mp-tile-n">' + n + "</div>" +
-               '<div class="mp-tile-l">' + label + "</div>" +
-               (sub ? '<div class="mp-tile-s">' + sub + "</div>" : "") + "</div>";
-      }
-      el.innerHTML =
-        tile(act.length, "Active Workers", "HF-BP " + hfbp + " · Hai Fu " + (act.length - hfbp)) +
-        tile(onSite, "On Sites", Object.keys(MP.sitesWithWorkers || {}).length + " sites") +
-        tile(unassigned.length, "Not On A Site", "");
-      el.hidden = false;
-    }
-
-    function renderCards(bySite, unassignedN) {
-      var el = document.getElementById("mp-cards");
-      MP.sitesWithWorkers = bySite;
+    /* ---- the answer first (owner's concept, 2026-09-24) --------------------
+       One row per site, one column per trade, a Total row: which site has how
+       many of each trade, and where a crew is thin, in one glance. The figures
+       are ALLOCATION only — "punched in today" belongs to the Attendance page
+       and is kept off this one on purpose. A gap shows in amber: no supervisor
+       of record, or a trade a machine on the site needs and nobody holds.
+       Pressing a row opens that site's roster below. */
+    var TRADES = [
+      ["boring_operator", "Boring Op"], ["crane_operator", "Crane Op"], ["vibro_operator", "Vibro Op"],
+      ["welder", "Welder"], ["general_worker", "General"]
+    ];
+    function renderMatrix(bySite, unassigned) {
+      var el = document.getElementById("mp-matrix");
       var keys = Object.keys(bySite).sort();
-      el.innerHTML = keys.map(function (k) {
-        var list = bySite[k].list, pid = list[0].current_project_id;
-        var name = list[0].project_name || k;
-        var sv = MP.supervisorsByPid[pid];
-        var mach = MP.machinesBySite[k] || [];
-        var tags = [];
-        if (!sv) tags.push('<span class="chip chip-warn">No Supervisor</span>');
-        if (MP.noPinByPid[pid]) tags.push('<span class="chip">No Pin</span>');
-        var missing = {};
-        mach.forEach(function (m) {
-          var trade = MACHINE_TRADE[m.type];
-          if (trade && !list.some(function (r) { return r.role === trade; })) missing[trade] = true;
-        });
-        Object.keys(missing).forEach(function (t) {
-          tags.push('<span class="chip chip-warn">No ' + escHtml(UI.label(t)) + "</span>");
-        });
-        var driftN = list.filter(isDrift).length;
-        if (driftN) tags.push('<span class="chip chip-warn">' + driftN + " Drift</span>");
-        var bpN = list.filter(function (r) { return r.company === "HF-BP"; }).length;
-        var split = bpN && bpN < list.length ? "HF-BP " + bpN + " · Hai Fu " + (list.length - bpN)
-                  : bpN ? "HF-BP" : "Hai Fu";
-        return '<button type="button" class="mp-card' + (MP.open[k] ? " open" : "") + '" data-card="' + esc(k) + '">' +
-          '<div class="mp-card-code">' + escHtml(k) + "</div>" +
-          '<div class="mp-card-name">' + escHtml(name) + "</div>" +
-          '<div class="mp-card-n"><strong>' + list.length + "</strong> worker" + (list.length === 1 ? "" : "s") +
-            ' <span class="muted">· ' + split + "</span></div>" +
-          '<div class="mp-card-meta">' + (sv ? "Supervisor " + escHtml(sv) : "") +
-            (mach.length ? (sv ? " · " : "") + "Machines " + mach.map(function (m) { return escHtml(m.code); }).join(", ") : "") +
-          "</div>" +
-          (tags.length ? '<div class="mp-card-tags">' + tags.join(" ") + "</div>" : "") +
-        "</button>";
-      }).join("") +
-      (unassignedN ? '<button type="button" class="mp-card mp-card-plain' + (MP.open.__unassigned ? " open" : "") + '" data-card="__unassigned">' +
-          '<div class="mp-card-name">Not On A Site</div>' +
-          '<div class="mp-card-n"><strong>' + unassignedN + "</strong> worker" + (unassignedN === 1 ? "" : "s") + "</div>" +
-          '<div class="mp-card-meta">Office staff and workers awaiting a site</div>' +
-        "</button>" : "");
-      el.hidden = !keys.length;
-      // the summary's "sites" count reads MP.sitesWithWorkers, set just above
-      var t = el.previousElementSibling && document.querySelector("#mp-summary .mp-tile:nth-child(2) .mp-tile-s");
-      if (t) t.textContent = keys.length + " site" + (keys.length === 1 ? "" : "s");
-    }
+      MP.sitesWithWorkers = bySite;
+      var tot = { other: 0, total: 0 };
+      TRADES.forEach(function (t) { tot[t[0]] = 0; });
 
+      function rowFor(key, title, sub, sv, list, extraCls, gaps) {
+        var counts = {}, other = 0;
+        list.forEach(function (r) {
+          if (counts.hasOwnProperty(r.role) || TRADES.some(function (t) { return t[0] === r.role; })) counts[r.role] = (counts[r.role] || 0) + 1;
+          else other++;
+        });
+        TRADES.forEach(function (t) { tot[t[0]] += counts[t[0]] || 0; });
+        tot.other += other; tot.total += list.length;
+        var cells = TRADES.map(function (t) {
+          var n = counts[t[0]] || 0, gap = gaps && gaps[t[0]] && !n;
+          return '<td class="num' + (gap ? " gap" : "") + '"' + (gap ? ' title="A machine on this site needs a ' + esc(UI.label(t[0]).toLowerCase()) + '"' : "") + ">" + (n || (gap ? "0" : '<span class="zero">0</span>')) + "</td>";
+        }).join("");
+        return '<tr class="mp-row' + (extraCls ? " " + extraCls : "") + (MP.open[key] ? " open" : "") + '" data-card="' + esc(key) + '" tabindex="0">' +
+          '<td class="site"><span class="caret"></span><strong>' + escHtml(title) + "</strong>" + (sub ? '<div class="muted-line">' + sub + "</div>" : "") + "</td>" +
+          '<td class="sv' + (sv === null ? " gap" : "") + '"' + (sv === null ? ' title="No supervisor of record for this site"' : "") + ">" + (sv === null ? "None" : (sv || "")) + "</td>" +
+          cells +
+          '<td class="num">' + (other || '<span class="zero">0</span>') + "</td>" +
+          '<td class="num total">' + list.length + "</td></tr>";
+      }
+
+      var rows = keys.map(function (k) {
+        var list = bySite[k].list, pid = list[0].current_project_id;
+        var mach = MP.machinesBySite[k] || [];
+        var gaps = {};
+        mach.forEach(function (m) { var tr = MACHINE_TRADE[m.type]; if (tr) gaps[tr] = true; });
+        var subBits = [];
+        if (mach.length) subBits.push("Machines " + mach.map(function (m) { return escHtml(m.code); }).join(", "));
+        if (MP.noPinByPid[pid]) subBits.push('<span class="chip">No Pin</span>');
+        var driftN = list.filter(isDrift).length;
+        if (driftN) subBits.push('<span class="chip chip-warn">' + driftN + " Drift</span>");
+        var sv = MP.supervisorsByPid[pid] ? escHtml(MP.supervisorsByPid[pid]) : null;
+        return rowFor(k, (list[0].project_name || k), subBits.join(" · "), sv, list, "", gaps);
+      }).join("");
+      if (unassigned.length) rows += rowFor("__unassigned", "Not On A Site", "Office staff and workers awaiting a site", "", unassigned, "plain", null);
+
+      var head = '<tr><th class="site">Site</th><th class="sv">Supervisor</th>' +
+        TRADES.map(function (t) { return '<th class="num">' + t[1] + "</th>"; }).join("") +
+        '<th class="num">Other</th><th class="num total">Total</th></tr>';
+      var foot = '<tr class="mp-total"><td class="site">Total</td><td class="sv">' + keys.length + " site" + (keys.length === 1 ? "" : "s") + "</td>" +
+        TRADES.map(function (t) { return '<td class="num">' + tot[t[0]] + "</td>"; }).join("") +
+        '<td class="num">' + tot.other + '</td><td class="num total">' + tot.total + "</td></tr>";
+      el.innerHTML = '<div class="table-wrap"><table class="att-table mp-matrix-table"><thead>' + head + "</thead><tbody>" + rows + "</tbody><tfoot>" + foot + "</tfoot></table></div>";
+      el.hidden = !keys.length && !unassigned.length;
+    }
     function render() {
       var act = activeRows();
       var unassigned = act.filter(function (r) { return !r.current_project_id; });
@@ -743,7 +736,6 @@
       document.getElementById("manpower-sub").innerHTML =
         "Where each worker is allocated. For who punched in, see Attendance." +
         (MP.canMove ? "" : ' <span class="muted">(view only — changes are office/management)</span>');
-      renderSummary(act, unassigned, hfbp);
 
       document.getElementById("error").innerHTML =
         (MP.err ? '<div class="banner banner-red">Could not save: ' + escHtml(MP.err) + "</div>" : "") +
@@ -781,9 +773,9 @@
           return groupBlock(k, bySite[k].title, bySite[k].list, "site");
         }).join("");
         if (shownUnassigned.length) html += groupBlock("__unassigned", "Unassigned", shownUnassigned, "site");
-        renderCards(bySite, shownUnassigned.length);
+        renderMatrix(bySite, shownUnassigned);
       }
-      document.getElementById("mp-cards").hidden = MP.groupMode !== "site";
+      document.getElementById("mp-matrix").hidden = MP.groupMode !== "site";
       html += upcomingMovesBlock();     // 0048: the office's move to-do list
       html += recentlyLeftBlock();
       document.getElementById("groups").innerHTML =
@@ -1073,25 +1065,28 @@
 
         document.getElementById("mp-search").addEventListener("input", applyFilter);
 
-        // a site card is the way into its roster: press to open (and scroll
-        // to) it, press again to close. The card mirrors the roster's state.
-        document.getElementById("mp-cards").addEventListener("click", function (ev) {
-          var card = ev.target.closest("button[data-card]");
-          if (!card) return;
-          var key = card.getAttribute("data-card");
+        // a site ROW is the way into its roster: press to open (and scroll
+        // to) it, press again to close. The row stays lit while it is open.
+        document.getElementById("mp-matrix").addEventListener("click", function (ev) {
+          var row = ev.target.closest("tr[data-card]");
+          if (!row) return;
+          var key = row.getAttribute("data-card");
           var det = document.querySelector('#groups details.zone[data-group="' + key.replace(/"/g, '\\"') + '"]');
           if (!det) return;
           det.open = !det.open;
           MP.open[key] = det.open;
-          card.classList.toggle("open", det.open);
+          row.classList.toggle("open", det.open);
           if (det.open) det.scrollIntoView({ behavior: "smooth", block: "start" });
         });
-        // …and closing a roster by its own header un-highlights its card
+        document.getElementById("mp-matrix").addEventListener("keydown", function (ev) {
+          if ((ev.key === "Enter" || ev.key === " ") && ev.target.matches("tr[data-card]")) { ev.preventDefault(); ev.target.click(); }
+        });
+        // …and closing a roster by its own header un-lights its row
         document.getElementById("groups").addEventListener("toggle", function (ev) {
           var det = ev.target;
           if (!det.matches || !det.matches("details.zone[data-group]")) return;
-          var card = document.querySelector('#mp-cards button[data-card="' + det.getAttribute("data-group").replace(/"/g, '\\"') + '"]');
-          if (card) card.classList.toggle("open", det.open);
+          var row = document.querySelector('#mp-matrix tr[data-card="' + det.getAttribute("data-group").replace(/"/g, '\\"') + '"]');
+          if (row) row.classList.toggle("open", det.open);
         }, true);
 
         // history-maintenance buttons inside the Recent moves panel (0050) —
