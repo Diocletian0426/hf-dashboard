@@ -318,6 +318,14 @@ body.rail-open .nav-burger span:nth-child(3) { transform: translateY(-6px) rotat
 .user-pop .user-desig { color: var(--ink-2); font-size: var(--fs-xs); margin: 2px 0 10px; }
 .user-pop .btn-plain { color: var(--danger-ink); border-color: var(--line-strong); width: 100%; }
 .user-pop .btn-plain:hover { background: var(--danger-soft); border-color: #fecaca; }
+/* the neutral menu action (Change Password); .btn-plain stays red for Sign Out */
+.user-pop .btn-menu {
+  display: block; width: 100%; margin-bottom: var(--sp-2);
+  background: rgba(255, 255, 255, 0.6); color: var(--ink);
+  border: 1px solid var(--line-strong); border-radius: var(--r-pill);
+  padding: 6px 14px; cursor: pointer; font-size: var(--fs-sm); white-space: nowrap;
+}
+.user-pop .btn-menu:hover { background: var(--surface-2); }
 
 /* (.brand / .nav-links / .nav-user-mobile / .nav-who / .nav-desig removed with
    the rail rewrite — grep-verified that no page emits them any more) */
@@ -2591,6 +2599,22 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
   display: block; width: 100%; box-sizing: border-box; margin-top: var(--sp-1);
 }
 .modal-card .modal-actions { display: flex; gap: var(--sp-2); justify-content: flex-end; }
+
+/* change-password card (shell.js): same field look as the sign-in page */
+.pw-card input[type="password"], .pw-card input[type="text"] {
+  display: block; width: 100%; box-sizing: border-box; margin-top: var(--sp-1);
+  font-size: 15px; padding: 10px 12px; min-height: var(--tap);
+  border: 1px solid var(--line-strong); border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.85); color: var(--ink);
+}
+.pw-card input[aria-invalid="true"] { border-color: var(--danger); }
+.pw-card input:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.pw-card .pw-row {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3);
+  margin: -4px 0 var(--sp-2); font-size: var(--fs-xs); color: var(--ink-3);
+}
+.pw-card .auth-msg { margin: 0 0 var(--sp-3); }
+.pw-card .auth-msg:empty { display: none; }
 
 /* ============================ 8. RESPONSIVE =============================== */
 
