@@ -64,6 +64,14 @@
           <path d="M6 9V3h12v6M6 18H4a1 1 0 0 1-1-1v-6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v6a1 1 0 0 1-1 1h-2"></path>
           <rect x="6" y="14" width="12" height="7"></rect>
         </svg>Print</button>
+      <!-- GROUP PDF (owner, 2026-09-25): the day as a list for the workers' group
+           chat — every active worker, HF Bored Piles first then Hai Fu, name,
+           site, in and out, so whoever did NOT punch is plain to see. Day view only. -->
+      <button type="button" class="btn att-btn" id="btn-group" hidden>
+        <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"></path>
+        </svg>Group PDF</button>
       <!-- Download Excel opens a small dialog that asks its own three questions
            (company, month, site) — see DOWNLOAD ATTENDANCE in the script. -->
       <button type="button" class="btn att-btn" id="btn-excel" hidden>
@@ -344,6 +352,111 @@
     // offset can be written flat rather than computed.
     function klInputToISO(v) { return v ? v + ":00+08:00" : null; }
 
+    /* ---- GROUP PDF: who punched today, for the workers' group chat ----------
+       Every ACTIVE worker on the roster (narrowed to the Site filter if one is
+       set), split by company — HF Bored Piles first, then Hai Fu — with the
+       site and the IN / OUT the table shows. A worker with no punch reads
+       "Not punched" in red: that is the point of the sheet. Names, sites and
+       times only; no hours, no overtime, no codes. */
+    var DAY_SHIFTS = [];
+
+    function showGroupSheet(date, site) {
+      var byStaff = {};
+      DAY_SHIFTS.forEach(function (s) { byStaff[s.staff_id] = s; });
+      var people = ROSTER.filter(function (m) { return !site || m.current_project_id === site; })
+        .map(function (m) {
+          var s = byStaff[m.staff_id];
+          return { name: m.full_name, company: m.company,
+                   site: (s && siteText(s)) || m.project_name || "Unassigned", shift: s || null };
+        });
+      // anyone who punched but is not on the roster read (a refused read, a left worker)
+      var onRoster = {};
+      ROSTER.forEach(function (m) { onRoster[m.staff_id] = true; });
+      DAY_SHIFTS.forEach(function (s) {
+        if (!onRoster[s.staff_id]) people.push({ name: s.full_name, company: COMPANY[s.staff_id] || "",
+                                                 site: siteText(s) || "—", shift: s });
+      });
+      if (!people.length) { alert("No workers to list for this day."); return; }
+
+      var groups = [["HF-BP", "HF Bored Piles"], ["Hai Fu", "Hai Fu"], ["", "Other"]];
+      var body = groups.map(function (g) {
+        var list = people.filter(function (p) {
+          return g[0] ? p.company === g[0] : (p.company !== "HF-BP" && p.company !== "Hai Fu");
+        }).sort(function (a, b) {
+          return (a.site || "").localeCompare(b.site || "") || a.name.localeCompare(b.name);
+        });
+        if (!list.length) return "";
+        var done = list.filter(function (p) { return p.shift && effIn(p.shift); }).length;
+        return '<h3>' + esc(g[1]) + ' <span class="gp-count">' + done + " / " + list.length + " punched in</span></h3>" +
+          "<table><thead><tr><th>#</th><th>Name</th><th>Site</th><th>Punch In</th><th>Punch Out</th></tr></thead><tbody>" +
+          list.map(function (p, i) {
+            var tin = p.shift && effIn(p.shift), tout = p.shift && effOut(p.shift);
+            return "<tr" + (tin ? "" : ' class="gp-miss"') + "><td>" + (i + 1) + "</td><td>" + esc(p.name) + "</td>" +
+                   "<td>" + esc(p.site) + "</td>" +
+                   (tin ? "<td>" + esc(Dash.klTime(tin)) + "</td><td>" + (tout ? esc(Dash.klTime(tout)) : "—") + "</td>"
+                        : '<td colspan="2" class="gp-no">Not punched</td>') + "</tr>";
+          }).join("") + "</tbody></table>";
+      }).join("");
+
+      var old = document.getElementById("group-sheet");
+      if (old) old.remove();
+      var el = document.createElement("div");
+      el.id = "group-sheet";
+      el.innerHTML =
+        "<style>" +
+        "#group-sheet{position:fixed;inset:0;z-index:1000;background:rgba(15,23,42,.45);overflow:auto;padding:24px}" +
+        "#group-sheet .gp-page{max-width:820px;margin:0 auto;background:#fff;color:#0f172a;border-radius:14px;" +
+          "padding:28px 32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif}" +
+        "#group-sheet .gp-bar{display:flex;gap:8px;justify-content:flex-end;margin:0 0 12px}" +
+        "#group-sheet h2{margin:0 0 4px;font-size:22px;font-weight:700;letter-spacing:0}" +
+        "#group-sheet .gp-sub{margin:0 0 6px;font-size:13px;color:#475569}" +
+        "#group-sheet h3{margin:22px 0 8px;font-size:17px;border-bottom:2px solid #2f6fdc;padding-bottom:4px}" +
+        "#group-sheet .gp-count{font-size:12.5px;font-weight:600;color:#475569;margin-left:6px}" +
+        "#group-sheet table{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed}" +
+        "#group-sheet th:nth-child(1){width:5%}#group-sheet th:nth-child(2){width:36%}" +
+        "#group-sheet th:nth-child(3){width:31%}#group-sheet th:nth-child(4),#group-sheet th:nth-child(5){width:14%}" +
+        "#group-sheet th,#group-sheet td{text-align:left;padding:6px 8px;border-bottom:1px solid #e2e8f0;" +
+          "white-space:normal;position:static;background:none;color:#0f172a}" +
+        "#group-sheet th{font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:#475569}" +
+        "#group-sheet td:first-child{color:#94a3b8;width:28px}" +
+        "#group-sheet tr.gp-miss td{background:#fef2f2}" +
+        "#group-sheet td.gp-no{color:#b91c1c;font-weight:700}" +
+        "#group-sheet tr{break-inside:avoid}" +
+        "@media print{body.gp-printing>*:not(#group-sheet){display:none!important}" +
+          "body.gp-printing{background:#fff!important;display:block!important}" +
+          "#group-sheet{position:static;background:none;padding:0;overflow:visible}" +
+          "#group-sheet .gp-page{max-width:none;padding:0;border-radius:0}" +
+          "#group-sheet .gp-bar{display:none}" +
+          "#group-sheet tr.gp-miss td{-webkit-print-color-adjust:exact;print-color-adjust:exact}}" +
+        "</style>" +
+        '<div class="gp-page">' +
+          '<div class="gp-bar">' +
+            '<button type="button" class="btn btn-primary" id="gp-print">Save as PDF</button>' +
+            '<button type="button" class="btn" id="gp-close">Close</button>' +
+          "</div>" +
+          "<h2>Attendance — " + esc(friendlyDate(date)) + "</h2>" +
+          '<p class="gp-sub">' + (site ? esc(siteLabel()) + " · " : "") + "As of " + esc(klNow().words) +
+            " · rows in red have not punched in</p>" +
+          body +
+        "</div>";
+      document.body.appendChild(el);
+
+      document.getElementById("gp-print").addEventListener("click", function () {
+        document.body.classList.add("gp-printing");
+        window.print();
+      });
+      document.getElementById("gp-close").addEventListener("click", function () { el.remove(); });
+    }
+    // the page's own beforeprint names the file "Attendance … - Printed …"; while
+    // the group sheet prints, this runs after it and names the file for the chat
+    window.addEventListener("beforeprint", function () {
+      if (document.body.classList.contains("gp-printing")) {
+        document.title = "Attendance " + friendlyDate(new URLSearchParams(location.search).get("date") || Dash.todayKL()) +
+                         " - Group";
+      }
+    });
+    window.addEventListener("afterprint", function () { document.body.classList.remove("gp-printing"); });
+
     /* ---- who is who: the employee code, and the Find box ------------------
        A day-row identifies its worker by staff_id — the one key that is unique
        for everybody; names repeat, and plenty of workers have no employee code
@@ -356,12 +469,14 @@
     // differently (owner, 2026-09-20), so an exported sheet has to say which
     // company each worker belongs to or HR cannot split it.
     var COMPANY = {};                     // staff_id -> "HF-BP" | "Hai Fu"
+    var ROSTER = [];                      // active workers — the Group PDF lists who did NOT punch too
 
     async function loadCodes() {
       try {
         ((await Dash.getManpowerBySite()) || []).forEach(function (m) {
           if (m.staff_id && m.employee_code) CODES[m.staff_id] = m.employee_code;
           if (m.staff_id && m.company) COMPANY[m.staff_id] = m.company;
+          if (m.staff_id && m.is_active) ROSTER.push(m);
         });
       } catch (e) { /* no codes — see above */ }
     }
@@ -816,6 +931,10 @@
         writePrintHead(view, view === "month" ? friendlyMonth(month) : friendlyDate(date));
         window.print();
       });
+      var groupBtn = document.getElementById("btn-group");
+      groupBtn.hidden = (view === "month");
+      groupBtn.addEventListener("click", function () { showGroupSheet(date, site); });
+
       // Ctrl+P gets the heading too. And "Save as PDF" names the file after the
       // page title — so for the length of the print the title IS the file name.
       var pageTitle = document.title;
@@ -853,6 +972,7 @@
           loadCodes()
         ]);
         var shifts = results[0], missing = results[1], projects = results[2], punches = results[3];
+        DAY_SHIFTS = shifts || [];
         // the Company filter only makes sense once the page knows who works for whom
         document.getElementById("lbl-company").hidden = !Object.keys(COMPANY).length;
 
