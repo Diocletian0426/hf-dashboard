@@ -573,7 +573,7 @@
         ? "Not paid overtime: the day counts as normal hours."
         : r.company_code === "Hai Fu"
         ? "Hai Fu: the whole day counts at 1.5×, so it sits under Over Time."
-        : "HF Bored Piles: paid as an ordinary day; only work beyond 8 hours is overtime.";
+        : "HF Bored Piles: paid as an ordinary day; only work beyond 7.5 hours is overtime.";
       return '<span class="badge badge-gray" title="' + esc(why) + '">' + w + "</span>" +
              (otBadge(r) ? " " + otBadge(r) : "");
     }
@@ -1591,7 +1591,7 @@
         [B("Site"), siteName],
         [B("Workers"), list.length],
         [B("Downloaded"), now.words + (who ? " by " + who : "")],
-        ["Over Time Hours = every hour at 1.5× (work beyond 8 hours; for Hai Fu the whole of a rest day or public holiday). " +
+        ["Over Time Hours = every hour at 1.5× (work beyond 7.5 hours; for Hai Fu the whole of a rest day or public holiday). Figures are rounded down to the half hour. " +
          "Days marked To Fix or Still Open are NOT in these totals — correct them on the Attendance page, then download again."],
         [B("Employee Code"), B("Name"), B("Company"), B("Sites"), B("Days Worked"), B("Working Hours"),
          B("Over Time Hours"), B("Total Hours"), B("Days To Fix"), B("Days Still Open")]];
@@ -1930,7 +1930,7 @@
       note.hidden = false;
       // what the two figures ARE — the one sentence the office needs when a
       // Hai Fu Sunday shows 0 working hours and a full day of Over Time
-      note.innerHTML = '<span class="legend-prose">Over Time is every hour at 1.5×: work beyond 8 hours, ' +
+      note.innerHTML = '<span class="legend-prose">Over Time is every hour at 1.5×: work beyond 7.5 hours, ' +
         "and for Hai Fu the whole of a rest day or public holiday. " +
         "Days marked <strong>To Fix</strong> or <strong>Still Open</strong> are excluded from totals.</span>";
 
