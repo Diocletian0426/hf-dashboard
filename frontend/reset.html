@@ -114,6 +114,9 @@
         return "That password is too short. Use at least 8 characters.";
       if (/different from the old password|same as the old/i.test(m))
         return "Choose a password you have not used before on this account.";
+      // the leaked-password (HaveIBeenPwned) check, once switched on in Supabase
+      if (/weak|easy to guess|pwned|leaked/i.test(m))
+        return "That password is too easy to guess. Choose another.";
       if (/for security purposes|rate limit|too many/i.test(m))
         return "Too many attempts. Please wait a minute and try again.";
       return m || "Could not save the new password. Please try again.";

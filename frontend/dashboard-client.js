@@ -9,6 +9,12 @@
    AUTH COMMANDS
    -----------------------------------------------------------------------------
    await Dash.signIn(email, password) -> { ok:true } or { ok:false, message }
+   await Dash.changePassword(current, next)
+                                      -> { ok:true } or { ok:false, reason, message }
+                                         reason: wrong_current | short | weak |
+                                         same | rate_limited | offline | error.
+                                         Signs every OTHER device out; this
+                                         browser stays signed in.
    await Dash.signOut()               -> clears the session, goes to login.html
    await Dash.getUser()               -> the signed-in user or null (no network)
    await Dash.requireLogin()          -> redirects to login.html when signed out
@@ -557,6 +563,62 @@
     var res = await sb.auth.updateUser({ password: newPassword });
     if (res.error) return { ok: false, message: res.error.message };
     return { ok: true };
+  }
+
+  // Change the signed-in person's password from inside the dashboard (the
+  // account menu in shell.js). Three steps, in order:
+  //   1. prove the CURRENT password by signing in with it again. Supabase has
+  //      no "check this password" call, and a fresh sign-in is also exactly
+  //      what its optional "secure password change" setting demands, so this
+  //      works whichever way that setting is switched;
+  //   2. save the new one;
+  //   3. sign out every OTHER device (scope "others"): a lost phone cannot
+  //      renew its session once the password is changed at the office. It
+  //      keeps working only until its current access token runs out (the
+  //      Supabase JWT, up to an hour) — not instantly, so the card says
+  //      "will need to sign in again". THIS browser keeps its session (the
+  //      owner chose "stay signed in").
+  // Why ask for the current password at all: sessions never expire on their
+  // own (only the idle timer signs people out), so an unattended laptop must
+  // not let a passer-by lock the real user out.
+  // Returns { ok:true } or { ok:false, reason, message }; reason is one of
+  //   wrong_current | short | weak | same | rate_limited | offline | error
+  // and message is Supabase's own wording, for a fallback the caller may show.
+  async function changePassword(currentPassword, newPassword) {
+    var user = await getUser();
+    if (!user || !user.email) return { ok: false, reason: "error", message: "Not signed in." };
+
+    var check = await sb.auth.signInWithPassword({ email: user.email, password: currentPassword });
+    if (check.error) {
+      return { ok: false, reason: passwordErrorReason(check.error, true), message: check.error.message };
+    }
+
+    var res = await sb.auth.updateUser({ password: newPassword });
+    if (res.error) {
+      return { ok: false, reason: passwordErrorReason(res.error, false), message: res.error.message };
+    }
+
+    // Best effort: if this call fails the password is still changed, and the
+    // other devices simply keep working until their own session ends.
+    try { await sb.auth.signOut({ scope: "others" }); } catch (e) { /* see above */ }
+    return { ok: true };
+  }
+
+  // Supabase's auth errors carry a short code (err.code) on current builds and
+  // only a sentence on older ones. Test both, code first.
+  function passwordErrorReason(err, checkingCurrent) {
+    var code = (err && err.code) || "";
+    var msg  = String((err && err.message) || "");
+    if (code === "invalid_credentials" || /invalid login credentials/i.test(msg)) {
+      return checkingCurrent ? "wrong_current" : "error";
+    }
+    if (code === "same_password" || /different from the old|same as the old/i.test(msg)) return "same";
+    if (/should be at least|too short/i.test(msg)) return "short";
+    // "weak_password" also covers the leaked-password (HaveIBeenPwned) check
+    if (code === "weak_password" || /weak|easy to guess|pwned|leaked/i.test(msg)) return "weak";
+    if (code === "over_request_rate_limit" || /rate limit|too many|for security purposes/i.test(msg)) return "rate_limited";
+    if ((err && err.status === 0) || /failed to fetch|network|load failed/i.test(msg)) return "offline";
+    return "error";
   }
 
   // the directory the app is served from — "/" locally, "/hf-dashboard/" on Pages
@@ -1694,6 +1756,7 @@
     signInWithProvider: signInWithProvider,
     resetPassword: resetPassword,
     updatePassword: updatePassword,
+    changePassword: changePassword,
     recoveryPending: recoveryPending,
     linkError: linkError,
     signOutQuiet: signOutQuiet,
