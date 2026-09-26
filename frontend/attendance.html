@@ -257,6 +257,12 @@
     // 8.25 -> "8 Hours 15 Mins". Spelled out, and spelled the SAME way the
     // worker's phone spells it — a decimal like "8.25" invites bad arithmetic,
     // and a different wording invites an argument.
+    // A MONTH total is rounded DOWN to the half hour (owner, 2026-09-26; DB
+    // 0111). Days stay to the minute — the database's own figures — and the
+    // month is what payroll pays, in half hours. Presentation of a sum, not a
+    // copy of the hours rule; the punch app's History tab does the same.
+    function monthMins(mins) { return Math.floor((Number(mins) || 0) / 30) * 30; }
+
     function hm(hours) {
       if (hours === null || hours === undefined) return "—";
       var mins = Math.round(Number(hours) * 60);
@@ -1591,15 +1597,18 @@
         [B("Site"), siteName],
         [B("Workers"), list.length],
         [B("Downloaded"), now.words + (who ? " by " + who : "")],
-        ["Over Time Hours = every hour at 1.5× (work beyond 7.5 hours; for Hai Fu the whole of a rest day or public holiday). Figures are rounded down to the half hour. " +
+        ["Over Time Hours = every hour at 1.5× (work beyond 7.5 hours; for Hai Fu the whole of a rest day or public holiday). Month totals on this sheet are rounded down to the half hour; the Daily sheet is to the minute. " +
          "Days marked To Fix or Still Open are NOT in these totals — correct them on the Attendance page, then download again."],
         [B("Employee Code"), B("Name"), B("Company"), B("Sites"), B("Days Worked"), B("Working Hours"),
          B("Over Time Hours"), B("Total Hours"), B("Days To Fix"), B("Days Still Open")]];
       var tDays = 0, tWm = 0, tOm = 0, tFix = 0, tOpen = 0;
       list.forEach(function (w) {
-        tDays += w.days; tWm += w.wm; tOm += w.om; tFix += w.broken; tOpen += w.open;
+        // the month per worker, rounded down to the half hour (0111); the Total
+        // row is =SUM of these rounded rows, so it never argues with them
+        var mwm = monthMins(w.wm), mom = monthMins(w.om);
+        tDays += w.days; tWm += mwm; tOm += mom; tFix += w.broken; tOpen += w.open;
         sum.push([CODES[w.staff_id] || "", w.name, companyFull(COMPANY[w.staff_id]), Object.keys(w.sites).join(", "),
-                  w.days, H(w.wm), H(w.om), H(w.wm + w.om), w.broken, w.open]);
+                  w.days, H(mwm), H(mom), H(mwm + mom), w.broken, w.open]);
       });
       var first = HEAD + 1, last = HEAD + list.length;
       function S(col, cached, hours) {            // =SUM down one column, with the value to show meanwhile
@@ -1911,9 +1920,12 @@
           'in this worker\'s totals until corrected.">' + w.broken + " To Fix</span>");
         if (w.open) att.push('<span class="badge badge-gray" title="Day(s) with a punch in and ' +
           'no punch out. No hours to count yet.">' + w.open + " Still Open</span>");
+        // the month figures, rounded down to the half hour (monthMins); the
+        // footer adds THESE, so it agrees with the rows and the Excel Summary
+        var mwm = monthMins(w.wm), mom = monthMins(w.om);
         return '<tr class="shift-row" data-i="' + i + '" data-company="' + esc(COMPANY[w.staff_id] || "") +
-                 '" data-days="' + w.days + '" data-wm="' + w.wm +
-                 '" data-om="' + w.om + '" data-find="' +
+                 '" data-days="' + w.days + '" data-wm="' + mwm +
+                 '" data-om="' + mom + '" data-find="' +
                  esc(findKey(w, Object.keys(w.sites).join(" "))) + '">' +
           codeCell(w.staff_id) +
           '<td><button type="button" class="worker-btn" data-i="' + i + '" aria-expanded="false">' +
@@ -1921,8 +1933,8 @@
             "</button></td>" +
           "<td>" + esc(Object.keys(w.sites).join(", ") || "—") + "</td>" +
           '<td class="num">' + w.days + "</td>" +
-          '<td class="num">' + hm(w.normal) + "</td>" +
-          '<td class="num">' + (w.ot > 0 ? '<span class="ot-on">' + hm(w.ot) + "</span>" : hm(0)) + "</td>" +
+          '<td class="num">' + hm(mwm / 60) + "</td>" +
+          '<td class="num">' + (mom > 0 ? '<span class="ot-on">' + hm(mom / 60) + "</span>" : hm(0)) + "</td>" +
           "<td>" + (att.join(" ") || "—") + "</td></tr>" +
           '<tr class="detail-row" id="m' + i + '" hidden><td colspan="7"></td></tr>';
       }).join("");
@@ -1932,6 +1944,7 @@
       // Hai Fu Sunday shows 0 working hours and a full day of Over Time
       note.innerHTML = '<span class="legend-prose">Over Time is every hour at 1.5×: work beyond 7.5 hours, ' +
         "and for Hai Fu the whole of a rest day or public holiday. " +
+        "Month totals are rounded down to the half hour; each day is to the minute. " +
         "Days marked <strong>To Fix</strong> or <strong>Still Open</strong> are excluded from totals.</span>";
 
       if (document.getElementById("f-find").value || document.getElementById("f-company").value) applyFind("month-rows", 7);
