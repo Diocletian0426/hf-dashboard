@@ -689,12 +689,16 @@
         "</div>";
     }
 
-    // ---- forgotten punch-outs (0084) ---------------------------------------
-    // Shifts a worker opened and never closed, from finished work-days. The
-    // office attests the real knock-off time; it records as "Closed By Office"
-    // with who entered it — never disguised as a GPS punch. Today's shifts are
-    // excluded: an open shift today is just someone at work.
-    var OS = { list: null, openFor: null, err: "", okMsg: "" };
+    // ---- forgotten punch-outs (0084, re-routed 2026-09-29) ------------------
+    // Shifts a worker opened and never closed, from finished work-days. Since
+    // 0088 the system closes these itself at 06:05 the next morning (at 17:00,
+    // no overtime), so this list is normally empty by the time the office
+    // reads it. When it is not, the fix is the same one the office uses for
+    // any wrong day: Correct This Day — a ruling in the corrections layer with
+    // a reason the worker can read. The old "Close Shift" wrote an office
+    // punch-out instead; close_shift / reopen_shift are gone (0113). Today's
+    // shifts are excluded: an open shift today is just someone at work.
+    var OS = { list: null, err: "" };
 
     async function loadOpenShifts() {
       // closing a shift is an attendance.edit act, and the database refuses the
@@ -708,95 +712,27 @@
     function renderOpenShifts() {
       var el = document.getElementById("open-shifts");
       var html = "";
-      if (OS.okMsg) html += '<div class="banner banner-green">' + esc(OS.okMsg) + "</div>";
-      if (OS.err)   html += '<div class="banner banner-red">Could not save: ' + esc(OS.err) + "</div>";
+      if (OS.err) html += '<div class="banner banner-red">' + esc(OS.err) + "</div>";
 
       if (OS.list && OS.list.length) {
         html += '<div class="banner banner-amber"><strong>' + OS.list.length +
-          " shift(s) never punched out</strong> — enter the real knock-off time once you have " +
-          "confirmed it with the supervisor. It is recorded as closed by you, not as a GPS punch." +
+          " shift(s) never punched out</strong> — the system closes these at 06:05 the next morning. " +
+          "To record the real knock-off time, correct the day." +
           '<ul style="margin:8px 0 0;padding-left:18px">' +
           OS.list.map(function (s) {
-            var open = OS.openFor === s.punch_id;
+            // the same door as the month view's "Correct This Day": opens that
+            // worker's row on that date with the correction form ready
             return "<li style='margin:4px 0'><strong>" + esc(s.full_name) + "</strong> — " +
               esc(s.project_name || "no site") + " · in " + esc(Dash.klDateTime(s.in_at)) +
-              ' <span class="muted">(' + esc(s.days_open) + " day" + (s.days_open === 1 ? "" : "s") + " ago)</span>" +
-              ' <button type="button" data-os="' + esc(s.punch_id) + '">' +
-              (open ? "Cancel" : "Close Shift") + "</button>" +
-              (open ? osForm(s) : "") +
+              ' <span class="muted">(' + esc(s.days_open) + " day" + (s.days_open === 1 ? "" : "s") + " ago)</span> " +
+              '<a class="fix-link" href="attendance.html?date=' + encodeURIComponent(s.work_date) +
+              "&open=" + encodeURIComponent(s.staff_id) + '">Correct This Day</a>' +
               "</li>";
           }).join("") +
           "</ul></div>";
       }
       el.innerHTML = html;
     }
-
-    function osForm(s) {
-      // prefill 18:00 on the work-day; the office adjusts (cross-midnight
-      // knock-offs: just set the next day's date in the same field)
-      return '<div class="claim-form" style="margin-top:6px">' +
-        '<label>Knock-off time <input type="datetime-local" id="os-out" value="' +
-          esc(s.work_date) + 'T18:00"></label>' +
-        '<label>Note <input type="text" id="os-note" size="24" placeholder="e.g. confirmed with supervisor"></label>' +
-        '<button type="button" data-os-save="' + esc(s.punch_id) + '" data-os-staff="' + esc(s.staff_id) +
-        '" data-os-date="' + esc(s.work_date) + '" data-os-name="' + esc(s.full_name) + '">Save</button>' +
-        '<span class="muted-line">Malaysia time. Must be after the punch-in and within 24 hours of it.</span>' +
-        "</div>";
-    }
-
-    document.getElementById("open-shifts").addEventListener("click", async function (ev) {
-      var toggle = ev.target.closest("button[data-os]");
-      if (toggle) {
-        var pid = toggle.getAttribute("data-os");
-        OS.openFor = (OS.openFor === pid) ? null : pid;
-        OS.err = ""; OS.okMsg = "";
-        renderOpenShifts();
-        return;
-      }
-
-      var save = ev.target.closest("button[data-os-save]");
-      if (!save) return;
-
-      var raw = document.getElementById("os-out").value;   // "YYYY-MM-DDTHH:mm" KL wall time
-      if (!raw) { OS.err = "enter the knock-off time"; renderOpenShifts(); return; }
-      var outISO = raw + ":00+08:00";                      // Malaysia is UTC+8, no DST
-      var note = document.getElementById("os-note").value.trim();
-
-      save.disabled = true; save.textContent = "Saving…";
-      try {
-        var res = await Dash.closeShift(
-          save.getAttribute("data-os-staff"), save.getAttribute("data-os-date"), outISO, note);
-        if (res && res.ok) {
-          OS.okMsg = "Closed " + save.getAttribute("data-os-name") + "'s " +
-                     save.getAttribute("data-os-date") + " shift (" + res.hours +
-                     " h). It shows as Closed By Office.";
-          OS.openFor = null;
-          await loadOpenShifts();
-          return;
-        }
-        OS.err = (res && res.message) || (res && res.code) || "unknown error";
-      } catch (e) {
-        OS.err = (e && e.message) || String(e);
-      }
-      renderOpenShifts();
-    });
-
-    // remove a mistyped office close from the raw punches table (worker
-    // punches never get this button, and the database refuses them anyway)
-    document.getElementById("punch-rows").addEventListener("click", async function (ev) {
-      var btn = ev.target.closest("button[data-reopen]");
-      if (!btn) return;
-      if (!confirm("Remove this office-entered punch-out? The shift becomes open again.")) return;
-      btn.disabled = true;
-      try {
-        await Dash.reopenShift(btn.getAttribute("data-reopen"));
-        location.reload();
-      } catch (e) {
-        OS.err = (e && e.message) || String(e);
-        renderOpenShifts();
-        btn.disabled = false;
-      }
-    });
 
     // one delegated handler on the static banner container — survives re-renders
     document.getElementById("geofence-banner").addEventListener("click", async function (ev) {
@@ -1479,11 +1415,10 @@
                   "<td>" + (p.punch_type || "").toUpperCase() + "</td>" +
                   "<td>" + (p.project_name || "—") + "</td>" +
                   '<td class="num">' + (plainDistance(p.distance_m) || "—") + "</td>" +
-                  '<td><span class="badge badge-' + vCls + '">' + esc(checkWords(p.verification_status)) + "</span>" +
-                  (canEdit && (p.verification_status === "office_closed" || p.verification_status === "auto_closed")
-                    ? ' <button type="button" data-reopen="' + p.punch_id + '">Remove</button>'
-                    : "") +
-                  "</td>" +
+                  // a system- or office-closed punch-out is never removed any more:
+                  // the office's ruling on the real time lives in the corrections
+                  // layer and wins over it, with both left visible (0090)
+                  '<td><span class="badge badge-' + vCls + '">' + esc(checkWords(p.verification_status)) + "</span></td>" +
                 "</tr>";
               }).join("")
             : '<tr><td colspan="6" class="empty">No raw punches for this date.</td></tr>';
