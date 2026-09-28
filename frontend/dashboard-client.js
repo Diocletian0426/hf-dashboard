@@ -902,25 +902,12 @@
   }
 
   // ---- forgotten punch-outs (0084) ---------------------------------------
-  // A shift the worker never closed. The office attests the real knock-off
-  // time; it is recorded as 'office_closed' with who entered it — visibly an
-  // attestation, never disguised as a GPS punch. Today's shifts can't be
-  // closed (the worker may simply still be on site).
+  // Shifts a worker never closed, from finished days. The list only: since
+  // 0088 the system closes them at 06:05 the next morning, and the office
+  // sets the real knock-off time through setDayCorrection (0090) like any
+  // other wrong day. closeShift / reopenShift were retired with DB 0113.
   function getOpenShifts() {
     return q(sb.rpc("get_open_shifts"));
-  }
-
-  function closeShift(staffId, workDate, outAtISO, note) {
-    return q(sb.rpc("close_shift", {
-      p_staff_id: staffId, p_work_date: workDate,
-      p_out_at: outAtISO, p_note: note || null
-    }));
-  }
-
-  // Retracts an office attestation entered by mistake. Refuses anything else —
-  // a worker's real punch can never be deleted through this.
-  function reopenShift(punchId) {
-    return q(sb.rpc("reopen_shift", { p_punch_id: punchId }));
   }
 
   // ---- office corrections to a day's hours (0090–0092) --------------------
@@ -1787,8 +1774,6 @@
     getShifts: getShifts,
     getShiftsRange: getShiftsRange,
     getOpenShifts: getOpenShifts,
-    closeShift: closeShift,
-    reopenShift: reopenShift,
     setDayCorrection: setDayCorrection,
     clearDayCorrection: clearDayCorrection,
     getSitesMissingGeofence: getSitesMissingGeofence,
