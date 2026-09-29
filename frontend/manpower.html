@@ -651,7 +651,7 @@
         ? '<div class="pc-move"><h3>Move this worker</h3>' + moveControls(r) + "</div>"
         : "";
 
-      return '<tr class="pile-card-row"><td colspan="6"><div class="pile-card">' + head + moveBlock +
+      return '<tr class="pile-card-row" data-cardfor="' + r.staff_id + '"><td colspan="6"><div class="pile-card">' + head + moveBlock +
              '<div class="pc-grid"><div><h3>Movement history</h3>' +
              (histHtml || '<div class="muted-line">No moves recorded yet — backfill via the Recent moves panel.</div>') +
              '<div id="wcf-' + r.staff_id + '"></div></div>' +
@@ -724,12 +724,25 @@
                       MP.siteFilter !== "all" || MP.driftOnly;
       document.querySelectorAll("#groups details.zone").forEach(function (det) {
         var any = false;
+        // Upcoming moves and Recently left are not roster rows: only the
+        // search term applies to them. The role / site / drift / housekeeping
+        // lenses describe workers on the roster and used to blank both panels.
+        var grp = det.getAttribute("data-group");
+        var aux = grp === "__plans" || grp === "__left";
         det.querySelectorAll("tbody tr").forEach(function (tr) {
+          // a worker's record card follows its own row — it carries no filter
+          // attributes of its own and used to vanish under any filter or search
+          if (tr.classList.contains("pile-card-row")) {
+            var host = tr.previousElementSibling;
+            tr.style.display = host && host.style.display !== "none" ? "" : "none";
+            return;
+          }
           var hit = (!qstr || (tr.getAttribute("data-search") || "").indexOf(qstr) !== -1) &&
-                    (!hk || (tr.getAttribute("data-hk") || "").indexOf(hk) !== -1) &&
-                    (MP.roleFilter === "all" || tr.getAttribute("data-role") === MP.roleFilter) &&
-                    (MP.siteFilter === "all" || tr.getAttribute("data-site") === MP.siteFilter) &&
-                    (!MP.driftOnly || tr.getAttribute("data-drift") === "1");
+                    (aux || (
+                      (!hk || (tr.getAttribute("data-hk") || "").indexOf(hk) !== -1) &&
+                      (MP.roleFilter === "all" || tr.getAttribute("data-role") === MP.roleFilter) &&
+                      (MP.siteFilter === "all" || tr.getAttribute("data-site") === MP.siteFilter) &&
+                      (!MP.driftOnly || tr.getAttribute("data-drift") === "1")));
           tr.style.display = hit ? "" : "none";
           if (hit) any = true;
         });
@@ -834,6 +847,10 @@
     function renderMoveLog() {
       if (!MP.canMove) return;                      // office-only history
       var el = document.getElementById("movelog");
+      // the panel is rebuilt after every save; keep it open if it was open
+      // (it used to snap shut, losing the office's place after each edit)
+      var prev = el.querySelector("details");
+      var wasOpen = !!(prev && prev.open);
       try {
         var log = (MP.translog || []).slice(0, 50); // panel shows the newest 50
         var rows = log.map(function (t) {
@@ -854,7 +871,7 @@
                  "</span></td></tr>";
         }).join("");
         el.innerHTML =
-          '<details class="zone"><summary><span class="zone-name">Recent moves</span>' +
+          '<details class="zone"' + (wasOpen ? " open" : "") + '><summary><span class="zone-name">Recent moves</span>' +
           '<span class="zone-count">' + log.length + " logged · dates = when it happened</span></summary>" +
           '<div class="claim-actions" style="padding:6px 0 0">' +
           '<button type="button" data-action="th-add">Add past move…</button></div>' +
@@ -955,7 +972,18 @@
           MP.err = msg;
         }
       }
+      await recacheWorker(staffId);
       await refresh();
+    }
+
+    // The record card caches a worker's identity facts (contact, date joined,
+    // overtime flag). After an edit that copy is stale, so drop it — and, when
+    // the card is open, fetch the saved values so the card shows the change.
+    async function recacheWorker(staffId) {
+      delete MP.cardCache[staffId];
+      if (MP.cardOpen !== staffId) return;
+      try { MP.cardCache[staffId] = await Dash.getStaffDetail(staffId); }
+      catch (e) { MP.cardCache[staffId] = {}; }
     }
 
     window.onShellReady = async function () {
@@ -1124,6 +1152,7 @@
               catch (e) { MP.cardCache[staffId] = {}; }
             }
             render();
+            await loadDevices(staffId);              // same as the row click — the phone panel stayed on "Loading…"
             return;
           }
 
