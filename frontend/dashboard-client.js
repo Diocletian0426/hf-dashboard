@@ -9,6 +9,12 @@
    AUTH COMMANDS
    -----------------------------------------------------------------------------
    await Dash.signIn(email, password) -> { ok:true } or { ok:false, message }
+   await Dash.changePassword(current, next)
+                                      -> { ok:true } or { ok:false, reason, message }
+                                         reason: wrong_current | short | weak |
+                                         same | rate_limited | offline | error.
+                                         Signs every OTHER device out; this
+                                         browser stays signed in.
    await Dash.signOut()               -> clears the session, goes to login.html
    await Dash.getUser()               -> the signed-in user or null (no network)
    await Dash.requireLogin()          -> redirects to login.html when signed out
@@ -559,6 +565,62 @@
     return { ok: true };
   }
 
+  // Change the signed-in person's password from inside the dashboard (the
+  // account menu in shell.js). Three steps, in order:
+  //   1. prove the CURRENT password by signing in with it again. Supabase has
+  //      no "check this password" call, and a fresh sign-in is also exactly
+  //      what its optional "secure password change" setting demands, so this
+  //      works whichever way that setting is switched;
+  //   2. save the new one;
+  //   3. sign out every OTHER device (scope "others"): a lost phone cannot
+  //      renew its session once the password is changed at the office. It
+  //      keeps working only until its current access token runs out (the
+  //      Supabase JWT, up to an hour) — not instantly, so the card says
+  //      "will need to sign in again". THIS browser keeps its session (the
+  //      owner chose "stay signed in").
+  // Why ask for the current password at all: sessions never expire on their
+  // own (only the idle timer signs people out), so an unattended laptop must
+  // not let a passer-by lock the real user out.
+  // Returns { ok:true } or { ok:false, reason, message }; reason is one of
+  //   wrong_current | short | weak | same | rate_limited | offline | error
+  // and message is Supabase's own wording, for a fallback the caller may show.
+  async function changePassword(currentPassword, newPassword) {
+    var user = await getUser();
+    if (!user || !user.email) return { ok: false, reason: "error", message: "Not signed in." };
+
+    var check = await sb.auth.signInWithPassword({ email: user.email, password: currentPassword });
+    if (check.error) {
+      return { ok: false, reason: passwordErrorReason(check.error, true), message: check.error.message };
+    }
+
+    var res = await sb.auth.updateUser({ password: newPassword });
+    if (res.error) {
+      return { ok: false, reason: passwordErrorReason(res.error, false), message: res.error.message };
+    }
+
+    // Best effort: if this call fails the password is still changed, and the
+    // other devices simply keep working until their own session ends.
+    try { await sb.auth.signOut({ scope: "others" }); } catch (e) { /* see above */ }
+    return { ok: true };
+  }
+
+  // Supabase's auth errors carry a short code (err.code) on current builds and
+  // only a sentence on older ones. Test both, code first.
+  function passwordErrorReason(err, checkingCurrent) {
+    var code = (err && err.code) || "";
+    var msg  = String((err && err.message) || "");
+    if (code === "invalid_credentials" || /invalid login credentials/i.test(msg)) {
+      return checkingCurrent ? "wrong_current" : "error";
+    }
+    if (code === "same_password" || /different from the old|same as the old/i.test(msg)) return "same";
+    if (/should be at least|too short/i.test(msg)) return "short";
+    // "weak_password" also covers the leaked-password (HaveIBeenPwned) check
+    if (code === "weak_password" || /weak|easy to guess|pwned|leaked/i.test(msg)) return "weak";
+    if (code === "over_request_rate_limit" || /rate limit|too many|for security purposes/i.test(msg)) return "rate_limited";
+    if ((err && err.status === 0) || /failed to fetch|network|load failed/i.test(msg)) return "offline";
+    return "error";
+  }
+
   // the directory the app is served from — "/" locally, "/hf-dashboard/" on Pages
   function basePath() {
     var p = window.location.pathname;
@@ -840,25 +902,12 @@
   }
 
   // ---- forgotten punch-outs (0084) ---------------------------------------
-  // A shift the worker never closed. The office attests the real knock-off
-  // time; it is recorded as 'office_closed' with who entered it — visibly an
-  // attestation, never disguised as a GPS punch. Today's shifts can't be
-  // closed (the worker may simply still be on site).
+  // Shifts a worker never closed, from finished days. The list only: since
+  // 0088 the system closes them at 06:05 the next morning, and the office
+  // sets the real knock-off time through setDayCorrection (0090) like any
+  // other wrong day. closeShift / reopenShift were retired with DB 0113.
   function getOpenShifts() {
     return q(sb.rpc("get_open_shifts"));
-  }
-
-  function closeShift(staffId, workDate, outAtISO, note) {
-    return q(sb.rpc("close_shift", {
-      p_staff_id: staffId, p_work_date: workDate,
-      p_out_at: outAtISO, p_note: note || null
-    }));
-  }
-
-  // Retracts an office attestation entered by mistake. Refuses anything else —
-  // a worker's real punch can never be deleted through this.
-  function reopenShift(punchId) {
-    return q(sb.rpc("reopen_shift", { p_punch_id: punchId }));
   }
 
   // ---- office corrections to a day's hours (0090–0092) --------------------
@@ -1320,7 +1369,9 @@
       p_date_joined: o.dateJoined || null,
       p_contact_number: o.contactNumber || null,
       p_country_origin: o.countryOrigin || null,
-      p_allow_duplicate: !!o.allowDuplicate
+      p_allow_duplicate: !!o.allowDuplicate,
+      // DB 0106: true / false sets "paid overtime"; anything else leaves it as it is
+      p_ot_eligible: typeof o.otEligible === "boolean" ? o.otEligible : null
     }));
   }
 
@@ -1692,6 +1743,7 @@
     signInWithProvider: signInWithProvider,
     resetPassword: resetPassword,
     updatePassword: updatePassword,
+    changePassword: changePassword,
     recoveryPending: recoveryPending,
     linkError: linkError,
     signOutQuiet: signOutQuiet,
@@ -1722,8 +1774,6 @@
     getShifts: getShifts,
     getShiftsRange: getShiftsRange,
     getOpenShifts: getOpenShifts,
-    closeShift: closeShift,
-    reopenShift: reopenShift,
     setDayCorrection: setDayCorrection,
     clearDayCorrection: clearDayCorrection,
     getSitesMissingGeofence: getSitesMissingGeofence,

@@ -8,7 +8,7 @@
    What gets injected:
      .rail    — fixed left column: brand, the primary links, sign out
      .topbar  — to the rail's right: burger (phones), global site search,
-                account menu
+                account menu (name, job, Change Password, Sign Out)
      .ctxbar  — ONLY on project-scoped pages (project/piles/claims):
                 "Projects › [project switcher]  Hub | Piles | Claims"
 
@@ -418,6 +418,124 @@
     setInterval(check, 1000);
   }
 
+  /* ---- change password ----
+     Account menu -> "Change Password". It lives in the shell so every page has
+     it, including attendance.html (owned by the attendance collaborator and
+     never edited here). Dash.changePassword() does the work and classifies
+     any failure; this only draws the card and words the outcome.
+     Same small-card pattern as the idle box above. */
+
+  var PW_WORDS = {
+    wrong_current: "Current password is incorrect.",
+    short:         "That password is too short.",
+    weak:          "That password is too easy to guess. Choose another.",
+    same:          "The new password must be different from the current one.",
+    rate_limited:  "Too many attempts. Wait a minute and try again.",
+    offline:       "Could not reach the server. Check your connection and try again.",
+    error:         "Could not change the password. Please try again."
+  };
+
+  function openPasswordBox() {
+    if (document.getElementById("pw-box")) return;             // already open
+    var box = document.createElement("div");
+    box.className = "modal-back";
+    box.id = "pw-box";
+    box.innerHTML =
+      '<form class="modal-card pw-card" role="dialog" aria-modal="true" aria-labelledby="pw-title" novalidate>' +
+        '<h3 id="pw-title">Change Password</h3>' +
+        '<label>Current Password' +
+          '<input type="password" id="pw-cur" autocomplete="current-password" required></label>' +
+        '<label>New Password' +
+          '<input type="password" id="pw-new" autocomplete="new-password" required></label>' +
+        '<label>Confirm New Password' +
+          '<input type="password" id="pw-again" autocomplete="new-password" required></label>' +
+        '<div class="pw-row">' +
+          '<span>At least 8 characters.</span>' +
+          '<button type="button" class="auth-link" id="pw-peek" aria-pressed="false">Show Passwords</button>' +
+        "</div>" +
+        '<div id="pw-msg" class="auth-msg" role="status" aria-live="polite"></div>' +
+        '<div class="modal-actions">' +
+          '<button type="button" class="btn-plain" id="pw-cancel">Cancel</button>' +
+          '<button type="submit" id="pw-save">Save</button>' +
+        "</div>" +
+      "</form>";
+    document.body.appendChild(box);
+
+    var form  = box.querySelector("form");
+    var cur   = box.querySelector("#pw-cur");
+    var nw    = box.querySelector("#pw-new");
+    var again = box.querySelector("#pw-again");
+    var msg   = box.querySelector("#pw-msg");
+    var save  = box.querySelector("#pw-save");
+    var busy  = false;
+
+    function say(text, kind) {
+      msg.textContent = text || "";
+      msg.className = "auth-msg" + (kind ? " " + kind : "");
+    }
+    function bad(field, text) {
+      field.setAttribute("aria-invalid", "true");
+      field.focus();
+      say(text, "bad");
+    }
+    function close() {
+      document.removeEventListener("keydown", onKey);
+      box.remove();
+    }
+    // Escape closes, but never mid-save: the password may already be changing.
+    function onKey(ev) { if (ev.key === "Escape" && !busy) close(); }
+    document.addEventListener("keydown", onKey);
+
+    box.querySelector("#pw-cancel").addEventListener("click", function () { if (!busy) close(); });
+
+    box.querySelector("#pw-peek").addEventListener("click", function () {
+      var showing = cur.type === "text";
+      cur.type = nw.type = again.type = showing ? "password" : "text";
+      this.textContent = showing ? "Show Passwords" : "Hide Passwords";
+      this.setAttribute("aria-pressed", String(!showing));
+    });
+
+    form.addEventListener("submit", async function (ev) {
+      ev.preventDefault();
+      if (busy) return;
+      say("");
+      cur.removeAttribute("aria-invalid"); nw.removeAttribute("aria-invalid"); again.removeAttribute("aria-invalid");
+
+      // Local checks first: no round trip for the obvious mistakes. The 8 is
+      // the same rule login.html and reset.html state.
+      if (!cur.value)               { bad(cur,   "Enter your current password."); return; }
+      if (nw.value.length < 8)      { bad(nw,    "Use at least 8 characters."); return; }
+      if (nw.value === cur.value)   { bad(nw,    PW_WORDS.same); return; }
+      if (nw.value !== again.value) { bad(again, "The two passwords do not match."); return; }
+
+      busy = true; save.disabled = true; save.textContent = "Saving…";
+      var res;
+      try { res = await Dash.changePassword(cur.value, nw.value); }
+      catch (e) { res = { ok: false, reason: "offline" }; }
+
+      if (!res.ok) {
+        busy = false; save.disabled = false; save.textContent = "Save";
+        bad(res.reason === "wrong_current" ? cur : nw, PW_WORDS[res.reason] || PW_WORDS.error);
+        return;
+      }
+
+      // Done. Say so in the same card; the note matters because someone's
+      // phone will ask for the password again. "Will need to", not "have
+      // been": their sessions are revoked now, but each device keeps working
+      // until its access token runs out (up to an hour).
+      busy = false;
+      form.innerHTML =
+        '<h3 id="pw-title">Password Updated</h3>' +
+        '<p class="modal-note">Other devices will need to sign in again.</p>' +
+        '<div class="modal-actions"><button type="button" id="pw-done">Done</button></div>';
+      var done = form.querySelector("#pw-done");
+      done.addEventListener("click", close);
+      done.focus();
+    });
+
+    cur.focus();
+  }
+
   /* ---- boot ---- */
 
   async function boot() {
@@ -521,6 +639,7 @@
               '<div class="user-pop">' +
                 '<div class="user-name">' + escText(fullName) + "</div>" +
                 '<div class="user-desig">' + escText(desig) + "</div>" +
+                '<button type="button" class="btn-menu pw-btn">Change Password</button>' +
                 '<button type="button" class="btn-plain signout-btn">Sign Out</button>' +
               "</div>" +
             "</details>" +
@@ -538,6 +657,16 @@
       var outs = nav.querySelectorAll(".signout-btn");
       for (var i = 0; i < outs.length; i++) {
         outs[i].addEventListener("click", function () { Dash.signOut(); });
+      }
+
+      // change password (account menu): close the menu, open the card
+      var pwBtn = nav.querySelector(".pw-btn");
+      if (pwBtn) {
+        pwBtn.addEventListener("click", function () {
+          var menu = nav.querySelector("details.user-menu[open]");
+          if (menu) menu.removeAttribute("open");
+          openPasswordBox();
+        });
       }
 
       // burger slides the rail in on phones
