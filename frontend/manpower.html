@@ -406,6 +406,10 @@
         '<label>date joined <input type="date" id="ew-joined" value="' + esc(d.date_joined || "") + '"></label>' +
         '<label>contact <input type="text" id="ew-contact" size="12" value="' + esc(d.contact_number || "") + '"></label>' +
         '<label>origin <input type="text" id="ew-origin" size="12" list="country-list" value="' + esc(d.country_origin || "") + '"></label>' +
+        // Paid overtime? (DB 0106) From the salary listing's OT column. Unticked =
+        // every worked minute is a normal minute; the Attendance page then shows
+        // no Over Time for this worker, whatever the hours.
+        '<label class="ew-check"><input type="checkbox" id="ew-ot"' + (d.ot_eligible === false ? "" : " checked") + '> paid overtime</label>' +
         (d.whatsapp_name
           ? '<span class="muted-line">WhatsApp: ' + escHtml(d.whatsapp_name) + " (bot match key — not editable here)</span>"
           : "") +
@@ -522,6 +526,7 @@
       if (d.contact_number) chips.push("Contact " + escHtml(d.contact_number));
       if (d.country_origin) chips.push("Origin " + escHtml(d.country_origin));
       if (d.whatsapp_name) chips.push("WhatsApp " + escHtml(d.whatsapp_name));
+      if (d.ot_eligible === false) chips.push("No Overtime");     // DB 0106: hours count, never at 1.5x
 
       var head =
         '<div class="pc-head"><strong>' + escHtml(r.full_name) + "</strong> " +
@@ -819,6 +824,10 @@
     function renderMoveLog() {
       if (!MP.canMove) return;                      // office-only history
       var el = document.getElementById("movelog");
+      // the panel is rebuilt after every save; keep it open if it was open
+      // (it used to snap shut, losing the office's place after each edit)
+      var prev = el.querySelector("details");
+      var wasOpen = !!(prev && prev.open);
       try {
         var log = (MP.translog || []).slice(0, 50); // panel shows the newest 50
         var rows = log.map(function (t) {
@@ -839,7 +848,7 @@
                  "</span></td></tr>";
         }).join("");
         el.innerHTML =
-          '<details class="zone"><summary><span class="zone-name">Recent moves</span>' +
+          '<details class="zone"' + (wasOpen ? " open" : "") + '><summary><span class="zone-name">Recent moves</span>' +
           '<span class="zone-count">' + log.length + " logged · dates = when it happened</span></summary>" +
           '<div class="claim-actions" style="padding:6px 0 0">' +
           '<button type="button" data-action="th-add">Add past move…</button></div>' +
@@ -917,7 +926,8 @@
         employeeCode: document.getElementById("ew-code").value || null,
         dateJoined: document.getElementById("ew-joined").value || null,
         contactNumber: document.getElementById("ew-contact").value || null,
-        countryOrigin: document.getElementById("ew-origin").value || null
+        countryOrigin: document.getElementById("ew-origin").value || null,
+        otEligible: document.getElementById("ew-ot").checked
       };
       try {
         var r = await Dash.updateStaff(staffId, payload);
@@ -939,7 +949,18 @@
           MP.err = msg;
         }
       }
+      await recacheWorker(staffId);
       await refresh();
+    }
+
+    // The record card caches a worker's identity facts (contact, date joined,
+    // overtime flag). After an edit that copy is stale, so drop it — and, when
+    // the card is open, fetch the saved values so the card shows the change.
+    async function recacheWorker(staffId) {
+      delete MP.cardCache[staffId];
+      if (MP.cardOpen !== staffId) return;
+      try { MP.cardCache[staffId] = await Dash.getStaffDetail(staffId); }
+      catch (e) { MP.cardCache[staffId] = {}; }
     }
 
     window.onShellReady = async function () {
@@ -1128,6 +1149,7 @@
               catch (e) { MP.cardCache[staffId] = {}; }
             }
             render();
+            await loadDevices(staffId);              // same as the row click — the phone panel stayed on "Loading…"
             return;
           }
 
