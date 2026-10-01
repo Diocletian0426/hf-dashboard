@@ -62,6 +62,7 @@
    await Dash.getLeaveRequests(year, status?)     -> leave requests ('pending' default, 'all', ...)
    await Dash.getAttendanceRequests(opts?)        -> { ok, requests, counts } missed-shift / change-times asks
    await Dash.reviewAttendanceRequest(id, decision, note?) -> { ok, status, message } | { ok:false, code, message }
+   await Dash.revokeAttendanceRequest(id, note)   -> undo an approval (turns Rejected); same result shape
    await Dash.getTests(showAll?)                  -> pile test tracker (hides completed/passed
                                                      unless showAll is true)
    await Dash.getTestTypes()                      -> test type directory (CSL/MLT/PDA/PIT:
@@ -1002,6 +1003,16 @@
     }));
   }
 
+  // Undo an APPROVED request: it turns Rejected and the approval is withdrawn.
+  // The note (why) is required. Same shape: { ok:true, status, message } or
+  // { ok:false, code, message } — not_approved, note_required,
+  // punches_changed, not_found — as data, not a thrown error.
+  function revokeAttendanceRequest(requestId, note) {
+    return q(sb.rpc("revoke_attendance_request", {
+      p_request_id: requestId, p_note: note || null
+    }));
+  }
+
   function getTests(showAll) {
     var b = sb.from("v_test_tracker").select("*");
     if (!showAll) b = b.not("status", "in", '("completed","passed")');
@@ -1810,6 +1821,7 @@
     getLeaveRequests: getLeaveRequests,
     getAttendanceRequests: getAttendanceRequests,
     reviewAttendanceRequest: reviewAttendanceRequest,
+    revokeAttendanceRequest: revokeAttendanceRequest,
     getTests: getTests,
     getTestTypes: getTestTypes,
     getProjectTestSpecs: getProjectTestSpecs,

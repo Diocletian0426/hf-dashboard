@@ -13,7 +13,9 @@
 // IT WRITES NOTHING. Approve / Reject change the in-memory list for this page
 // load only — no database call is made while this is on. Approving Captain
 // America's missed shift is scripted to be REFUSED the way the database would
-// (overlaps_existing_shift), so the error path can be seen too.
+// (overlaps_existing_shift), so the error path can be seen too; so is undoing
+// Hawkeye's approval (punches_changed). Undo on any other approved row flips
+// it to Rejected, again in memory only.
 //
 // Names are the Avengers test crew (the convention attendance-demo.js and the
 // real test rows use), so a demo row can never be mistaken for a real worker.
@@ -173,6 +175,30 @@
              message: decision === "rejected" ? "Request rejected."
                     : r.type === "missed_shift" ? "Approved — the In and Out punches were added for " + r.full_name + "."
                     : "Approved — the new times now stand for " + r.full_name + "'s shift." };
+  };
+
+  // Undo an approval: flips the row to Rejected, in memory only. Hawkeye's
+  // approval is scripted to be refused (punches_changed) so that path shows.
+  Dash.revokeAttendanceRequest = async function (id, note) {
+    await wait(350);
+    if (!Dash.can("attendance.edit"))
+      return { ok: false, code: "forbidden", message: "Your account may not undo attendance approvals." };
+    var r = ROWS.filter(function (x) { return x.request_id === id; })[0];
+    if (!r) return { ok: false, code: "not_found", message: "That request no longer exists." };
+    if (r.status !== "approved")
+      return { ok: false, code: "not_approved", message: "Only an approved request can be undone — this one is " +
+               r.status + "." };
+    if (!note || !String(note).trim())
+      return { ok: false, code: "note_required", message: "Say why the approval is withdrawn." };
+    if (id === "demo-r6")
+      return { ok: false, code: "punches_changed",
+               message: "Hawkeye (demo)'s shift has been changed since this was approved, so the approval cannot " +
+                        "be undone here. Correct the day on the Attendance page instead." };
+    r.status = "rejected";
+    r.note = String(note).trim();
+    r.reviewed_at = new Date().toISOString();
+    r.reviewed_by_name = FURY;
+    return { ok: true, status: "rejected", message: "Approval withdrawn — " + r.full_name + "'s request is now rejected." };
   };
 
   // a banner, so nobody mistakes this screen for the real one

@@ -69,9 +69,10 @@
            Change Times — fix the In and/or Out of one finished shift (a blank
                           end = keep it). Approving writes the office ruling the
                           pay figures follow.
-         Reading needs attendance.view; Approve / Reject need attendance.edit,
-         and the database re-checks both (get_attendance_requests /
-         review_attendance_request). Times are the RPC's *_local strings —
+         Reading needs attendance.view; Approve / Reject — and Undo on an
+         approved row, which turns it Rejected — need attendance.edit, and the
+         database re-checks all of it (get_attendance_requests /
+         review_attendance_request / revoke_attendance_request). Times are the RPC's *_local strings —
          Malaysia time, shown as given; this page never works out hours. -->
     <h1>Attendance Requests</h1>
     <p class="page-caption" id="rq-sub">
@@ -221,8 +222,15 @@
     }
 
     function actionsCell(r) {
-      if (r.status !== "pending") return '<td class="rq-act-cell"></td>';
       var c = R.confirm && R.confirm.id === r.request_id ? R.confirm.decision : "";
+      // an approval can be withdrawn (revoke_attendance_request) — it turns Rejected
+      if (r.status === "approved") {
+        return '<td class="rq-act-cell"><div class="rq-acts">' +
+                 '<button type="button" class="btn" data-act="revoke" data-id="' + esc(r.request_id) +
+                   '" aria-pressed="' + (c === "revoke") + '" title="Withdraw this approval">Undo</button>' +
+               "</div></td>";
+      }
+      if (r.status !== "pending") return '<td class="rq-act-cell"></td>';
       return '<td class="rq-act-cell"><div class="rq-acts">' +
                '<button type="button" class="btn rq-approve" data-act="approved" data-id="' + esc(r.request_id) +
                  '" aria-pressed="' + (c === "approved") + '">Approve</button>' +
@@ -233,30 +241,36 @@
 
     // the small inline confirm under the row — not a modal
     function confirmRow(r) {
-      var c = R.confirm, approve = c.decision === "approved";
+      var c = R.confirm, approve = c.decision === "approved", revoke = c.decision === "revoke";
+      var verb = approve ? "Approve" : revoke ? "Undo the approval of" : "Reject";
       var who = escHtml(r.full_name || "this worker");
       var when = r.work_date ? escHtml(weekday(r.work_date) + " " + UI.dstr(r.work_date)) : "that day";
       var what;
       if (r.type === "missed_shift") {
-        what = (approve ? "Approve" : "Reject") + " the missed shift for <b>" + who + "</b> on " + when +
+        what = verb + " the missed shift for <b>" + who + "</b> on " + when +
                " — In " + escHtml(r.requested_in_local || "—") + ", Out " + escHtml(r.requested_out_local || "—") + "?";
       } else {
-        what = (approve ? "Approve" : "Reject") + " the time change for <b>" + who + "</b>" +
+        what = verb + " the time change for <b>" + who + "</b>" +
                (r.shift_no ? ", Shift " + escHtml(r.shift_no) : "") + " on " + when + "?";
       }
-      var hint = !approve ? "Nothing changes on the attendance record."
+      var hint = revoke ? "The request turns Rejected and what the approval wrote is withdrawn."
+               : !approve ? "Nothing changes on the attendance record."
                : r.type === "missed_shift" ? "Approving adds these In and Out punches for that day."
                : "Approving sets these times for the shift — the pay figures follow them.";
       return '<tr class="rq-confirm-row"><td colspan="' + colCount() + '">' +
-        '<div class="rq-confirm" role="group" aria-label="Confirm ' + (approve ? "approval" : "rejection") + '">' +
+        '<div class="rq-confirm" role="group" aria-label="Confirm ' +
+          (approve ? "approval" : revoke ? "undo of the approval" : "rejection") + '">' +
           '<p class="rq-confirm-q">' + what + "</p>" +
           '<p class="muted">' + hint + "</p>" +
-          "<label>" + (approve ? "Note (optional)" : "Reason for rejecting (required)") +
+          "<label>" + (approve ? "Note (optional)" : revoke ? "Why the approval is withdrawn (required)"
+                                                             : "Reason for rejecting (required)") +
             '<input type="text" id="rq-note" maxlength="500" autocomplete="off" value="' + esc(c.note) + '"' +
             (c.invalid ? ' aria-invalid="true"' : "") + (c.busy ? " disabled" : "") +
-            ' placeholder="' + (approve ? "e.g. supervisor confirmed" : "e.g. no work recorded that day") + '"></label>' +
+            ' placeholder="' + (approve ? "e.g. supervisor confirmed" : revoke ? "e.g. approved by mistake"
+                                : "e.g. no work recorded that day") + '"></label>' +
           '<button type="button" class="btn ' + (approve ? "btn-primary" : "btn-danger") + '" data-act="confirm"' +
-            (c.busy ? " disabled" : "") + ">" + (c.busy ? "Saving…" : approve ? "Approve" : "Reject") + "</button>" +
+            (c.busy ? " disabled" : "") + ">" +
+            (c.busy ? "Saving…" : approve ? "Approve" : revoke ? "Undo Approval" : "Reject") + "</button>" +
           '<button type="button" class="btn" data-act="cancel"' + (c.busy ? " disabled" : "") + ">Cancel</button>" +
           '<div class="rq-confirm-err" role="alert">' + escHtml(c.err || "") + "</div>" +
         "</div></td></tr>";
@@ -441,7 +455,8 @@
       R.counts = Array.isArray(res) ? null : (res.counts || null);
       if (R.confirm) {
         var still = byId(R.confirm.id);
-        if (!still || still.status !== "pending") R.confirm = null;
+        // an open confirm only survives while its row is still where it was
+        if (!still || still.status !== (R.confirm.decision === "revoke" ? "approved" : "pending")) R.confirm = null;
       }
       fillSites();
       render();
@@ -469,9 +484,11 @@
       var c = R.confirm;
       if (!c || c.busy) return;
       var note = String(c.note || "").trim();
-      if (c.decision === "rejected" && !note) {
+      var revoke = c.decision === "revoke";
+      if ((c.decision === "rejected" || revoke) && !note) {
         c.invalid = true;
-        c.err = "Write a short reason — it is required to reject a request.";
+        c.err = revoke ? "Write why the approval is withdrawn — it is required to undo an approval."
+                       : "Write a short reason — it is required to reject a request.";
         renderRows(); focusNote();
         return;
       }
@@ -480,7 +497,8 @@
 
       var res;
       try {
-        res = await Dash.reviewAttendanceRequest(c.id, c.decision, note || null);
+        res = revoke ? await Dash.revokeAttendanceRequest(c.id, note)
+                     : await Dash.reviewAttendanceRequest(c.id, c.decision, note || null);
       } catch (e) {
         c.busy = false;
         c.err = (e && e.message) || String(e);
@@ -492,7 +510,7 @@
       if (!res || res.ok === false) {
         var msg = (res && (res.message || res.code)) || "The server did not answer.";
         // the request moved on under us — say so up top and show where it is now
-        if (res && (res.code === "already_reviewed" || res.code === "not_found")) {
+        if (res && (res.code === "already_reviewed" || res.code === "not_found" || res.code === "not_approved")) {
           R.confirm = null; R.err = msg; R.ok = "";
           await load(true);
           return;
@@ -503,7 +521,8 @@
       }
 
       R.confirm = null; R.err = "";
-      R.ok = res.message || (c.decision === "approved" ? "Request approved." : "Request rejected.");
+      R.ok = res.message || (c.decision === "approved" ? "Request approved."
+                           : revoke ? "Approval withdrawn — the request is now rejected." : "Request rejected.");
       await load(true);
     }
 
@@ -584,7 +603,7 @@
           var b = ev.target.closest("button[data-act]");
           if (!b || b.disabled) return;
           var act = b.getAttribute("data-act");
-          if (act === "approved" || act === "rejected") openConfirm(b.getAttribute("data-id"), act);
+          if (act === "approved" || act === "rejected" || act === "revoke") openConfirm(b.getAttribute("data-id"), act);
           else if (act === "cancel") { R.confirm = null; renderRows(); }
           else if (act === "confirm") submitConfirm();
         });
@@ -592,8 +611,10 @@
           if (ev.target.id !== "rq-note" || !R.confirm) return;
           R.confirm.note = ev.target.value;
           if (R.confirm.invalid && ev.target.value.trim()) {
-            R.confirm.invalid = false;
+            R.confirm.invalid = false; R.confirm.err = "";
             ev.target.removeAttribute("aria-invalid");
+            var errEl = document.querySelector(".rq-confirm-err");
+            if (errEl) errEl.textContent = "";             // the "required" line no longer applies
           }
         });
         tbody.addEventListener("keydown", function (ev) {
