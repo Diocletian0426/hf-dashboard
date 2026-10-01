@@ -54,6 +54,7 @@ Note the repo itself is public (free-plan requirement for Pages).
 | `machines.html` | Machine fleet + servicing + moves |
 | `manpower.html` | Site manpower roster + moves |
 | `attendance.html` | Punch attendance — **owned by the attendance collaborator, do not edit** (see `docs/ATTENDANCE-HANDOFF.md`) |
+| `requests.html` | Attendance Requests — office approves/rejects the punch app's Missed Shift + Change Times asks (`?demo=1` = invented data, no login, writes nothing) |
 | `tests.html` | Cross-project test chasing queue (deliberately thin — locked decision) |
 
 ## Shared architecture

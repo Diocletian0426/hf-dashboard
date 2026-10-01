@@ -60,6 +60,8 @@
    await Dash.getRecentPunches(dateYYYYMMDD, projectId?, limit?) -> raw punch list
    await Dash.getLeaveBalances(year)              -> per-worker leave balance rows
    await Dash.getLeaveRequests(year, status?)     -> leave requests ('pending' default, 'all', ...)
+   await Dash.getAttendanceRequests(opts?)        -> { ok, requests, counts } missed-shift / change-times asks
+   await Dash.reviewAttendanceRequest(id, decision, note?) -> { ok, status, message } | { ok:false, code, message }
    await Dash.getTests(showAll?)                  -> pile test tracker (hides completed/passed
                                                      unless showAll is true)
    await Dash.getTestTypes()                      -> test type directory (CSL/MLT/PDA/PIT:
@@ -975,6 +977,31 @@
     }));
   }
 
+  // ---- worker requests: missed shifts + time changes (requests.html) -------
+  // A worker asks from the punch app; the office rules on the dashboard. One
+  // call returns the rows (newest first) AND the pending/approved/rejected
+  // counts. opts: { status, projectId, from, to, limit } — status null or
+  // "all" = every status. The *_local fields are Malaysia time, ready to show.
+  function getAttendanceRequests(opts) {
+    opts = opts || {};
+    return q(sb.rpc("get_attendance_requests", {
+      p_status: (opts.status && opts.status !== "all") ? opts.status : null,
+      p_project_id: opts.projectId || null,
+      p_from: opts.from || null,
+      p_to: opts.to || null,
+      p_limit: opts.limit || 300
+    }));
+  }
+
+  // decision: 'approved' | 'rejected'. A refusal (already reviewed, overlaps
+  // an existing shift, …) comes back as DATA — { ok:false, code, message } —
+  // not as a thrown error, so the caller shows the message as it is.
+  function reviewAttendanceRequest(requestId, decision, note) {
+    return q(sb.rpc("review_attendance_request", {
+      p_request_id: requestId, p_decision: decision, p_note: note || null
+    }));
+  }
+
   function getTests(showAll) {
     var b = sb.from("v_test_tracker").select("*");
     if (!showAll) b = b.not("status", "in", '("completed","passed")');
@@ -1781,6 +1808,8 @@
     getRecentPunches: getRecentPunches,
     getLeaveBalances: getLeaveBalances,
     getLeaveRequests: getLeaveRequests,
+    getAttendanceRequests: getAttendanceRequests,
+    reviewAttendanceRequest: reviewAttendanceRequest,
     getTests: getTests,
     getTestTypes: getTestTypes,
     getProjectTestSpecs: getProjectTestSpecs,

@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nexus — Attendance Requests</title>
+  <link rel="stylesheet" href="styles.css" />
+  <!-- Page-only bits, tokens only. Kept here rather than in styles.css so this
+       page ships as one new file; fold into styles.css §7 when convenient. -->
+  <style>
+    .tbl-requests td { vertical-align: top; }
+    .tbl-requests th, .tbl-requests td { padding-left: 12px; padding-right: 12px; }
+    .rq-ask .chip { margin-bottom: 4px; }
+    .rq-sub { display: block; margin-top: 2px; color: var(--ink-3); font-size: var(--fs-xs); font-weight: 400; }
+    .rq-type-change { background: #ede9fe; color: #6d28d9; }
+    .rq-shift { font-size: var(--fs-xs); font-weight: 600; color: var(--ink-2); margin-bottom: 2px; }
+    .rq-line { white-space: nowrap; font-variant-numeric: tabular-nums; line-height: 1.7; }
+    .rq-k { display: inline-block; min-width: 30px; text-align: left; color: var(--ink-3);
+            font-size: var(--fs-xs); font-weight: 600; }
+    @media (min-width: 761px) {
+      .tbl-requests td:nth-child(1) { min-width: 130px; }
+      .tbl-requests td:nth-child(2) { min-width: 110px; }
+      .tbl-requests td:nth-child(6) { min-width: 150px; }       /* status + who reviewed + note */
+    }
+    .rq-was { color: var(--ink-3); text-decoration: line-through; }
+    .rq-arrow { color: var(--ink-3); padding: 0 3px; }
+    .rq-same { color: var(--ink-3); }
+    .rq-same i { font-size: var(--fs-xs); }
+    .rq-reason { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 170px; max-width: 280px; }
+    .rq-note { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 240px; margin-top: 4px;
+               color: var(--ink-2); font-size: var(--fs-xs); }
+    .rq-note b { font-weight: 600; }
+    .rq-acts { display: flex; flex-direction: column; gap: 6px; }
+    .rq-acts .btn.rq-approve { color: var(--ok-ink); }
+    .rq-acts .btn.rq-approve:hover { background: var(--ok-soft); border-color: #bbf7d0; color: var(--ok-ink); }
+    .rq-acts .btn[aria-pressed="true"] { background: var(--charcoal); border-color: var(--charcoal); color: #fff; }
+    tr.rq-open > td, tr.rq-confirm-row > td { background: var(--brand-soft); }
+    tr.rq-confirm-row > td { white-space: normal; padding-top: 4px; }
+    .rq-confirm { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--sp-3); }
+    .rq-confirm-q { flex: 1 1 100%; margin: 0; color: var(--ink); font-size: var(--fs-md); }
+    .rq-confirm-q + .muted { flex: 1 1 100%; margin: -6px 0 0; }
+    .rq-confirm label { display: flex; flex-direction: column; gap: 4px; flex: 1 1 320px;
+                        font-size: var(--fs-xs); font-weight: 600; color: var(--ink-2); }
+    .rq-confirm input[type="text"] { font-family: var(--font); font-size: 13.5px; color: var(--ink);
+                        padding: 8px 12px; border: 1px solid var(--line-strong);
+                        border-radius: var(--r-sm); background: var(--surface-solid); }
+    .rq-confirm input[aria-invalid="true"] { border-color: var(--danger); }
+    .rq-confirm-err { flex: 1 1 100%; color: var(--danger-ink); font-size: var(--fs-sm); white-space: pre-wrap; }
+    .rq-confirm-err:empty { display: none; }
+    .rq-foot { margin: var(--sp-3) 0 0; }
+    @media (max-width: 760px) {
+      .rq-reason, .rq-note { min-width: 0; max-width: none; text-align: left; }
+      .rq-k { min-width: 0; margin: 0 5px 0 8px; }
+      .rq-acts { flex-direction: row; }
+      .rq-acts .btn { flex: 1; min-height: var(--tap); }
+      .table-stack tr.rq-confirm-row > td { display: block; text-align: left; }
+    }
+  </style>
+</head>
+<body>
+
+  <header id="nav"></header>
+
+  <main id="main">
+    <!-- ================= ATTENDANCE REQUESTS (office side) ==================
+         The punch app lets a worker ask for two things; the office rules here.
+           Missed Shift — worked a past day but never punched: asks for an In
+                          and an Out. Approving creates those punches.
+           Change Times — fix the In and/or Out of one finished shift (a blank
+                          end = keep it). Approving writes the office ruling the
+                          pay figures follow.
+         Reading needs attendance.view; Approve / Reject need attendance.edit,
+         and the database re-checks both (get_attendance_requests /
+         review_attendance_request). Times are the RPC's *_local strings —
+         Malaysia time, shown as given; this page never works out hours. -->
+    <h1>Attendance Requests</h1>
+    <p class="page-caption" id="rq-sub">
+      Workers ask from the punch app when a day went wrong.
+      <b>Missed Shift</b>: they worked but never punched — approving adds the In and Out punches.
+      <b>Change Times</b>: fix the In and/or Out of one finished shift — approving sets the times
+      the pay figures follow. Reasons are shown exactly as the worker wrote them.
+    </p>
+
+    <div id="error"></div>
+    <!-- the counts ARE the status filter, same as the Issues page cards -->
+    <div class="istats" id="rq-stats"></div>
+
+    <div class="mp-controls" id="rq-controls">
+      <span>Show:
+        <button type="button" data-status="pending" class="active">Pending</button>
+        <button type="button" data-status="approved">Approved</button>
+        <button type="button" data-status="rejected">Rejected</button>
+        <button type="button" data-status="all">All</button>
+      </span>
+      <span>Site: <select id="f-site" aria-label="Site"><option value="">All Sites</option></select></span>
+      <span>From <input type="date" id="f-from" aria-label="From date">
+            to <input type="date" id="f-to" aria-label="To date"></span>
+      <span class="tool-search">
+        <svg class="ric" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="11" cy="11" r="6.5"/><path d="M15.8 15.8 20.5 20.5"/>
+        </svg>
+        <input type="search" id="f-text" placeholder="Search worker name or code…"
+               aria-label="Search by worker name or code" />
+        <span class="muted" id="f-count"></span>
+      </span>
+    </div>
+
+    <div class="table-wrap table-stack tbl-requests">
+      <table>
+        <thead id="rq-head"></thead>
+        <tbody id="rq-rows"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
+      </table>
+    </div>
+    <p class="muted rq-foot" id="rq-foot"></p>
+  </main>
+
+  <script src="vendor/supabase.js"></script>
+  <script src="config.js"></script>
+  <script src="dashboard-client.js"></script>
+  <script src="ui.js"></script>
+  <!-- DEV ONLY: does nothing unless the URL has ?demo=1, and never writes.
+       Must sit BEFORE shell.js (it stands in for the sign-in the shell asks
+       for). Delete this line + requests-demo.js before the pilot starts. -->
+  <script src="requests-demo.js"></script>
+  <script src="shell.js"></script>
+
+  <script>
+    var esc = UI.esc, escHtml = UI.escHtml;
+
+    var LIMIT = 300;
+    var STATUSES = ["pending", "approved", "rejected"];
+    var TYPE_LABEL = { missed_shift: "Missed Shift", change_times: "Change Times" };
+
+    var R = {
+      rows: [], counts: null, projects: [],
+      canEdit: false, loading: true, loadErr: "",
+      status: "pending", project: "", from: "", to: "", q: "",
+      confirm: null,          // { id, decision, note, err, busy, invalid } — the open inline confirm
+      ok: "", err: ""         // the result banner of the last approve / reject
+    };
+
+    /* ---------------------------- small helpers ---------------------------- */
+
+    function addDays(iso, n) {
+      var d = new Date(iso + "T00:00:00Z");
+      d.setUTCDate(d.getUTCDate() + n);
+      return d.toISOString().slice(0, 10);
+    }
+    function weekday(iso) {
+      return new Date(iso + "T00:00:00").toLocaleDateString("en-MY", { weekday: "short" });
+    }
+    // "3 h ago" — the exact KL time sits under it
+    function ago(ts) {
+      var t = new Date(ts).getTime();
+      if (!ts || isNaN(t)) return "";
+      var m = Math.floor(Math.max(0, Date.now() - t) / 60000);
+      if (m < 1) return "just now";
+      if (m < 60) return m + " min ago";
+      var h = Math.floor(m / 60);
+      if (h < 24) return h + " h ago";
+      var d = Math.floor(h / 24);
+      if (d === 1) return "yesterday";
+      if (d < 31) return d + " days ago";
+      var mo = Math.floor(d / 30);
+      return mo + (mo === 1 ? " month ago" : " months ago");
+    }
+    function isMissingFunction(e) {
+      var code = (e && e.code) || "";
+      return code === "PGRST202" || /could not find the function/i.test(String((e && e.message) || ""));
+    }
+    function typeLabel(t) { return TYPE_LABEL[t] || UI.label(t); }
+    function byId(id) { return R.rows.filter(function (r) { return r.request_id === id; })[0]; }
+    function colCount() { return R.canEdit ? 8 : 7; }
+
+    /* ----------------------------- the cells ------------------------------- */
+
+    function typeChip(r) {
+      return '<span class="chip ' + (r.type === "change_times" ? "rq-type-change" : "chip-tag") + '">' +
+             escHtml(typeLabel(r.type)) + "</span>";
+    }
+
+    // Missed Shift: In → Out. Change Times: Shift N, then each end as
+    // original → requested, or dimmed "unchanged" when the worker left it.
+    function askedFor(r) {
+      if (r.type === "missed_shift") {
+        return '<div class="rq-line"><span class="rq-k">In</span>' + escHtml(r.requested_in_local || "—") +
+               '<span class="rq-arrow">→</span><span class="rq-k">Out</span>' +
+               escHtml(r.requested_out_local || "—") + "</div>";
+      }
+      function end(label, orig, want) {
+        if (!want || want === orig) {
+          return '<div class="rq-line rq-same"><span class="rq-k">' + label + "</span>" +
+                 escHtml(orig || "—") + " <i>unchanged</i></div>";
+        }
+        return '<div class="rq-line"><span class="rq-k">' + label + "</span>" +
+               '<span class="rq-was">' + escHtml(orig || "—") + "</span>" +
+               '<span class="rq-arrow">→</span><b>' + escHtml(want) + "</b></div>";
+      }
+      return "<div>" +
+               (r.shift_no ? '<div class="rq-shift">Shift ' + escHtml(r.shift_no) + "</div>" : "") +
+               end("In", r.original_in_local, r.requested_in_local) +
+               end("Out", r.original_out_local, r.requested_out_local) +
+             "</div>";
+    }
+
+    function statusCell(r) {
+      var h = UI.badge(r.status);
+      var reviewed = r.status !== "pending";
+      if (reviewed && (r.reviewed_by_name || r.reviewed_at)) {
+        h += '<span class="rq-sub">' +
+               (r.reviewed_by_name ? "by " + escHtml(r.reviewed_by_name) : "") +
+               (r.reviewed_by_name && r.reviewed_at ? " · " : "") +
+               (r.reviewed_at ? escHtml(Dash.klDateTime(r.reviewed_at)) : "") +
+             "</span>";
+      }
+      if (r.note) {
+        h += '<div class="rq-note"><b>' + (reviewed ? "Office note:" : "Note:") + "</b> " + escHtml(r.note) + "</div>";
+      }
+      return "<div>" + h + "</div>";
+    }
+
+    function actionsCell(r) {
+      if (r.status !== "pending") return '<td class="rq-act-cell"></td>';
+      var c = R.confirm && R.confirm.id === r.request_id ? R.confirm.decision : "";
+      return '<td class="rq-act-cell"><div class="rq-acts">' +
+               '<button type="button" class="btn rq-approve" data-act="approved" data-id="' + esc(r.request_id) +
+                 '" aria-pressed="' + (c === "approved") + '">Approve</button>' +
+               '<button type="button" class="btn btn-danger" data-act="rejected" data-id="' + esc(r.request_id) +
+                 '" aria-pressed="' + (c === "rejected") + '">Reject</button>' +
+             "</div></td>";
+    }
+
+    // the small inline confirm under the row — not a modal
+    function confirmRow(r) {
+      var c = R.confirm, approve = c.decision === "approved";
+      var who = escHtml(r.full_name || "this worker");
+      var when = r.work_date ? escHtml(weekday(r.work_date) + " " + UI.dstr(r.work_date)) : "that day";
+      var what;
+      if (r.type === "missed_shift") {
+        what = (approve ? "Approve" : "Reject") + " the missed shift for <b>" + who + "</b> on " + when +
+               " — In " + escHtml(r.requested_in_local || "—") + ", Out " + escHtml(r.requested_out_local || "—") + "?";
+      } else {
+        what = (approve ? "Approve" : "Reject") + " the time change for <b>" + who + "</b>" +
+               (r.shift_no ? ", Shift " + escHtml(r.shift_no) : "") + " on " + when + "?";
+      }
+      var hint = !approve ? "Nothing changes on the attendance record."
+               : r.type === "missed_shift" ? "Approving adds these In and Out punches for that day."
+               : "Approving sets these times for the shift — the pay figures follow them.";
+      return '<tr class="rq-confirm-row"><td colspan="' + colCount() + '">' +
+        '<div class="rq-confirm" role="group" aria-label="Confirm ' + (approve ? "approval" : "rejection") + '">' +
+          '<p class="rq-confirm-q">' + what + "</p>" +
+          '<p class="muted">' + hint + "</p>" +
+          "<label>" + (approve ? "Note (optional)" : "Reason for rejecting (required)") +
+            '<input type="text" id="rq-note" maxlength="500" autocomplete="off" value="' + esc(c.note) + '"' +
+            (c.invalid ? ' aria-invalid="true"' : "") + (c.busy ? " disabled" : "") +
+            ' placeholder="' + (approve ? "e.g. supervisor confirmed" : "e.g. no work recorded that day") + '"></label>' +
+          '<button type="button" class="btn ' + (approve ? "btn-primary" : "btn-danger") + '" data-act="confirm"' +
+            (c.busy ? " disabled" : "") + ">" + (c.busy ? "Saving…" : approve ? "Approve" : "Reject") + "</button>" +
+          '<button type="button" class="btn" data-act="cancel"' + (c.busy ? " disabled" : "") + ">Cancel</button>" +
+          '<div class="rq-confirm-err" role="alert">' + escHtml(c.err || "") + "</div>" +
+        "</div></td></tr>";
+    }
+
+    function rowHtml(r) {
+      var open = R.confirm && R.confirm.id === r.request_id;
+      var asked = r.created_at
+        ? "<div>" + escHtml(ago(r.created_at)) + '<span class="rq-sub">' +
+          escHtml(Dash.klDateTime(r.created_at)) + "</span></div>"
+        : "";
+      return '<tr class="rq-row' + (open ? " rq-open" : "") + '" data-id="' + esc(r.request_id) + '">' +
+          UI.td("Worker", "<div><b>" + escHtml(r.full_name || "—") + "</b>" +
+            (r.employee_code ? '<span class="rq-sub">' + escHtml(r.employee_code) + "</span>" : "") + "</div>", "wrap") +
+          UI.td("Site", escHtml(r.project_name || ""), "wrap") +
+          UI.td("Date", r.work_date
+            ? "<div>" + escHtml(UI.dstr(r.work_date)) + '<span class="rq-sub">' + escHtml(weekday(r.work_date)) + "</span></div>"
+            : "") +
+          // the type chip heads its own "asked for" — one column fewer, so the
+          // reviewed rows' status + note still fit beside it on a laptop
+          UI.td("Asked For", '<div class="rq-ask">' + typeChip(r) + askedFor(r) + "</div>") +
+          UI.td("Reason", r.reason
+            ? '<div class="rq-reason">' + escHtml(r.reason) + "</div>"
+            : '<span class="muted">No reason given</span>', "wrap") +
+          UI.td("Status", statusCell(r), "wrap") +
+          UI.td("Asked On", asked) +
+          (R.canEdit ? actionsCell(r) : "") +
+        "</tr>" +
+        (open ? confirmRow(r) : "");
+    }
+
+    /* ------------------------------- render -------------------------------- */
+
+    function visibleRows() {
+      var q = R.q.trim().toLowerCase();
+      return R.rows.filter(function (r) {
+        if (R.status !== "all" && r.status !== R.status) return false;
+        if (q && (String(r.full_name || "") + " " + String(r.employee_code || ""))
+                   .toLowerCase().indexOf(q) === -1) return false;
+        return true;
+      });
+    }
+
+    function countOf(s) {
+      if (R.counts && R.counts[s] !== undefined && R.counts[s] !== null) return Number(R.counts[s]);
+      return R.rows.filter(function (r) { return r.status === s; }).length;
+    }
+
+    function renderStats() {
+      var cards = [
+        { key: "pending",  label: "Pending",  sub: "Waiting for the office", icon: "clock", tone: "warn" },
+        { key: "approved", label: "Approved", sub: "In these dates",         icon: "check", tone: "ok" },
+        { key: "rejected", label: "Rejected", sub: "In these dates",         icon: "alert", tone: "bad" }
+      ];
+      document.getElementById("rq-stats").innerHTML = cards.map(function (c) {
+        var on = R.status === c.key;
+        return '<button type="button" class="istat tone-' + c.tone + (on ? " on" : "") +
+                 '" data-card="' + c.key + '" aria-pressed="' + on + '">' +
+                 '<span class="istat-ic">' + UI.icon(c.icon) + "</span>" +
+                 '<span class="istat-body">' +
+                   '<span class="istat-top"><b>' + (R.loading || R.loadErr ? "–" : countOf(c.key)) +
+                     "</b><i>" + escHtml(c.label) + "</i></span>" +
+                   '<span class="istat-sub">' + escHtml(c.sub) + "</span>" +
+                 "</span>" +
+               "</button>";
+      }).join("");
+      var btns = document.querySelectorAll("#rq-controls button[data-status]");
+      for (var i = 0; i < btns.length; i++) {
+        btns[i].classList.toggle("active", btns[i].getAttribute("data-status") === R.status);
+      }
+    }
+
+    function renderBanner() {
+      var h = "";
+      if (R.loadErr === "missing") {
+        h = '<div class="banner banner-amber">Attendance requests are not switched on in the database yet. ' +
+            "This page fills in once that update is applied.</div>";
+      } else if (R.loadErr) {
+        h = UI.errorBanner(R.loadErr);
+      }
+      if (R.err) h += '<div class="banner banner-red">' + escHtml(R.err) + "</div>";
+      if (R.ok) h += UI.okBanner(R.ok);
+      document.getElementById("error").innerHTML = h;
+    }
+
+    function renderRows() {
+      var tbody = document.getElementById("rq-rows");
+      var n = colCount();
+      var rows = visibleRows();
+      var count = document.getElementById("f-count");
+      var foot = document.getElementById("rq-foot");
+
+      if (R.loading) {
+        tbody.innerHTML = UI.loadingRow(n);
+        count.textContent = ""; foot.textContent = "";
+        return;
+      }
+      count.textContent = R.q.trim() ? rows.length + " shown" : "";
+      foot.textContent = R.rows.length >= LIMIT
+        ? "Showing the newest " + LIMIT + " requests in these dates — narrow the dates or pick a site to see the rest."
+        : "";
+
+      if (R.loadErr) { tbody.innerHTML = UI.emptyRow(n, "Nothing to show."); return; }
+      if (!rows.length) {
+        var msg;
+        if (R.q.trim()) msg = "No request from a worker matching “" + R.q.trim() + "”.";
+        else if (R.status === "pending") msg = "No requests waiting for the office in these dates. " +
+          "When a worker asks for a missed shift or a time change, it appears here.";
+        else if (R.status === "all") msg = "No requests in these dates.";
+        else msg = "No " + UI.label(R.status).toLowerCase() + " requests in these dates.";
+        tbody.innerHTML = UI.emptyRow(n, msg);
+        return;
+      }
+      tbody.innerHTML = rows.map(rowHtml).join("");
+    }
+
+    function render() { renderStats(); renderBanner(); renderRows(); }
+
+    function renderHead() {
+      document.getElementById("rq-head").innerHTML =
+        "<tr><th>Worker</th><th>Site</th><th>Date</th><th>Asked For</th>" +
+        "<th>Reason</th><th>Status</th><th>Asked On</th>" + (R.canEdit ? "<th></th>" : "") + "</tr>";
+    }
+
+    // Site dropdown: the engine's project directory (active first), plus any
+    // site a request names that the directory did not return.
+    function fillSites() {
+      var sel = document.getElementById("f-site");
+      var seen = {}, opts = [];
+      R.projects.slice().sort(function (a, b) {
+        var aa = a.status === "active" ? 0 : 1, bb = b.status === "active" ? 0 : 1;
+        if (aa !== bb) return aa - bb;
+        return String(a.project_code || "").localeCompare(String(b.project_code || ""));
+      }).forEach(function (p) {
+        if (!p.project_id || seen[p.project_id]) return;
+        seen[p.project_id] = true;
+        var label = (p.project_code ? p.project_code + " — " : "") + (p.project_name || "");
+        if (p.status && p.status !== "active") label += " (" + UI.label(p.status) + ")";
+        opts.push([p.project_id, label]);
+      });
+      R.rows.forEach(function (r) {
+        if (!r.project_id || seen[r.project_id]) return;
+        seen[r.project_id] = true;
+        opts.push([r.project_id, r.project_name || "Unnamed site"]);
+      });
+      sel.innerHTML = '<option value="">All Sites</option>' + opts.map(function (o) {
+        return '<option value="' + esc(o[0]) + '"' + (o[0] === R.project ? " selected" : "") + ">" +
+               escHtml(o[1]) + "</option>";
+      }).join("");
+    }
+
+    /* --------------------------- data + actions ---------------------------- */
+
+    var loadSeq = 0;
+    // quiet = keep the current rows on screen while refreshing (after a save)
+    async function load(quiet) {
+      var my = ++loadSeq;
+      if (!quiet) { R.loading = true; render(); }
+      var res;
+      try {
+        res = await Dash.getAttendanceRequests({
+          status: null,                  // every status: the cards count all three
+          projectId: R.project || null, from: R.from || null, to: R.to || null, limit: LIMIT
+        });
+      } catch (e) {
+        if (my !== loadSeq) return;
+        R.loading = false; R.rows = []; R.counts = null;
+        R.loadErr = isMissingFunction(e) ? "missing" : ((e && e.message) || String(e));
+        render();
+        return;
+      }
+      if (my !== loadSeq) return;        // a newer filter change already asked
+      R.loading = false;
+      if (!res || res.ok === false) {
+        R.rows = []; R.counts = null;
+        R.loadErr = (res && (res.message || res.code)) || "The server did not answer.";
+        render();
+        return;
+      }
+      R.loadErr = "";
+      R.rows = Array.isArray(res) ? res : (res.requests || []);
+      R.counts = Array.isArray(res) ? null : (res.counts || null);
+      if (R.confirm) {
+        var still = byId(R.confirm.id);
+        if (!still || still.status !== "pending") R.confirm = null;
+      }
+      fillSites();
+      render();
+    }
+
+    function focusNote() {
+      var el = document.getElementById("rq-note");
+      if (el) el.focus();
+    }
+
+    function openConfirm(id, decision) {
+      if (R.confirm && R.confirm.busy) return;
+      if (R.confirm && R.confirm.id === id && R.confirm.decision === decision) {
+        R.confirm = null;                // pressing the same button again closes it
+      } else {
+        var keep = R.confirm && R.confirm.id === id ? R.confirm.note : "";
+        R.confirm = { id: id, decision: decision, note: keep, err: "", busy: false, invalid: false };
+      }
+      R.ok = ""; R.err = "";
+      renderBanner(); renderRows();
+      focusNote();
+    }
+
+    async function submitConfirm() {
+      var c = R.confirm;
+      if (!c || c.busy) return;
+      var note = String(c.note || "").trim();
+      if (c.decision === "rejected" && !note) {
+        c.invalid = true;
+        c.err = "Write a short reason — it is required to reject a request.";
+        renderRows(); focusNote();
+        return;
+      }
+      c.busy = true; c.err = ""; c.invalid = false;
+      renderRows();
+
+      var res;
+      try {
+        res = await Dash.reviewAttendanceRequest(c.id, c.decision, note || null);
+      } catch (e) {
+        c.busy = false;
+        c.err = (e && e.message) || String(e);
+        renderRows(); focusNote();
+        return;
+      }
+      c.busy = false;
+
+      if (!res || res.ok === false) {
+        var msg = (res && (res.message || res.code)) || "The server did not answer.";
+        // the request moved on under us — say so up top and show where it is now
+        if (res && (res.code === "already_reviewed" || res.code === "not_found")) {
+          R.confirm = null; R.err = msg; R.ok = "";
+          await load(true);
+          return;
+        }
+        c.err = msg;                     // verbatim, kept beside the form it belongs to
+        renderRows(); focusNote();
+        return;
+      }
+
+      R.confirm = null; R.err = "";
+      R.ok = res.message || (c.decision === "approved" ? "Request approved." : "Request rejected.");
+      await load(true);
+    }
+
+    /* -------------------------------- boot --------------------------------- */
+
+    window.onShellReady = async function () {
+      try {
+        R.canEdit = Dash.can("attendance.edit");
+        var today = Dash.todayKL();
+        R.to = today;
+        R.from = addDays(today, -30);                  // the last 31 days, today included
+
+        // deep links: requests.html?status=all&project=<uuid>&from=…&to=…
+        var p = new URLSearchParams(location.search);
+        var st = p.get("status");
+        if (st && (st === "all" || STATUSES.indexOf(st) !== -1)) R.status = st;
+        if (p.get("project")) R.project = p.get("project");
+        if (/^\d{4}-\d{2}-\d{2}$/.test(p.get("from") || "")) R.from = p.get("from");
+        if (/^\d{4}-\d{2}-\d{2}$/.test(p.get("to") || "")) R.to = p.get("to");
+
+        var fFrom = document.getElementById("f-from"), fTo = document.getElementById("f-to");
+        fFrom.value = R.from; fTo.value = R.to;
+        fFrom.max = today; fTo.max = today;
+
+        if (!R.canEdit) {
+          document.getElementById("rq-sub").insertAdjacentHTML("beforeend",
+            '<br><span class="muted">View only — approving and rejecting needs the Attendance edit permission.</span>');
+        }
+        renderHead();
+
+        // the site list is a nice-to-have: a failure leaves the sites the
+        // requests themselves name
+        Dash.getProjectDirectory().then(function (rows) {
+          R.projects = rows || [];
+          fillSites();
+        }).catch(function () { /* keep the request-derived list */ });
+
+        document.getElementById("rq-stats").addEventListener("click", function (ev) {
+          var b = ev.target.closest("button[data-card]");
+          if (!b) return;
+          var k = b.getAttribute("data-card");
+          R.status = R.status === k ? "all" : k;        // pressing the lit card again shows all
+          renderStats(); renderRows();
+        });
+
+        document.getElementById("rq-controls").addEventListener("click", function (ev) {
+          var b = ev.target.closest("button[data-status]");
+          if (!b) return;
+          R.status = b.getAttribute("data-status");
+          renderStats(); renderRows();
+        });
+
+        document.getElementById("f-site").addEventListener("change", function () {
+          R.project = this.value; R.ok = ""; R.err = "";
+          load();
+        });
+
+        function onDates(ev) {
+          var f = fFrom.value, t = fTo.value;
+          if (!f || !t) return;                          // half-typed: wait
+          if (f > t) {                                   // keep the range the right way round
+            if (ev.target === fFrom) fTo.value = t = f; else fFrom.value = f = t;
+          }
+          if (f === R.from && t === R.to) return;
+          R.from = f; R.to = t; R.ok = ""; R.err = "";
+          load();
+        }
+        fFrom.addEventListener("change", onDates);
+        fTo.addEventListener("change", onDates);
+
+        document.getElementById("f-text").addEventListener("input", function () {
+          R.q = this.value;
+          renderRows();
+        });
+
+        var tbody = document.getElementById("rq-rows");
+        tbody.addEventListener("click", function (ev) {
+          var b = ev.target.closest("button[data-act]");
+          if (!b || b.disabled) return;
+          var act = b.getAttribute("data-act");
+          if (act === "approved" || act === "rejected") openConfirm(b.getAttribute("data-id"), act);
+          else if (act === "cancel") { R.confirm = null; renderRows(); }
+          else if (act === "confirm") submitConfirm();
+        });
+        tbody.addEventListener("input", function (ev) {
+          if (ev.target.id !== "rq-note" || !R.confirm) return;
+          R.confirm.note = ev.target.value;
+          if (R.confirm.invalid && ev.target.value.trim()) {
+            R.confirm.invalid = false;
+            ev.target.removeAttribute("aria-invalid");
+          }
+        });
+        tbody.addEventListener("keydown", function (ev) {
+          if (ev.target.id !== "rq-note") return;
+          if (ev.key === "Enter") { ev.preventDefault(); submitConfirm(); }
+        });
+        document.addEventListener("keydown", function (ev) {
+          if (ev.key === "Escape" && R.confirm && !R.confirm.busy) { R.confirm = null; renderRows(); }
+        });
+
+        await load();
+      } catch (e) {
+        document.getElementById("rq-rows").innerHTML = "";
+        document.getElementById("error").innerHTML = UI.errorBanner((e && e.message) || String(e));
+      }
+    };
+  </script>
+</body>
+</html>

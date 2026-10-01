@@ -48,7 +48,10 @@
                 '<circle cx="17.2" cy="9" r="2.2"/><path d="M17.2 13.4c2.3 0 4.2 1.9 4.2 4.2"/>',
     attendance: '<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 9.5h17"/>' +
                 '<path d="M8 3.5v3M16 3.5v3"/><path d="M8.8 14.6l2 2 3.6-3.8"/>',
-    tests:      '<path d="M9.5 3.5v6.2L4.7 18a1.6 1.6 0 0 0 1.4 2.5h11.8a1.6 1.6 0 0 0 1.4-2.5l-4.8-8.3V3.5"/>' +
+    // a clipboard — a worker's written ask, waiting for the office's ruling
+    requests:   '<rect x="5" y="4.5" width="14" height="16" rx="2"/><path d="M9 4.5V3h6v1.5"/>' +
+                '<path d="M8.5 10h7M8.5 13.5h7M8.5 17h4"/>',
+    tests:     '<path d="M9.5 3.5v6.2L4.7 18a1.6 1.6 0 0 0 1.4 2.5h11.8a1.6 1.6 0 0 0 1.4-2.5l-4.8-8.3V3.5"/>' +
                 '<path d="M8.6 3.5h6.8"/><path d="M7.6 14.5h8.8"/>',
     // a core sample with its strata lines — the bore log itself
     borelogs:   '<rect x="7" y="3.5" width="10" height="17" rx="2"/>' +
@@ -77,6 +80,9 @@
     { href: "delivery-status.html", label: "Delivery Status", icon: "delivery"   },
     { href: "manpower.html",        label: "Manpower",        icon: "manpower"   },
     { href: "attendance.html",      label: "Attendance",      icon: "attendance" },
+    // the office's half of the punch app's missed-shift / change-times asks;
+    // its own page because attendance.html is not ours to edit
+    { href: "requests.html",        label: "Requests",        icon: "requests"   },
     // leave.html stays in PAGE_ACCESS but is out of the nav until the page
     // is actually built (owner decision — leave UI deferred)
     { href: "tests.html",           label: "Tests",           icon: "tests"      },
@@ -111,6 +117,7 @@
     "delivery-status.html": "deliveries.view",
     "manpower.html":   "manpower.view",
     "attendance.html": "attendance.view",
+    "requests.html":   "attendance.view",  // approve/reject buttons need attendance.edit
     "tests.html":      "tests.view",
     "bore-logs.html":  "bore_logs.view",  // inbox + the review screen (?id=…)
     "claims.html":     "claims.view",     // MONEY — the DB re-checks every call too
