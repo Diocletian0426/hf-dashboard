@@ -2367,8 +2367,9 @@ summary.zone-rich::before { float: left; margin: 4px 8px 0 0; }
 /* ---- people and drivers on the map (index.html §2b) ----
    Workers stand ABOVE their site's dot — the label owns the space beside it —
    one figure per company, with a count once there is a crowd. Drivers are a
-   lorry on a straight line between two sites, the stripe and the line in that
-   driver's own colour. Two blues for the payrolls and a fixed palette for the
+   lorry parked on the dot of the site they last punched in at, a straight line
+   between each pair of stops, the stripe and the line in that driver's own
+   colour. Two blues for the payrolls and a fixed palette for the
    drivers, on purpose: red, amber and green mean report freshness on this map
    and nothing else may borrow them. Hover gives the names; a click falls
    through to the map, so the pins stay the only thing that opens a popup. */
@@ -2403,6 +2404,17 @@ summary.zone-rich::before { float: left; margin: 4px 8px 0 0; }
 .truck-cab    { fill: #2b3550; }
 .truck-glass  { fill: #cfe0f5; }
 .truck-wheel  { fill: var(--charcoal); stroke: #fff; stroke-width: 0.9; }
+/* punched out today: the same lorry, muted, its stripe kept so it still
+   matches its route */
+.truck-mk.off .truck { opacity: 0.55; }
+/* no punch today: an outline on his assigned site, grey stripe — present on
+   the books, not on the road */
+.truck-mk.idle .truck { opacity: 0.45; }
+.truck-mk.idle .truck-box,
+.truck-mk.idle .truck-cab   { fill: #fff; stroke: #2b3550; stroke-width: 1.1; stroke-dasharray: 2 1.4; }
+.truck-mk.idle .truck-glass { fill: none; }
+.truck-mk.idle .truck-stripe { fill: #9aa3b2; }
+.truck-mk.idle .truck-wheel { fill: #fff; stroke: var(--charcoal); }
 .map-legend .lg-ic { display: inline-flex; align-items: center; font-style: normal; }
 .map-legend .pfig-ic svg { width: 7px; height: 14px; }
 .map-legend .truck-ic svg { display: block; width: 22px; height: 12.5px; }
