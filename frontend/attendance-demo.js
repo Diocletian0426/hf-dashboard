@@ -201,6 +201,15 @@
     shiftsOn(date, projectId || null).forEach(function (r) { out = out.concat(punchesFor(r)); });
     return out.sort(function (a, b) { return a.punched_at < b.punched_at ? 1 : -1; });  // newest first, as the real one does
   };
+  // 0124 (15 Oct review): the payroll-close read the Download Excel panel asks —
+  // two unpriced days this month, so the tick shows
+  Dash.getUnpricedDays = async function (from, to) {
+    var m = String(from || Dash.todayKL()).slice(0, 7);
+    return [
+      { staff_id: "demo-Hulk (demo)", employee_code: "", full_name: "Hulk (demo)", company_code: "HF-BP", work_date: m + "-12", why: "open" },
+      { staff_id: "demo-Thor (demo)", employee_code: "", full_name: "Thor (demo)", company_code: "HF-BP", work_date: m + "-19", why: "overlong" }
+    ].filter(function (u) { return (!from || u.work_date >= from) && (!to || u.work_date <= to); });
+  };
   Dash.getSitesMissingGeofence = async function () {
     return [{ project_name: SITES[1].name, active_workers_assigned: 3 }];
   };

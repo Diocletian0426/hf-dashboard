@@ -43,6 +43,10 @@
     .ex-confirm input[aria-invalid="true"] { border-color: var(--danger); }
     .ex-confirm-err { flex: 1 1 100%; color: var(--danger-ink); font-size: var(--fs-sm); white-space: pre-wrap; }
     .ex-confirm-err:empty { display: none; }
+    .ex-reasons { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 100%; }
+    .ex-reasons button { font-family: var(--font); font-size: 12.5px; padding: 6px 12px; border-radius: var(--r-pill);
+                         border: 1px solid var(--line-strong); background: #fff; color: var(--ink); cursor: pointer; }
+    .ex-reasons button:hover { background: var(--surface-2); }
     /* Compare With Crew: the same site, the same day, everyone's taps */
     .ex-crew-head { margin: 0 0 6px; font-size: var(--fs-sm); color: var(--ink-2); }
     .ex-crew-head b { color: var(--ink); }
@@ -88,8 +92,11 @@
                         office accepts it as punched or rules a time.
            early_start  a site worker's start before 06:00: counted from 08:00
                         until the office credits the real punch-in.
-           declared     a finish time the worker typed at an off-site punch-out,
-                        waiting as a Change Times request (approve / reject).
+         A finish time the worker declared is a Change Times request and lives
+         on the Requests page (15 Oct review); a row whose shift has one waiting
+         says Request Pending and holds its accept buttons until it is answered.
+         An early start has two answers: Credit From Punch-In, or Keep From 8 AM
+         (settled, no pay change). Accepting needs a reason on record.
          Compare With Crew = get_daily_shifts(work_date, project_id): the same
          site, the same day, everyone's taps — the supervisor evidence. A true
          night shows the crew ending together; a forgotten punch-out shows one
@@ -104,7 +111,7 @@
     <p class="page-caption" id="ex-sub">
       Shifts the punch system could not settle on its own. Nothing is priced for these
       until the office accepts the shift as punched, rules a time with Correct This Day,
-      or answers the worker's request. Times are Malaysia time.
+      or keeps an early start at 8 AM. Times are Malaysia time.
     </p>
 
     <div id="error"></div>
@@ -113,6 +120,10 @@
 
     <div class="mp-controls" id="ex-controls">
       <span>Site: <select id="f-site" aria-label="Site"><option value="">All Sites</option></select></span>
+      <span>Company: <select id="f-company" aria-label="Company">
+        <option value="">All Companies</option>
+        <option value="HF-BP">HF Bored Piles Malaysia Sdn Bhd</option>
+        <option value="Hai Fu">Hai Fu Sheet Piles Sdn Bhd</option></select></span>
       <span>From <input type="date" id="f-from" aria-label="From date">
             to <input type="date" id="f-to" aria-label="To date"></span>
       <span>
@@ -171,9 +182,10 @@
       { key: "missed",      label: "Punch Out Missing", sub: "HR rules the finish time",        icon: "alert",    tone: "bad"   },
       { key: "long_open",   label: "Open 16 h+",        sub: "Still running, no punch-out",     icon: "clock",    tone: "warn"  },
       { key: "overlong",    label: "Overlong",          sub: "Over 16 h, unpriced until accepted", icon: "clock", tone: "warn"  },
-      { key: "early_start", label: "Early Start",       sub: "Before 6 AM, counted from 8 AM",  icon: "play",     tone: "info"  },
-      { key: "declared",    label: "Declared Time",     sub: "A finish time waiting as a request", icon: "question", tone: "brand" }
+      { key: "early_start", label: "Early Start",       sub: "Before 6 AM, counted from 8 AM",  icon: "play",     tone: "info"  }
     ];
+    // the office answers: the database kind behind each button
+    var KIND_OF = { accept: "long", early: "early", keep: "early_keep" };
     var KIND_LABEL = {};
     KINDS.forEach(function (k) { KIND_LABEL[k.key] = k.label; });
     var WHY_WORDS = { missed: "Punch Out Missing", open: "Still Open", overlong: "Overlong",
@@ -185,7 +197,7 @@
     var X = {
       rows: [], unpriced: null, projects: [],
       canEdit: false, loading: true, loadErr: "", payErr: "",
-      kind: "", project: "", from: "", to: "", q: "",
+      kind: "", project: "", company: "", from: "", to: "", q: "",
       confirm: null,          // { key, act, note, err, busy, invalid } — the open inline confirm
       crew: null,             // { key, date, projectId, staffId } — the open Compare With Crew panel
       crewCache: {},          // "date|projectId" -> rows | { err }
@@ -284,18 +296,20 @@
           why = "Started " + Dash.klTime(r.in_at) + ". " + minsText(uncreditedMins(r)) +
                 " before 8 AM is not credited until accepted.";
           break;
-        case "declared":
-          why = "Worker says the shift finished " + timeWord(r.declared_out_at, r.work_date) + "." +
-                (r.out_at ? " Tapped out " + timeWord(r.out_at, r.work_date) +
-                            (r.off_site_out ? ", away from the site." : ".") : "");
-          break;
         default:
           why = "";
       }
+      // 15 Oct review: a worker's request on the same shift is answered on Requests first
+      var pending = r.request_pending
+        ? '<div class="ex-note"><b>Request Pending:</b> the worker asked for a time change on this shift' +
+          (r.declared_out_at ? " (finished " + escHtml(timeWord(r.declared_out_at, r.work_date)) + ")" : "") +
+          '. Answer it on <a class="section-link" href="requests.html?status=pending">Requests</a> first.</div>'
+        : "";
       return '<div class="ex-ask">' + kindChip(r.kind) +
+             (r.request_pending ? ' <span class="chip ex-kind-declared">Request Pending</span>' : "") +
              (why ? '<div class="ex-why">' + escHtml(why) + "</div>" : "") +
              (r.worker_note ? '<div class="ex-note"><b>Worker’s reason:</b> ' + escHtml(r.worker_note) + "</div>" : "") +
-             "</div>";
+             pending + "</div>";
     }
 
     function actionsCell(r) {
@@ -303,21 +317,25 @@
       var c = X.confirm && X.confirm.key === key ? X.confirm.act : "";
       var crewOn = X.crew && X.crew.key === key;
       var b = "";
-      if (r.kind === "overlong") {
+      // 15 Oct review: a shift with a worker's request waiting is answered on
+      // Requests first; accepting is held until then
+      if (r.request_pending) {
+        b += '<a class="btn" href="requests.html?status=pending">Open Requests</a>';
+      } else if (r.kind === "overlong") {
         b += '<button type="button" class="btn ex-accept" data-act="accept" data-key="' + esc(key) +
              '" aria-pressed="' + (c === "accept") + '">Accept As Punched</button>';
       } else if (r.kind === "early_start") {
         b += '<button type="button" class="btn ex-accept" data-act="early" data-key="' + esc(key) +
-             '" aria-pressed="' + (c === "early") + '">Credit From Punch-In</button>';
-      } else if (r.kind === "declared") {
-        b += '<button type="button" class="btn ex-accept" data-act="approved" data-key="' + esc(key) +
-             '" aria-pressed="' + (c === "approved") + '">Approve</button>' +
-             '<button type="button" class="btn btn-danger" data-act="rejected" data-key="' + esc(key) +
-             '" aria-pressed="' + (c === "rejected") + '">Reject</button>';
+             '" aria-pressed="' + (c === "early") + '">Credit From Punch-In</button>' +
+             '<button type="button" class="btn" data-act="keep" data-key="' + esc(key) +
+             '" aria-pressed="' + (c === "keep") + '">Keep From 8 AM</button>';
       }
       b += '<button type="button" class="btn" data-act="crew" data-key="' + esc(key) +
            '" aria-pressed="' + crewOn + '">Compare With Crew</button>';
-      if (r.kind !== "declared") {
+      // a shift still running today cannot be ruled yet (the database refuses it)
+      if (r.kind === "long_open" && String(r.work_date).slice(0, 10) >= Dash.todayKL()) {
+        b += '<span class="muted">Still Running</span>';
+      } else {
         b += '<a class="btn" href="' + esc(correctHref(r)) + '">Correct This Day</a>';
       }
       return '<td class="ex-act-cell"><div class="ex-acts">' + b + "</div></td>";
@@ -329,38 +347,38 @@
       var who = escHtml(whoWords(r)), when = escHtml(dayWords(r) + shiftWords(r));
       var span = escHtml(Dash.klTime(r.in_at) + " to " + (r.out_at ? timeWord(r.out_at, r.work_date) : "open") +
                          " (" + hoursText(r.hours) + ")");
-      var what, hint, label, placeholder, required = false, danger = false, go;
+      var what, hint, label, placeholder, required = false, go, reasons = null;
+      // one tap is a reason (15 Oct review): what the office checked before accepting
+      var REASONS = ["Crew Finished Together", "Supervisor Confirmed", "Site Record", "Other"];
       if (act === "accept") {
-        what = "Accept <b>" + who + "</b>’s shift on " + when + " as punched — " + span + "?";
-        hint = "The shift is priced exactly as tapped. The punches stay as they are; the acceptance is " +
+        what = "Accept <b>" + who + "</b>\u2019s shift on " + when + " as punched \u2014 " + span + "?";
+        hint = "The shift is priced exactly as tapped. The punches stay as they are; the acceptance and your reason are " +
                "recorded under your name and can be undone.";
-        label = "Note (optional)"; placeholder = "e.g. concreting night, crew ended together"; go = "Accept As Punched";
+        label = "Reason (required)"; placeholder = "pick one above, or write it"; go = "Accept As Punched"; required = true; reasons = REASONS;
       } else if (act === "early") {
-        what = "Count <b>" + who + "</b>’s shift on " + when + " from the real punch-in, " +
+        what = "Count <b>" + who + "</b>\u2019s shift on " + when + " from the real punch-in, " +
                escHtml(Dash.klTime(r.in_at)) + "?";
-        hint = minsText(uncreditedMins(r)) + " more is credited. Site workers normally count from 8 AM; " +
-               "the acceptance is recorded under your name and can be undone.";
-        label = "Note (optional)"; placeholder = "e.g. called in early for the pour"; go = "Credit From Punch-In";
-      } else if (act === "approved") {
-        what = "Approve the finish time <b>" + who + "</b> declared — " +
-               escHtml(timeWord(r.declared_out_at, r.work_date)) + " — for " + when + "?";
-        hint = "Approving sets that Out time for the shift; the pay figures follow it. The tap stays on record.";
-        label = "Note (optional)"; placeholder = "e.g. matches the crew"; go = "Approve";
+        hint = minsText(uncreditedMins(r)) + " more is credited. Site workers normally count from 8 AM; the credit and your " +
+               "reason are recorded under your name and can be undone.";
+        label = "Reason (required)"; placeholder = "pick one above, or write it"; go = "Credit From Punch-In"; required = true; reasons = REASONS;
       } else {
-        what = "Reject the finish time <b>" + who + "</b> declared for " + when + "?";
-        hint = "Nothing changes on the attendance record; the worker reads your reason in the app.";
-        label = "Reason for rejecting (required)"; placeholder = "e.g. crew left at 6 PM, see the site record";
-        required = true; danger = true; go = "Reject";
+        what = "Keep <b>" + who + "</b>\u2019s shift on " + when + " counted from 8 AM?";
+        hint = "The " + minsText(uncreditedMins(r)) + " before 8 AM stay uncredited, as the rule says. The row leaves the queue; " +
+               "this can be undone.";
+        label = "Note (optional)"; placeholder = "e.g. arrived early by choice"; go = "Keep From 8 AM";
       }
       return '<tr class="ex-confirm-row"><td colspan="' + colCount() + '">' +
         '<div class="ex-confirm" role="group" aria-label="Confirm">' +
           '<p class="ex-confirm-q">' + what + "</p>" +
           '<p class="muted">' + escHtml(hint) + "</p>" +
+          (reasons ? '<div class="ex-reasons">' + reasons.map(function (t) {
+              return '<button type="button" data-reason="' + esc(t) + '"' + (c.busy ? " disabled" : "") + ">" + escHtml(t) + "</button>";
+            }).join("") + "</div>" : "") +
           "<label>" + escHtml(label) +
             '<input type="text" id="ex-note" maxlength="500" autocomplete="off" value="' + esc(c.note) + '"' +
             (c.invalid ? ' aria-invalid="true"' : "") + (c.busy ? " disabled" : "") +
             ' placeholder="' + esc(placeholder) + '"' + (required ? ' data-required="1"' : "") + "></label>" +
-          '<button type="button" class="btn ' + (danger ? "btn-danger" : "btn-primary") + '" data-act="confirm"' +
+          '<button type="button" class="btn btn-primary" data-act="confirm"' +
             (c.busy ? " disabled" : "") + ">" + (c.busy ? "Saving…" : escHtml(go)) + "</button>" +
           '<button type="button" class="btn" data-act="cancel"' + (c.busy ? " disabled" : "") + ">Cancel</button>" +
           '<div class="ex-confirm-err" role="alert">' + escHtml(c.err || "") + "</div>" +
@@ -399,6 +417,7 @@
                         : escHtml(timeWord(w.last_out_at, r.work_date));
                 var tags = "";
                 if (missed) tags += ' <span class="chip ex-kind-missed">Punch Out Missing</span>';
+                if (w.flexible_hours) tags += ' <span class="chip badge-gray">Flexible Hours</span>';   // comes and goes at its own times
                 if (w.has_correction) tags += ' <span class="chip badge-gray">Corrected</span>';
                 if (Number(w.shift_count) > 1) tags += ' <span class="chip badge-gray">' + w.shift_count + " Shifts</span>";
                 return '<tr class="' + (w.staff_id === r.staff_id ? "ex-me" : "") + '"><td>' + escHtml(w.full_name || "—") +
@@ -433,6 +452,7 @@
     // site + search narrow the whole page; the kind cards narrow the table
     function matchesFilters(r) {
       if (X.project && r.project_id !== X.project) return false;
+      if (X.company && (r.company_code || "") !== X.company) return false;
       var q = X.q.trim().toLowerCase();
       if (q && (String(r.full_name || "") + " " + String(r.employee_code || "")).toLowerCase().indexOf(q) === -1) return false;
       return true;
@@ -489,7 +509,7 @@
       }
       count.textContent = X.q.trim() ? rows.length + " shown" : "";
       foot.textContent = X.rows.length
-        ? "Off-site punch-outs sort first within a kind. Accepting or ruling a shift takes it off this list."
+        ? "Off-site punch-outs sort first within a kind. Accepting, keeping or ruling a shift takes it off this list; a shift with a worker’s request waiting is answered on Requests first."
         : "";
 
       if (X.loadErr) { tbody.innerHTML = UI.emptyRow(n, "Nothing to show."); return; }
@@ -515,6 +535,7 @@
       }
       if (X.payErr) { tbody.innerHTML = UI.emptyRow(4, "Nothing to show."); sum.textContent = X.payErr; return; }
       var rows = X.unpriced.filter(function (u) {
+        if (X.company && (u.company_code || "") !== X.company) return false;
         var q = X.q.trim().toLowerCase();
         return !q || (String(u.full_name || "") + " " + String(u.employee_code || "")).toLowerCase().indexOf(q) !== -1;
       });
@@ -659,9 +680,9 @@
       var r = byKey(c.key);
       if (!r) { X.confirm = null; renderRows(); return; }
       var note = String(c.note || "").trim();
-      if (c.act === "rejected" && !note) {
+      if ((c.act === "accept" || c.act === "early") && !note) {
         c.invalid = true;
-        c.err = "Write a short reason — it is required to reject a request.";
+        c.err = "Pick a reason or write one — it is required to accept this shift.";
         renderRows(); focusNote();
         return;
       }
@@ -670,12 +691,7 @@
 
       var res;
       try {
-        if (c.act === "accept" || c.act === "early") {
-          res = await Dash.acceptShiftAsPunched(r.staff_id, String(r.work_date).slice(0, 10), r.shift_no,
-                                                c.act === "accept" ? "long" : "early", note || null);
-        } else {
-          res = await Dash.reviewAttendanceRequest(r.request_id, c.act, note || null);
-        }
+        res = await Dash.acceptShiftAsPunched(r.staff_id, String(r.work_date).slice(0, 10), r.shift_no, KIND_OF[c.act], note || null);
       } catch (e) {
         c.busy = false;
         c.err = (e && e.message) || String(e);
@@ -687,8 +703,8 @@
       if (!res || res.ok === false) {
         var msg = (res && (res.message || res.code)) || "The server did not answer.";
         // the shift moved on under us — say so up top and show the list as it is now
-        if (res && (res.code === "already_reviewed" || res.code === "not_found" || res.code === "no_such_shift" ||
-                    res.code === "shift_open" || res.code === "not_overlong" || res.code === "not_early")) {
+        if (res && (res.code === "no_such_shift" || res.code === "shift_open" || res.code === "not_overlong" ||
+                    res.code === "not_early" || res.code === "already_ruled")) {
           X.confirm = null; X.err = msg; X.ok = ""; X.undo = null;
           await load(true);
           return;
@@ -700,14 +716,9 @@
 
       var who = whoWords(r) + ", " + dayWords(r) + shiftWords(r);
       X.confirm = null; X.err = ""; X.undo = null;
-      if (c.act === "accept" || c.act === "early") {
-        X.ok = (c.act === "accept" ? "Accepted as punched — " : "Credited from the punch-in — ") + who +
-               (res.working_minutes != null ? ". The day now prices at " + minsText(res.working_minutes) + "." : ".");
-        X.undo = { staffId: r.staff_id, workDate: String(r.work_date).slice(0, 10), shiftNo: r.shift_no,
-                   kind: c.act === "accept" ? "long" : "early", who: who };
-      } else {
-        X.ok = res.message || (c.act === "approved" ? "Request approved." : "Request rejected.");
-      }
+      X.ok = (c.act === "accept" ? "Accepted as punched — " : c.act === "early" ? "Credited from the punch-in — " : "Kept from 8 AM — ") + who +
+             (c.act !== "keep" && res.working_minutes != null ? ". The day now prices at " + minsText(res.working_minutes) + "." : ".");
+      X.undo = { staffId: r.staff_id, workDate: String(r.work_date).slice(0, 10), shiftNo: r.shift_no, kind: KIND_OF[c.act], who: who };
       await load(true);
     }
 
@@ -741,6 +752,7 @@
         var p = new URLSearchParams(location.search);
         if (p.get("kind") && KIND_LABEL[p.get("kind")]) X.kind = p.get("kind");
         if (p.get("project")) X.project = p.get("project");
+        if (p.get("company") === "HF-BP" || p.get("company") === "Hai Fu") X.company = p.get("company");
         if (/^\d{4}-\d{2}-\d{2}$/.test(p.get("from") || "")) X.from = p.get("from");
         if (/^\d{4}-\d{2}-\d{2}$/.test(p.get("to") || "")) X.to = p.get("to");
 
@@ -790,6 +802,11 @@
           X.project = this.value;
           renderStats(); renderRows();
         });
+        document.getElementById("f-company").addEventListener("change", function () {
+          X.company = this.value; document.getElementById("f-company").value = X.company;
+          renderStats(); renderRows(); renderPay();
+        });
+        if (X.company) document.getElementById("f-company").value = X.company;
 
         function onDates(ev) {
           var f = fFrom.value, t = fTo.value;
@@ -813,10 +830,22 @@
 
         var tbody = document.getElementById("ex-rows");
         tbody.addEventListener("click", function (ev) {
+          // a reason chip fills the note; Other clears it for typing
+          var rb = ev.target.closest("button[data-reason]");
+          if (rb && X.confirm && !X.confirm.busy) {
+            var t = rb.getAttribute("data-reason"), inp = document.getElementById("ex-note");
+            if (inp) {
+              inp.value = t === "Other" ? "" : t; X.confirm.note = inp.value;
+              X.confirm.invalid = false; X.confirm.err = ""; inp.removeAttribute("aria-invalid");
+              var errEl = document.querySelector(".ex-confirm-err"); if (errEl) errEl.textContent = "";
+              inp.focus();
+            }
+            return;
+          }
           var b = ev.target.closest("button[data-act]");
           if (!b || b.disabled) return;
           var act = b.getAttribute("data-act"), key = b.getAttribute("data-key");
-          if (act === "accept" || act === "early" || act === "approved" || act === "rejected") openConfirm(key, act);
+          if (act === "accept" || act === "early" || act === "keep") openConfirm(key, act);
           else if (act === "crew") toggleCrew(key);
           else if (act === "cancel") { X.confirm = null; renderRows(); }
           else if (act === "confirm") submitConfirm();

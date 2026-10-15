@@ -68,7 +68,8 @@
                                                      early_start / declared; null before 0124
    await Dash.getUnpricedDays(from, to)           -> the payroll-close list: worker days with no figure
                                                      or a request waiting; null before 0124
-   await Dash.acceptShiftAsPunched(staffId, date, shiftNo, 'long'|'early', note?)
+   await Dash.acceptShiftAsPunched(staffId, date, shiftNo, 'long'|'early'|'early_keep', note)
+                                                     (note required for long and early)
                                                   -> { ok, mark, working_minutes } or { ok:false, code, message }
    await Dash.clearShiftAcceptance(staffId, date, shiftNo, 'long'|'early') -> undo the acceptance
    await Dash.getTests(showAll?)                  -> pile test tracker (hides completed/passed
@@ -1055,11 +1056,15 @@
   }
 
   // kind 'long'  = accept a shift over 16 h as punched (it prices as tapped);
-  // kind 'early' = credit a site worker's start before 06:00 from the punch-in.
+  // kind 'early' = credit a site worker's start before 06:00 from the punch-in;
+  // kind 'early_keep' = looked at, kept counted from 08:00 (settled, no pay change).
+  // A reason is required for long and early (note_required). Nobody settles
+  // their own shift (self_review; Super Administrator excepted); a shift the
+  // office already ruled answers already_ruled.
   // The punches are untouched: a mark sits beside them (shift_marks) and an
   // audit row names who accepted. Refusals come back as DATA — { ok:false,
   // code, message }: no_such_shift, shift_open, not_overlong, not_early,
-  // flexible_hours, bad_kind. Success: { ok:true, mark, working_minutes } with
+  // flexible_hours, bad_kind, note_required, already_ruled, self_review. Success: { ok:true, mark, working_minutes } with
   // the DAY's priced minutes after the acceptance.
   function acceptShiftAsPunched(staffId, workDate, shiftNo, kind, note) {
     return q(sb.rpc("accept_shift_as_punched", {

@@ -101,7 +101,9 @@
     wd({ who: "wanda",   site: 0, date: day(3), inL: "08:00", outL: "17:30" }),
     // 5 days ago at MCS SIK: one forgotten punch-out — Captain America "ended" at
     // 08:02 next morning while the crew left at 17:30
-    wd({ who: "cap",     site: 1, date: day(5), inL: "08:00", outL: "08:02", outNext: true, kind: "overlong", offSite: true }),
+    // ... and he has asked for a 5:30 PM finish: a Change Times request waiting (Request Pending, accept held)
+    wd({ who: "cap",     site: 1, date: day(5), inL: "08:00", outL: "08:02", outNext: true, kind: "overlong", offSite: true,
+         declaredL: "17:30", reqId: "demo-req-1" }),
     wd({ who: "thor",    site: 1, date: day(5), inL: "07:55", outL: "17:30" }),
     wd({ who: "hawkeye", site: 1, date: day(5), inL: "07:58", outL: "17:32" }),
     wd({ who: "falcon",  site: 1, date: day(5), inL: "08:03", outL: "17:28" }),
@@ -113,10 +115,8 @@
     // 2 days ago at UMECH: Hawkeye was called in at 04:50 for the pour (Early Start)
     wd({ who: "hawkeye", site: 0, date: day(2), inL: "04:50", outL: "17:05", kind: "early_start" }),
     wd({ who: "ironman", site: 0, date: day(2), inL: "07:50", outL: "17:10" }),
-    // 4 days ago at UMECH: Falcon punched out next morning away from the site and
-    // declared he finished at 23:30 — a Change Times request waiting
-    wd({ who: "falcon",  site: 0, date: day(4), inL: "19:00", outL: "09:40", outNext: true, kind: "declared", offSite: true,
-         declaredL: "23:30", reqId: "demo-req-1" }),
+    // 4 days ago at UMECH: a night of 14 h 40 m — under 16 h, nothing to settle
+    wd({ who: "falcon",  site: 0, date: day(4), inL: "19:00", outL: "09:40", outNext: true, offSite: true }),
     wd({ who: "vision",  site: 0, date: day(4), inL: "19:05", outL: "23:25" }),
     wd({ who: "wanda",   site: 0, date: day(4), inL: "19:02", outL: "23:28" })
   ];
@@ -131,6 +131,7 @@
   })();
 
   var ACCEPTED = {};                                   // key -> true after Accept / Credit
+  var KEPT = {};                                       // key -> true after Keep From 8 AM
   var REQUESTS = { "demo-req-1": "pending" };
 
   function key(d) { return d.staff_id + "|" + d.work_date + "|1"; }
@@ -141,18 +142,17 @@
       if (!d._kind) return;
       if (from && d.work_date < from) return;
       if (to && d.work_date > to) return;
-      if ((d._kind === "overlong" || d._kind === "early_start") && ACCEPTED[key(d)]) return;
-      if (d._kind === "declared" && REQUESTS[d._reqId] !== "pending") return;
+      if ((d._kind === "overlong" || d._kind === "early_start") && (ACCEPTED[key(d)] || KEPT[key(d)])) return;
       out.push({
         kind: d._kind, staff_id: d.staff_id, employee_code: d.employee_code, full_name: d.full_name,
         company_code: d.company_code, flexible_hours: d.flexible_hours,
         project_id: d.project_id, project_name: d.project_name, work_date: d.work_date, shift_no: 1,
         in_at: d.first_in_at, out_at: d.last_out_at, hours: hoursBetween(d.first_in_at, d.last_out_at),
         off_site_out: d._offSite, worker_note: d._note,
-        request_id: d._reqId, declared_out_at: d._declared, request_pending: !!d._reqId
+        request_id: d._reqId, declared_out_at: d._declared, request_pending: !!(d._reqId && REQUESTS[d._reqId] === "pending")
       });
     });
-    var order = { missed: 1, long_open: 2, overlong: 3, declared: 4, early_start: 5 };
+    var order = { missed: 1, long_open: 2, overlong: 3, early_start: 4 };
     return out.sort(function (a, b) {
       if (order[a.kind] !== order[b.kind]) return order[a.kind] - order[b.kind];
       if (a.off_site_out !== b.off_site_out) return a.off_site_out ? -1 : 1;
@@ -218,6 +218,9 @@
     await wait(350);
     var d = DAYS.filter(function (x) { return x.staff_id === staffId && x.work_date === workDate; })[0];
     if (!d) return { ok: false, code: "no_such_shift", message: "That shift is not on the record." };
+    if ((kind === "long" || kind === "early") && !(note && String(note).trim()))
+      return { ok: false, code: "note_required", message: "Give the reason for accepting this shift." };
+    if (kind === "early_keep") { KEPT[key(d)] = true; delete ACCEPTED[key(d)]; return { ok: true, mark: "early_start_kept", working_minutes: null }; }
     if (kind === "long" && !d.last_out_at) return { ok: false, code: "shift_open", message: "That shift has no punch-out yet." };
     if (kind === "long" && hoursBetween(d.first_in_at, d.last_out_at) <= 16)
       return { ok: false, code: "not_overlong", message: "That shift is not over 16 hours." };
@@ -227,11 +230,12 @@
     var mins = Math.round(hoursBetween(d.first_in_at, d.last_out_at) * 60) - 90;   // a plain 1.5 h rest, demo only
     return { ok: true, mark: kind === "long" ? "overlong_accepted" : "early_start_accepted", working_minutes: mins };
   };
-  Dash.clearShiftAcceptance = async function (staffId, workDate) {
+  Dash.clearShiftAcceptance = async function (staffId, workDate, shiftNo, kind) {
     await wait(300);
     var d = DAYS.filter(function (x) { return x.staff_id === staffId && x.work_date === workDate; })[0];
-    if (!d || !ACCEPTED[key(d)]) return { ok: false, code: "not_found" };
-    delete ACCEPTED[key(d)];
+    var box = kind === "early_keep" ? KEPT : ACCEPTED;
+    if (!d || !box[key(d)]) return { ok: false, code: "not_found" };
+    delete box[key(d)];
     return { ok: true };
   };
   Dash.reviewAttendanceRequest = async function (id, decision, note) {

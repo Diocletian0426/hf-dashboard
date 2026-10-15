@@ -94,6 +94,11 @@
         <button type="button" data-status="all">All</button>
       </span>
       <span>Site: <select id="f-site" aria-label="Site"><option value="">All Sites</option></select></span>
+      <!-- HF Bored Piles and Hai Fu are paid separately (15 Oct review); hidden until the rows carry a company -->
+      <span id="lbl-company" hidden>Company: <select id="f-company" aria-label="Company">
+        <option value="">All Companies</option>
+        <option value="HF-BP">HF Bored Piles Malaysia Sdn Bhd</option>
+        <option value="Hai Fu">Hai Fu Sheet Piles Sdn Bhd</option></select></span>
       <span>From <input type="date" id="f-from" aria-label="From date">
             to <input type="date" id="f-to" aria-label="To date"></span>
       <span class="tool-search">
@@ -136,7 +141,7 @@
     var R = {
       rows: [], counts: null, projects: [],
       canEdit: false, loading: true, loadErr: "",
-      status: "pending", project: "", from: "", to: "", q: "",
+      status: "pending", project: "", company: "", from: "", to: "", q: "",
       confirm: null,          // { id, decision, note, err, busy, invalid } — the open inline confirm
       ok: "", err: ""         // the result banner of the last approve / reject
     };
@@ -206,7 +211,10 @@
     }
 
     function statusCell(r) {
-      var h = UI.badge(r.status);
+      // an approval taken back is stored as Rejected with a note that starts "Revoked"
+      // (revoke_attendance_request); it reads as what it is until it has a status of its own
+      var withdrawn = r.status === "rejected" && /^Revoked\b/.test(String(r.note || ""));
+      var h = withdrawn ? '<span class="badge badge-rejected">Approval Withdrawn</span>' : UI.badge(r.status);
       var reviewed = r.status !== "pending";
       if (reviewed && (r.reviewed_by_name || r.reviewed_at)) {
         h += '<span class="rq-sub">' +
@@ -284,10 +292,11 @@
         : "";
       return '<tr class="rq-row' + (open ? " rq-open" : "") + '" data-id="' + esc(r.request_id) + '">' +
           UI.td("Worker", "<div><b>" + escHtml(r.full_name || "—") + "</b>" +
-            (r.employee_code ? '<span class="rq-sub">' + escHtml(r.employee_code) + "</span>" : "") + "</div>", "wrap") +
+            ((r.employee_code || r.company_code) ? '<span class="rq-sub">' + escHtml([r.employee_code, r.company_code].filter(Boolean).join(" · ")) + "</span>" : "") + "</div>", "wrap") +
           UI.td("Site", escHtml(r.project_name || ""), "wrap") +
           UI.td("Date", r.work_date
-            ? "<div>" + escHtml(UI.dstr(r.work_date)) + '<span class="rq-sub">' + escHtml(weekday(r.work_date)) + "</span></div>"
+            ? "<div>" + escHtml(UI.dstr(r.work_date)) + '<span class="rq-sub">' + escHtml(weekday(r.work_date)) + "</span>" +
+              (r.outside_dates ? '<span class="rq-sub">Outside These Dates</span>' : "") + "</div>"
             : "") +
           // the type chip heads its own "asked for" — one column fewer, so the
           // reviewed rows' status + note still fit beside it on a laptop
@@ -308,6 +317,7 @@
       var q = R.q.trim().toLowerCase();
       return R.rows.filter(function (r) {
         if (R.status !== "all" && r.status !== R.status) return false;
+        if (R.company && (r.company_code || "") !== R.company) return false;
         if (q && (String(r.full_name || "") + " " + String(r.employee_code || ""))
                    .toLowerCase().indexOf(q) === -1) return false;
         return true;
@@ -315,8 +325,8 @@
     }
 
     function countOf(s) {
-      if (R.counts && R.counts[s] !== undefined && R.counts[s] !== null) return Number(R.counts[s]);
-      return R.rows.filter(function (r) { return r.status === s; }).length;
+      if (!R.company && R.counts && R.counts[s] !== undefined && R.counts[s] !== null) return Number(R.counts[s]);
+      return R.rows.filter(function (r) { return r.status === s && (!R.company || (r.company_code || "") === R.company); }).length;
     }
 
     function renderStats() {
@@ -369,9 +379,9 @@
         return;
       }
       count.textContent = R.q.trim() ? rows.length + " shown" : "";
-      foot.textContent = R.rows.length >= LIMIT
-        ? "Showing the newest " + LIMIT + " requests in these dates — narrow the dates or pick a site to see the rest."
-        : "";
+      foot.textContent = (R.rows.length >= LIMIT
+        ? "Showing the newest " + LIMIT + " requests in these dates — narrow the dates or pick a site to see the rest. "
+        : "") + (R.rows.some(function (r) { return r.outside_dates; }) ? "Pending requests are shown whatever the dates." : "");
 
       if (R.loadErr) { tbody.innerHTML = UI.emptyRow(n, "Nothing to show."); return; }
       if (!rows.length) {
@@ -453,6 +463,22 @@
       R.loadErr = "";
       R.rows = Array.isArray(res) ? res : (res.requests || []);
       R.counts = Array.isArray(res) ? null : (res.counts || null);
+      // 15 Oct review: a pending request must never fall outside the dates on
+      // screen (one did, filed with a September date by mistake). Every pending
+      // request, whatever its date, is fetched as well and merged in; the
+      // Pending count is the whole lot.
+      try {
+        var pend = await Dash.getAttendanceRequests({ status: "pending", projectId: R.project || null, from: null, to: null, limit: LIMIT });
+        if (my !== loadSeq) return;
+        var seen = {}; R.rows.forEach(function (r) { seen[r.request_id] = true; });
+        ((pend && (Array.isArray(pend) ? pend : pend.requests)) || []).forEach(function (r) {
+          if (seen[r.request_id]) return;
+          r.outside_dates = true; R.rows.push(r);
+        });
+        R.counts = R.counts || {};
+        R.counts.pending = R.rows.filter(function (r) { return r.status === "pending"; }).length;
+      } catch (e2) { /* the dated list stands */ }
+      document.getElementById("lbl-company").hidden = !R.rows.some(function (r) { return r.company_code; });
       if (R.confirm) {
         var still = byId(R.confirm.id);
         // an open confirm only survives while its row is still where it was
@@ -578,6 +604,10 @@
         document.getElementById("f-site").addEventListener("change", function () {
           R.project = this.value; R.ok = ""; R.err = "";
           load();
+        });
+        document.getElementById("f-company").addEventListener("change", function () {
+          R.company = this.value;
+          renderStats(); renderRows();
         });
 
         function onDates(ev) {
