@@ -65,7 +65,8 @@
    await Dash.revokeAttendanceRequest(id, note)   -> undo an approval (turns Rejected); same result shape
    await Dash.getPunchExceptions(from, to)        -> the office's Exceptions queue (DB 0124): one row per
                                                      shift AND kind — missed / long_open / overlong /
-                                                     early_start / declared; null before 0124
+                                                     early_start; both dates null = every unresolved
+                                                     shift since the rule's start date; null before 0124
    await Dash.getUnpricedDays(from, to)           -> the payroll-close list: worker days with no figure
                                                      or a request waiting; null before 0124
    await Dash.acceptShiftAsPunched(staffId, date, shiftNo, 'long'|'early'|'early_keep', note)
@@ -934,14 +935,19 @@
   // the worker's raw punch for that end"; the two laid together must still make
   // a complete pair. The reason is required and the worker reads it in their
   // own app history, so it is written for them, not for us.
-  function setDayCorrection(staffId, workDate, inAtISO, outAtISO, reason) {
-    return q(sb.rpc("set_day_correction", {
+  // shiftNo (optional): rule ONE shift of a day that holds several (the
+  // Exceptions page always names it). Left out, the database rules the
+  // day's only shift and refuses a day with more than one.
+  function setDayCorrection(staffId, workDate, inAtISO, outAtISO, reason, shiftNo) {
+    var args = {
       p_staff_id: staffId,
       p_work_date: workDate,
       p_in_at:  inAtISO  || null,
       p_out_at: outAtISO || null,
       p_reason: reason
-    }));
+    };
+    if (shiftNo != null && shiftNo !== "") args.p_shift_no = Number(shiftNo);
+    return q(sb.rpc("set_day_correction", args));
   }
 
   // Drops the ruling; the worker's raw punches stand again. Both this and the
@@ -1030,7 +1036,11 @@
   //   long_open    still open 16 h or more
   //   overlong     closed over 16 h and not accepted: unpriced
   //   early_start  a site worker's start before 06:00, not accepted: counts from 08:00
-  //   declared     a finish time the worker declared, waiting as a Change Times request
+  // A finish time the worker declared rides on the row as request_id /
+  // declared_out_at / request_pending (it is a Change Times request). Each row
+  // also carries the shift AS RULED (official_in_at, official_out_at, adjusted,
+  // adjust_reason) so the office can rule a time in place. Both dates null =
+  // every unresolved shift since the rule's start date (the database's floor).
   // Off-site punch-outs sort first within a kind. Compare With Crew is
   // getShifts(work_date, project_id). Resolves to NULL — not an error — when
   // the database predates 0124, so the page can ship before the migration.

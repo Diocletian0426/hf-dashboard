@@ -11,9 +11,9 @@
 // list. Dates are pinned to today so the rows are on screen whenever the page
 // is opened.
 //
-// IT WRITES NOTHING. Accept As Punched, Credit From Punch-In, Approve, Reject
-// and Undo change the in-memory list for this page load only — no database
-// call is made while this is on.
+// IT WRITES NOTHING. Accept As Punched, Credit From Punch-In, Keep From 8 AM,
+// Rule The Times, Approve, Reject and Undo change the in-memory list for this
+// page load only — no database call is made while this is on.
 //
 // Names are the Avengers test crew (the convention attendance-demo.js and the
 // real test rows use), so a demo row can never be mistaken for a real worker.
@@ -132,9 +132,20 @@
 
   var ACCEPTED = {};                                   // key -> true after Accept / Credit
   var KEPT = {};                                       // key -> true after Keep From 8 AM
+  var RULED = {};                                      // key -> { inISO, outISO, why } after Rule The Times / Approve
   var REQUESTS = { "demo-req-1": "pending" };
 
   function key(d) { return d.staff_id + "|" + d.work_date + "|1"; }
+  function ruledIn(d)  { var r = RULED[key(d)]; return r && r.inISO  ? r.inISO  : d.first_in_at; }
+  function ruledOut(d) { var r = RULED[key(d)]; return r && r.outISO ? r.outISO : d.last_out_at; }
+  // 'YYYY-MM-DD HH12:MI AM' in Malaysia time, as set_day_correction answers
+  var KL12 = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Kuala_Lumpur", hour12: true,
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+  function local(iso) {
+    if (!iso) return null;
+    var p = {}; KL12.formatToParts(new Date(iso)).forEach(function (x) { p[x.type] = x.value; });
+    return p.year + "-" + p.month + "-" + p.day + " " + p.hour + ":" + p.minute + " " + p.dayPeriod;
+  }
 
   function exceptionsFor(from, to) {
     var out = [];
@@ -143,11 +154,13 @@
       if (from && d.work_date < from) return;
       if (to && d.work_date > to) return;
       if ((d._kind === "overlong" || d._kind === "early_start") && (ACCEPTED[key(d)] || KEPT[key(d)])) return;
+      if (RULED[key(d)]) return;                       // a ruling settles the shift, whatever the kind
       out.push({
         kind: d._kind, staff_id: d.staff_id, employee_code: d.employee_code, full_name: d.full_name,
         company_code: d.company_code, flexible_hours: d.flexible_hours,
         project_id: d.project_id, project_name: d.project_name, work_date: d.work_date, shift_no: 1,
         in_at: d.first_in_at, out_at: d.last_out_at, hours: hoursBetween(d.first_in_at, d.last_out_at),
+        official_in_at: d.first_in_at, official_out_at: d.last_out_at, adjusted: false, adjust_reason: null,
         off_site_out: d._offSite, worker_note: d._note,
         request_id: d._reqId, declared_out_at: d._declared, request_pending: !!(d._reqId && REQUESTS[d._reqId] === "pending")
       });
@@ -165,6 +178,7 @@
     var out = [];
     DAYS.forEach(function (d) {
       if (!d._kind || (from && d.work_date < from) || (to && d.work_date > to)) return;
+      if (RULED[key(d)]) return;                       // ruled = priced as ruled
       var why = d._kind === "missed" ? "missed" : d._kind === "long_open" ? "open"
               : d._kind === "overlong" && !ACCEPTED[key(d)] ? "overlong" : null;
       if (why) out.push({ staff_id: d.staff_id, employee_code: d.employee_code, full_name: d.full_name,
@@ -210,7 +224,16 @@
   Dash.getUnpricedDays   = async function (from, to) { await wait(150); return copy(unpricedFor(from, to)); };
   Dash.getShifts = async function (date, projectId) {
     await wait(200);
-    return copy(DAYS.filter(function (d) { return d.work_date === date && (!projectId || d.project_id === projectId); }));
+    return copy(DAYS.filter(function (d) { return d.work_date === date && (!projectId || d.project_id === projectId); }))
+      .map(function (d) {
+        var r = RULED[d.staff_id + "|" + d.work_date + "|1"];
+        if (r) {                                       // a ruling shows in the crew table as it would live
+          d.has_correction = true; d.last_out_at = ruledOut(d); d.first_in_at = ruledIn(d);
+          d.hours_on_site = d.last_out_at ? hoursBetween(d.first_in_at, d.last_out_at) : null;
+          d.open_shift = !d.last_out_at; d.has_anomaly = !d.last_out_at;
+        }
+        return d;
+      });
   };
 
   // ---- the writes: in memory only ------------------------------------------
@@ -246,9 +269,31 @@
     if (decision === "rejected" && !(note && String(note).trim()))
       return { ok: false, code: "note_required", message: "Say why the request is rejected." };
     REQUESTS[id] = decision;
+    var d = DAYS.filter(function (x) { return x._reqId === id; })[0];
+    // approving a Change Times ask lays the declared time on the shift as the office's ruling
+    if (decision === "approved" && d && d._declared) RULED[key(d)] = { outISO: d._declared, why: "Approved as asked" };
     return { ok: true, status: decision,
              message: decision === "rejected" ? "Request rejected."
-                    : "Approved — the declared finish time now stands for Falcon (demo)’s shift." };
+                    : "Approved — the declared finish time now stands for " + (d ? d.full_name : "the worker") + "’s shift." };
+  };
+  // Rule The Times (set_day_correction): the ruling lives beside the taps, in memory only
+  Dash.setDayCorrection = async function (staffId, workDate, inISO, outISO, why, shiftNo) {
+    await wait(350);
+    var d = DAYS.filter(function (x) { return x.staff_id === staffId && x.work_date === workDate; })[0];
+    if (!d) return { ok: false, code: "unknown_staff", message: "That day is not on the record." };
+    if (!(why && String(why).trim()))
+      return { ok: false, code: "reason_required", message: "A reason is required — it is shown to the worker." };
+    if (!inISO && !outISO)
+      return { ok: false, code: "nothing_to_correct", message: "Give a corrected start time, end time, or both." };
+    if (workDate === today && !d.last_out_at)
+      return { ok: false, code: "shift_running", message: "That shift is still running — correct it once the worker has punched out." };
+    var r = RULED[key(d)] || {};
+    if (inISO) r.inISO = inISO;
+    if (outISO) r.outISO = outISO;
+    r.why = why; RULED[key(d)] = r;
+    var effIn = ruledIn(d), effOut = ruledOut(d);
+    return { ok: true, full_name: d.full_name, work_date: workDate, shift_no: Number(shiftNo) || 1, new_shift: false,
+             hours: effOut ? hoursBetween(effIn, effOut) : null, in_at_local: local(effIn), out_at_local: local(effOut) };
   };
 
   // a banner, so nobody mistakes this screen for the real one
