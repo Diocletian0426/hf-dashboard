@@ -63,6 +63,14 @@
    await Dash.getAttendanceRequests(opts?)        -> { ok, requests, counts } missed-shift / change-times asks
    await Dash.reviewAttendanceRequest(id, decision, note?) -> { ok, status, message } | { ok:false, code, message }
    await Dash.revokeAttendanceRequest(id, note)   -> undo an approval (turns Rejected); same result shape
+   await Dash.getPunchExceptions(from, to)        -> the office's Exceptions queue (DB 0124): one row per
+                                                     shift AND kind — missed / long_open / overlong /
+                                                     early_start / declared; null before 0124
+   await Dash.getUnpricedDays(from, to)           -> the payroll-close list: worker days with no figure
+                                                     or a request waiting; null before 0124
+   await Dash.acceptShiftAsPunched(staffId, date, shiftNo, 'long'|'early', note?)
+                                                  -> { ok, mark, working_minutes } or { ok:false, code, message }
+   await Dash.clearShiftAcceptance(staffId, date, shiftNo, 'long'|'early') -> undo the acceptance
    await Dash.getTests(showAll?)                  -> pile test tracker (hides completed/passed
                                                      unless showAll is true)
    await Dash.getTestTypes()                      -> test type directory (CSL/MLT/PDA/PIT:
@@ -1013,6 +1021,60 @@
     }));
   }
 
+  // ---- the punch Exceptions queue (DB 0124, exceptions.html) ---------------
+  // Since 0124 nothing is auto-closed; what the punch system cannot settle on
+  // its own lands here for the office. One row per shift AND kind, for the
+  // dates from..to (both inclusive; null = the last 31 days):
+  //   missed       left without a punch-out (the worker said so, or 48 h passed)
+  //   long_open    still open 16 h or more
+  //   overlong     closed over 16 h and not accepted: unpriced
+  //   early_start  a site worker's start before 06:00, not accepted: counts from 08:00
+  //   declared     a finish time the worker declared, waiting as a Change Times request
+  // Off-site punch-outs sort first within a kind. Compare With Crew is
+  // getShifts(work_date, project_id). Resolves to NULL — not an error — when
+  // the database predates 0124, so the page can ship before the migration.
+  async function getPunchExceptions(from, to) {
+    try {
+      return await q(sb.rpc("get_punch_exceptions", { p_from: from || null, p_to: to || null }));
+    } catch (e) {
+      if (isMissingFunction(e)) return null;
+      throw e;
+    }
+  }
+
+  // The payroll-close list: every worker day in from..to that would reach
+  // payroll with no figure (why = missed / open / overlong / unpriced) or with a
+  // request still waiting (pending_request). NULL before 0124, as above.
+  async function getUnpricedDays(from, to) {
+    try {
+      return await q(sb.rpc("get_unpriced_days", { p_from: from, p_to: to }));
+    } catch (e) {
+      if (isMissingFunction(e)) return null;
+      throw e;
+    }
+  }
+
+  // kind 'long'  = accept a shift over 16 h as punched (it prices as tapped);
+  // kind 'early' = credit a site worker's start before 06:00 from the punch-in.
+  // The punches are untouched: a mark sits beside them (shift_marks) and an
+  // audit row names who accepted. Refusals come back as DATA — { ok:false,
+  // code, message }: no_such_shift, shift_open, not_overlong, not_early,
+  // flexible_hours, bad_kind. Success: { ok:true, mark, working_minutes } with
+  // the DAY's priced minutes after the acceptance.
+  function acceptShiftAsPunched(staffId, workDate, shiftNo, kind, note) {
+    return q(sb.rpc("accept_shift_as_punched", {
+      p_staff_id: staffId, p_work_date: workDate, p_shift_no: Number(shiftNo) || 1,
+      p_kind: kind, p_note: note || null
+    }));
+  }
+
+  // Takes the acceptance back (audited). { ok:true } or { ok:false, code } (not_found, bad_kind).
+  function clearShiftAcceptance(staffId, workDate, shiftNo, kind) {
+    return q(sb.rpc("clear_shift_acceptance", {
+      p_staff_id: staffId, p_work_date: workDate, p_shift_no: Number(shiftNo) || 1, p_kind: kind
+    }));
+  }
+
   function getTests(showAll) {
     var b = sb.from("v_test_tracker").select("*");
     if (!showAll) b = b.not("status", "in", '("completed","passed")');
@@ -1822,6 +1884,10 @@
     getAttendanceRequests: getAttendanceRequests,
     reviewAttendanceRequest: reviewAttendanceRequest,
     revokeAttendanceRequest: revokeAttendanceRequest,
+    getPunchExceptions: getPunchExceptions,
+    getUnpricedDays: getUnpricedDays,
+    acceptShiftAsPunched: acceptShiftAsPunched,
+    clearShiftAcceptance: clearShiftAcceptance,
     getTests: getTests,
     getTestTypes: getTestTypes,
     getProjectTestSpecs: getProjectTestSpecs,

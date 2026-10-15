@@ -1,0 +1,850 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nexus — Punch Exceptions</title>
+  <link rel="stylesheet" href="styles.css" />
+  <!-- Page-only bits, tokens only. Kept here rather than in styles.css so this
+       page ships as one new file (the Requests page did the same). -->
+  <style>
+    .tbl-ex td { vertical-align: top; }
+    .tbl-ex th, .tbl-ex td { padding-left: 12px; padding-right: 12px; }
+    .ex-sub { display: block; margin-top: 2px; color: var(--ink-3); font-size: var(--fs-xs); font-weight: 400; }
+    .ex-line { white-space: nowrap; font-variant-numeric: tabular-nums; line-height: 1.7; }
+    .ex-k { display: inline-block; min-width: 30px; text-align: left; color: var(--ink-3);
+            font-size: var(--fs-xs); font-weight: 600; }
+    .ex-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+    .ex-kind-missed      { background: var(--danger-soft); color: var(--danger-ink); }
+    .ex-kind-long_open   { background: var(--warn-soft);   color: var(--warn-ink); }
+    .ex-kind-overlong    { background: var(--warn-soft);   color: var(--warn-ink); }
+    .ex-kind-early_start { background: #ede9fe;            color: #6d28d9; }
+    .ex-kind-declared    { background: var(--brand-soft);  color: var(--brand-ink); }
+    .ex-why { white-space: normal; min-width: 180px; max-width: 320px; margin-top: 4px;
+              color: var(--ink-2); font-size: var(--fs-sm); line-height: 1.45; }
+    .ex-note { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 320px; margin-top: 4px;
+               color: var(--ink-2); font-size: var(--fs-xs); }
+    .ex-note b { font-weight: 600; }
+    .ex-acts { display: flex; flex-direction: column; gap: 6px; }
+    .ex-acts .btn { text-align: center; text-decoration: none; }
+    .ex-acts .btn.ex-accept { color: var(--ok-ink); }
+    .ex-acts .btn.ex-accept:hover { background: var(--ok-soft); border-color: #bbf7d0; color: var(--ok-ink); }
+    .ex-acts .btn[aria-pressed="true"] { background: var(--charcoal); border-color: var(--charcoal); color: #fff; }
+    tr.ex-open > td, tr.ex-confirm-row > td, tr.ex-crew-row > td { background: var(--brand-soft); }
+    tr.ex-confirm-row > td, tr.ex-crew-row > td { white-space: normal; padding-top: 4px; }
+    .ex-confirm { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--sp-3); }
+    .ex-confirm-q { flex: 1 1 100%; margin: 0; color: var(--ink); font-size: var(--fs-md); }
+    .ex-confirm-q + .muted { flex: 1 1 100%; margin: -6px 0 0; }
+    .ex-confirm label { display: flex; flex-direction: column; gap: 4px; flex: 1 1 320px;
+                        font-size: var(--fs-xs); font-weight: 600; color: var(--ink-2); }
+    .ex-confirm input[type="text"] { font-family: var(--font); font-size: 13.5px; color: var(--ink);
+                        padding: 8px 12px; border: 1px solid var(--line-strong);
+                        border-radius: var(--r-sm); background: var(--surface-solid); }
+    .ex-confirm input[aria-invalid="true"] { border-color: var(--danger); }
+    .ex-confirm-err { flex: 1 1 100%; color: var(--danger-ink); font-size: var(--fs-sm); white-space: pre-wrap; }
+    .ex-confirm-err:empty { display: none; }
+    /* Compare With Crew: the same site, the same day, everyone's taps */
+    .ex-crew-head { margin: 0 0 6px; font-size: var(--fs-sm); color: var(--ink-2); }
+    .ex-crew-head b { color: var(--ink); }
+    table.ex-crew-tbl { width: auto; min-width: 460px; font-size: 13px;
+                        background: var(--surface-solid); border: 1px solid var(--line); }
+    table.ex-crew-tbl th, table.ex-crew-tbl td { padding: 6px 10px; position: static; white-space: nowrap; }
+    table.ex-crew-tbl tr.ex-me > td { font-weight: 600; background: #fff7ed; }
+    .ex-undo { margin-left: 10px; }
+    .ex-foot { margin: var(--sp-3) 0 0; }
+    .ex-pay { margin-top: var(--sp-6); }
+    .ex-pay h2 { font-size: var(--fs-xl); margin: 0 0 var(--sp-2); }
+    .ex-pay-sum { margin: 0 0 var(--sp-3); color: var(--ink-2); font-size: var(--fs-sm); }
+    .tbl-pay td:nth-child(1) { min-width: 150px; }
+    @media (min-width: 761px) {
+      .tbl-ex td:nth-child(1) { min-width: 130px; }
+      .tbl-ex td:nth-child(3) { min-width: 110px; }
+    }
+    @media (max-width: 760px) {
+      .ex-why, .ex-note { min-width: 0; max-width: none; }
+      .ex-acts { flex-direction: row; flex-wrap: wrap; }
+      .ex-acts .btn { flex: 1; min-height: var(--tap); }
+      table.ex-crew-tbl { min-width: 0; width: 100%; }
+      .table-stack tr.ex-confirm-row > td, .table-stack tr.ex-crew-row > td { display: block; text-align: left; }
+    }
+  </style>
+</head>
+<body>
+
+  <header id="nav"></header>
+
+  <main id="main">
+    <!-- ================= PUNCH EXCEPTIONS (office side, DB 0124) ===========
+         The shifts the punch system could not settle on its own. Since 0124
+         nothing is auto-closed: a forgotten punch-out is a question to the
+         worker, and what is still unsettled lands here for the office.
+         One row per shift AND kind (get_punch_exceptions):
+           missed       left without a punch-out — the worker said so (Start
+                        New Shift) or 48 h passed. Unpriced until HR rules a
+                        finish time with Correct This Day.
+           long_open    still open 16 h or more. The phone asks the worker at
+                        punch-out; nothing to approve yet, HR may rule early.
+           overlong     closed over 16 h and not accepted: unpriced until the
+                        office accepts it as punched or rules a time.
+           early_start  a site worker's start before 06:00: counted from 08:00
+                        until the office credits the real punch-in.
+           declared     a finish time the worker typed at an off-site punch-out,
+                        waiting as a Change Times request (approve / reject).
+         Compare With Crew = get_daily_shifts(work_date, project_id): the same
+         site, the same day, everyone's taps — the supervisor evidence. A true
+         night shows the crew ending together; a forgotten punch-out shows one
+         worker ending at 08:00 while the crew ended at 17:30.
+         Before Payroll Closes = get_unpriced_days: every worker day in these
+         dates that would reach payroll with no figure or a request waiting.
+         Opening needs attendance.edit (shell PAGE_ACCESS) and the database
+         re-checks every call on the same permission. Punches are never
+         edited here: an acceptance is a mark beside them, undone with Undo. -->
+    <div class="page-eyebrow">Attendance</div>
+    <h1>Punch Exceptions</h1>
+    <p class="page-caption" id="ex-sub">
+      Shifts the punch system could not settle on its own. Nothing is priced for these
+      until the office accepts the shift as punched, rules a time with Correct This Day,
+      or answers the worker's request. Times are Malaysia time.
+    </p>
+
+    <div id="error"></div>
+    <!-- the counts ARE the kind filter, same as the Issues and Requests pages -->
+    <div class="istats" id="ex-stats"></div>
+
+    <div class="mp-controls" id="ex-controls">
+      <span>Site: <select id="f-site" aria-label="Site"><option value="">All Sites</option></select></span>
+      <span>From <input type="date" id="f-from" aria-label="From date">
+            to <input type="date" id="f-to" aria-label="To date"></span>
+      <span>
+        <button type="button" data-range="month">This Month</button>
+        <button type="button" data-range="last">Last Month</button>
+        <button type="button" data-range="31">Last 31 Days</button>
+      </span>
+      <span class="tool-search">
+        <svg class="ric" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="11" cy="11" r="6.5"/><path d="M15.8 15.8 20.5 20.5"/>
+        </svg>
+        <input type="search" id="f-text" placeholder="Search worker name or code…"
+               aria-label="Search by worker name or code" />
+        <span class="muted" id="f-count"></span>
+      </span>
+    </div>
+
+    <div class="table-wrap table-stack tbl-ex">
+      <table>
+        <thead id="ex-head"></thead>
+        <tbody id="ex-rows"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+      </table>
+    </div>
+    <p class="muted ex-foot" id="ex-foot"></p>
+
+    <section class="ex-pay" id="ex-pay">
+      <h2>Before Payroll Closes</h2>
+      <p class="page-caption">Every worker day in these dates, all sites, that would reach payroll
+        with no figure or with a request still waiting. Settle each one above, or on the
+        Attendance page.</p>
+      <p class="ex-pay-sum" id="pay-sum"></p>
+      <div class="table-wrap table-stack tbl-pay">
+        <table>
+          <thead><tr><th>Worker</th><th>Date</th><th>Why</th><th></th></tr></thead>
+          <tbody id="pay-rows"><tr><td colspan="4" class="empty">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="vendor/supabase.js"></script>
+  <script src="config.js"></script>
+  <script src="dashboard-client.js"></script>
+  <script src="ui.js"></script>
+  <!-- DEV ONLY: does nothing unless the URL has ?demo=1, and never writes.
+       Must sit BEFORE shell.js (it stands in for the sign-in the shell asks
+       for). Delete this line + exceptions-demo.js before the pilot starts. -->
+  <script src="exceptions-demo.js"></script>
+  <script src="shell.js"></script>
+
+  <script>
+    var esc = UI.esc, escHtml = UI.escHtml;
+
+    var KINDS = [
+      { key: "missed",      label: "Punch Out Missing", sub: "HR rules the finish time",        icon: "alert",    tone: "bad"   },
+      { key: "long_open",   label: "Open 16 h+",        sub: "Still running, no punch-out",     icon: "clock",    tone: "warn"  },
+      { key: "overlong",    label: "Overlong",          sub: "Over 16 h, unpriced until accepted", icon: "clock", tone: "warn"  },
+      { key: "early_start", label: "Early Start",       sub: "Before 6 AM, counted from 8 AM",  icon: "play",     tone: "info"  },
+      { key: "declared",    label: "Declared Time",     sub: "A finish time waiting as a request", icon: "question", tone: "brand" }
+    ];
+    var KIND_LABEL = {};
+    KINDS.forEach(function (k) { KIND_LABEL[k.key] = k.label; });
+    var WHY_WORDS = { missed: "Punch Out Missing", open: "Still Open", overlong: "Overlong",
+                      unpriced: "Unpriced", pending_request: "Request Pending" };
+    var WHY_CLASS = { missed: "ex-kind-missed", open: "ex-kind-long_open", overlong: "ex-kind-overlong",
+                      unpriced: "chip-warn", pending_request: "ex-kind-declared" };
+    var UNKNOWN = "Unknown Location";
+
+    var X = {
+      rows: [], unpriced: null, projects: [],
+      canEdit: false, loading: true, loadErr: "", payErr: "",
+      kind: "", project: "", from: "", to: "", q: "",
+      confirm: null,          // { key, act, note, err, busy, invalid } — the open inline confirm
+      crew: null,             // { key, date, projectId, staffId } — the open Compare With Crew panel
+      crewCache: {},          // "date|projectId" -> rows | { err }
+      ok: "", err: "",        // the result banner of the last action
+      undo: null              // { staffId, workDate, shiftNo, kind, who } — Undo for the last acceptance
+    };
+
+    /* ---------------------------- small helpers ---------------------------- */
+
+    function addDays(iso, n) {
+      var d = new Date(iso + "T00:00:00Z");
+      d.setUTCDate(d.getUTCDate() + n);
+      return d.toISOString().slice(0, 10);
+    }
+    function monthStart(iso) { return iso.slice(0, 7) + "-01"; }
+    function weekday(iso) {
+      return new Date(iso + "T00:00:00").toLocaleDateString("en-MY", { weekday: "short" });
+    }
+    // the Malaysia calendar day a timestamp falls on — "is the Out on a later day?"
+    var KL_DAY = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kuala_Lumpur" });
+    function klDate(ts) {
+      if (!ts) return "";
+      var d = new Date(ts);
+      return isNaN(d) ? "" : KL_DAY.format(d);
+    }
+    // a time on the work day reads "07:58 am"; on a later day "14 Oct, 05:10 am"
+    function timeWord(ts, workDate) {
+      if (!ts) return "";
+      return klDate(ts) === String(workDate || "").slice(0, 10) ? Dash.klTime(ts) : Dash.klDateTime(ts);
+    }
+    function minsText(min) {
+      min = Math.max(0, Math.round(Number(min) || 0));
+      var h = Math.floor(min / 60), m = min % 60;
+      if (!h) return m + " m";
+      return h + " h" + (m ? " " + (m < 10 ? "0" : "") + m + " m" : "");
+    }
+    function hoursText(hours) { return minsText((Number(hours) || 0) * 60); }
+    // a site worker's start before 06:00: the minutes before 08:00 that are not credited
+    function uncreditedMins(r) {
+      var eight = new Date(String(r.work_date).slice(0, 10) + "T08:00:00+08:00").getTime();
+      var start = new Date(r.in_at).getTime();
+      var end = r.out_at ? new Date(r.out_at).getTime() : Date.now();
+      return Math.max(0, (Math.min(end, eight) - start) / 60000);
+    }
+    function isMissingFunction(e) {
+      var code = (e && e.code) || "";
+      return code === "PGRST202" || /could not find the function/i.test(String((e && e.message) || ""));
+    }
+    function rowKey(r) { return r.kind + "|" + r.staff_id + "|" + String(r.work_date).slice(0, 10) + "|" + (r.shift_no || 1); }
+    function byKey(key) { return X.rows.filter(function (r) { return rowKey(r) === key; })[0]; }
+    function colCount() { return X.canEdit ? 6 : 5; }
+    function whoWords(r) {
+      return (r.full_name || "—") + (r.employee_code ? " (" + r.employee_code + ")" : "");
+    }
+    function dayWords(r) { return weekday(r.work_date) + " " + UI.dstr(r.work_date); }
+    function shiftWords(r) { return Number(r.shift_no) > 1 ? ", Shift " + r.shift_no : ""; }
+    function correctHref(r) {
+      var no = Number(r.shift_no) || 1;
+      return "attendance.html?date=" + encodeURIComponent(String(r.work_date).slice(0, 10)) +
+             "&open=" + encodeURIComponent(r.staff_id) + (no > 1 ? "&shift=" + no : "");
+    }
+
+    /* ----------------------------- the cells ------------------------------- */
+
+    function kindChip(kind) {
+      return '<span class="chip ex-kind-' + esc(kind) + '">' + escHtml(KIND_LABEL[kind] || UI.label(kind)) + "</span>";
+    }
+
+    function shiftCell(r) {
+      var open = !r.out_at;
+      var h = '<div class="ex-line"><span class="ex-k">In</span>' + escHtml(Dash.klTime(r.in_at)) + "</div>" +
+              '<div class="ex-line"><span class="ex-k">Out</span>' +
+                (open ? '<span class="muted">Still Open</span>' : escHtml(timeWord(r.out_at, r.work_date))) + "</div>" +
+              '<span class="ex-sub">' + escHtml(hoursText(r.hours)) + (open ? " so far" : "") + "</span>";
+      var chips = "";
+      if (r.off_site_out) chips += '<span class="chip chip-warn">Off-Site Punch-Out</span>';
+      if (r.flexible_hours) chips += '<span class="chip badge-gray">Flexible Hours</span>';
+      if (chips) h += '<div class="ex-chips">' + chips + "</div>";
+      return h;
+    }
+
+    // what is wrong, in a sentence the office acts on
+    function whyCell(r) {
+      var why;
+      switch (r.kind) {
+        case "missed":
+          why = "Left without a punch-out. Unpriced until HR rules the finish time.";
+          break;
+        case "long_open":
+          why = "Open for " + hoursText(r.hours) + ". The worker is asked when punching out; nothing is priced yet.";
+          break;
+        case "overlong":
+          why = "Over 16 hours and not accepted. Unpriced until accepted as punched or a time is ruled.";
+          break;
+        case "early_start":
+          why = "Started " + Dash.klTime(r.in_at) + ". " + minsText(uncreditedMins(r)) +
+                " before 8 AM is not credited until accepted.";
+          break;
+        case "declared":
+          why = "Worker says the shift finished " + timeWord(r.declared_out_at, r.work_date) + "." +
+                (r.out_at ? " Tapped out " + timeWord(r.out_at, r.work_date) +
+                            (r.off_site_out ? ", away from the site." : ".") : "");
+          break;
+        default:
+          why = "";
+      }
+      return '<div class="ex-ask">' + kindChip(r.kind) +
+             (why ? '<div class="ex-why">' + escHtml(why) + "</div>" : "") +
+             (r.worker_note ? '<div class="ex-note"><b>Worker’s reason:</b> ' + escHtml(r.worker_note) + "</div>" : "") +
+             "</div>";
+    }
+
+    function actionsCell(r) {
+      var key = rowKey(r);
+      var c = X.confirm && X.confirm.key === key ? X.confirm.act : "";
+      var crewOn = X.crew && X.crew.key === key;
+      var b = "";
+      if (r.kind === "overlong") {
+        b += '<button type="button" class="btn ex-accept" data-act="accept" data-key="' + esc(key) +
+             '" aria-pressed="' + (c === "accept") + '">Accept As Punched</button>';
+      } else if (r.kind === "early_start") {
+        b += '<button type="button" class="btn ex-accept" data-act="early" data-key="' + esc(key) +
+             '" aria-pressed="' + (c === "early") + '">Credit From Punch-In</button>';
+      } else if (r.kind === "declared") {
+        b += '<button type="button" class="btn ex-accept" data-act="approved" data-key="' + esc(key) +
+             '" aria-pressed="' + (c === "approved") + '">Approve</button>' +
+             '<button type="button" class="btn btn-danger" data-act="rejected" data-key="' + esc(key) +
+             '" aria-pressed="' + (c === "rejected") + '">Reject</button>';
+      }
+      b += '<button type="button" class="btn" data-act="crew" data-key="' + esc(key) +
+           '" aria-pressed="' + crewOn + '">Compare With Crew</button>';
+      if (r.kind !== "declared") {
+        b += '<a class="btn" href="' + esc(correctHref(r)) + '">Correct This Day</a>';
+      }
+      return '<td class="ex-act-cell"><div class="ex-acts">' + b + "</div></td>";
+    }
+
+    // the small inline confirm under the row — not a modal
+    function confirmRow(r) {
+      var c = X.confirm, act = c.act;
+      var who = escHtml(whoWords(r)), when = escHtml(dayWords(r) + shiftWords(r));
+      var span = escHtml(Dash.klTime(r.in_at) + " to " + (r.out_at ? timeWord(r.out_at, r.work_date) : "open") +
+                         " (" + hoursText(r.hours) + ")");
+      var what, hint, label, placeholder, required = false, danger = false, go;
+      if (act === "accept") {
+        what = "Accept <b>" + who + "</b>’s shift on " + when + " as punched — " + span + "?";
+        hint = "The shift is priced exactly as tapped. The punches stay as they are; the acceptance is " +
+               "recorded under your name and can be undone.";
+        label = "Note (optional)"; placeholder = "e.g. concreting night, crew ended together"; go = "Accept As Punched";
+      } else if (act === "early") {
+        what = "Count <b>" + who + "</b>’s shift on " + when + " from the real punch-in, " +
+               escHtml(Dash.klTime(r.in_at)) + "?";
+        hint = minsText(uncreditedMins(r)) + " more is credited. Site workers normally count from 8 AM; " +
+               "the acceptance is recorded under your name and can be undone.";
+        label = "Note (optional)"; placeholder = "e.g. called in early for the pour"; go = "Credit From Punch-In";
+      } else if (act === "approved") {
+        what = "Approve the finish time <b>" + who + "</b> declared — " +
+               escHtml(timeWord(r.declared_out_at, r.work_date)) + " — for " + when + "?";
+        hint = "Approving sets that Out time for the shift; the pay figures follow it. The tap stays on record.";
+        label = "Note (optional)"; placeholder = "e.g. matches the crew"; go = "Approve";
+      } else {
+        what = "Reject the finish time <b>" + who + "</b> declared for " + when + "?";
+        hint = "Nothing changes on the attendance record; the worker reads your reason in the app.";
+        label = "Reason for rejecting (required)"; placeholder = "e.g. crew left at 6 PM, see the site record";
+        required = true; danger = true; go = "Reject";
+      }
+      return '<tr class="ex-confirm-row"><td colspan="' + colCount() + '">' +
+        '<div class="ex-confirm" role="group" aria-label="Confirm">' +
+          '<p class="ex-confirm-q">' + what + "</p>" +
+          '<p class="muted">' + escHtml(hint) + "</p>" +
+          "<label>" + escHtml(label) +
+            '<input type="text" id="ex-note" maxlength="500" autocomplete="off" value="' + esc(c.note) + '"' +
+            (c.invalid ? ' aria-invalid="true"' : "") + (c.busy ? " disabled" : "") +
+            ' placeholder="' + esc(placeholder) + '"' + (required ? ' data-required="1"' : "") + "></label>" +
+          '<button type="button" class="btn ' + (danger ? "btn-danger" : "btn-primary") + '" data-act="confirm"' +
+            (c.busy ? " disabled" : "") + ">" + (c.busy ? "Saving…" : escHtml(go)) + "</button>" +
+          '<button type="button" class="btn" data-act="cancel"' + (c.busy ? " disabled" : "") + ">Cancel</button>" +
+          '<div class="ex-confirm-err" role="alert">' + escHtml(c.err || "") + "</div>" +
+        "</div></td></tr>";
+    }
+
+    // Compare With Crew: everyone at the same site that day, the subject first
+    function crewRow(r) {
+      var cr = X.crew;
+      var inner;
+      if (!r.project_id) {
+        inner = '<p class="ex-crew-head">No site on record for this shift, so there is no crew to compare.</p>';
+      } else {
+        var got = X.crewCache[cr.date + "|" + cr.projectId];
+        if (!got) {
+          inner = '<p class="ex-crew-head">Loading the crew…</p>';
+        } else if (got.err) {
+          inner = '<p class="ex-crew-head" style="color:var(--danger-ink)">Could not load the crew: ' + escHtml(got.err) + "</p>";
+        } else {
+          var rows = got.slice().sort(function (a, b) {
+            var am = a.staff_id === r.staff_id ? 0 : 1, bm = b.staff_id === r.staff_id ? 0 : 1;
+            if (am !== bm) return am - bm;
+            var ao = a.last_out_at || "", bo = b.last_out_at || "";
+            if (ao !== bo) return ao < bo ? -1 : 1;
+            return String(a.full_name || "").localeCompare(String(b.full_name || ""));
+          });
+          var others = rows.length - 1;
+          inner = '<p class="ex-crew-head"><b>' + escHtml(r.project_name || UNKNOWN) + "</b> on " +
+                  escHtml(dayWords(r)) + " — " + (others < 1 ? "nobody else punched here that day."
+                    : others + (others === 1 ? " other worker" : " other workers") + ", taps as recorded.") + "</p>";
+          if (rows.length) {
+            inner += '<table class="ex-crew-tbl"><thead><tr><th>Worker</th><th>In</th><th>Out</th><th>Hours</th></tr></thead><tbody>' +
+              rows.map(function (w) {
+                var missed = (w.shifts || []).some(function (s) { return s && s.missed; });
+                var out = w.open_shift && !w.last_out_at ? '<span class="chip chip-warn">Still Open</span>'
+                        : escHtml(timeWord(w.last_out_at, r.work_date));
+                var tags = "";
+                if (missed) tags += ' <span class="chip ex-kind-missed">Punch Out Missing</span>';
+                if (w.has_correction) tags += ' <span class="chip badge-gray">Corrected</span>';
+                if (Number(w.shift_count) > 1) tags += ' <span class="chip badge-gray">' + w.shift_count + " Shifts</span>";
+                return '<tr class="' + (w.staff_id === r.staff_id ? "ex-me" : "") + '"><td>' + escHtml(w.full_name || "—") +
+                       "</td><td>" + escHtml(Dash.klTime(w.first_in_at)) + "</td><td>" + out + tags + "</td><td>" +
+                       escHtml(w.hours_on_site == null ? "—" : hoursText(w.hours_on_site)) + "</td></tr>";
+              }).join("") + "</tbody></table>";
+          }
+        }
+      }
+      return '<tr class="ex-crew-row"><td colspan="' + colCount() + '">' + inner + "</td></tr>";
+    }
+
+    function rowHtml(r) {
+      var key = rowKey(r);
+      var open = (X.confirm && X.confirm.key === key) || (X.crew && X.crew.key === key);
+      return '<tr class="ex-row' + (open ? " ex-open" : "") + '" data-key="' + esc(key) + '">' +
+          UI.td("Worker", "<div><b>" + escHtml(r.full_name || "—") + "</b>" +
+            '<span class="ex-sub">' + escHtml([r.employee_code, r.company_code].filter(Boolean).join(" · ")) + "</span></div>", "wrap") +
+          UI.td("Site", r.project_name ? escHtml(r.project_name) : '<span class="muted">' + UNKNOWN + "</span>", "wrap") +
+          UI.td("Date", "<div>" + escHtml(UI.dstr(r.work_date)) + '<span class="ex-sub">' + escHtml(weekday(r.work_date)) +
+            (Number(r.shift_no) > 1 ? " · Shift " + escHtml(r.shift_no) : "") + "</span></div>") +
+          UI.td("Shift", shiftCell(r)) +
+          UI.td("What Is Wrong", whyCell(r), "wrap") +
+          (X.canEdit ? actionsCell(r) : "") +
+        "</tr>" +
+        (X.confirm && X.confirm.key === key ? confirmRow(r) : "") +
+        (X.crew && X.crew.key === key ? crewRow(r) : "");
+    }
+
+    /* ------------------------------- render -------------------------------- */
+
+    // site + search narrow the whole page; the kind cards narrow the table
+    function matchesFilters(r) {
+      if (X.project && r.project_id !== X.project) return false;
+      var q = X.q.trim().toLowerCase();
+      if (q && (String(r.full_name || "") + " " + String(r.employee_code || "")).toLowerCase().indexOf(q) === -1) return false;
+      return true;
+    }
+    function visibleRows() {
+      return X.rows.filter(function (r) { return matchesFilters(r) && (!X.kind || r.kind === X.kind); });
+    }
+    function countOf(kind) {
+      return X.rows.filter(function (r) { return r.kind === kind && matchesFilters(r); }).length;
+    }
+
+    function renderStats() {
+      document.getElementById("ex-stats").innerHTML = KINDS.map(function (c) {
+        var on = X.kind === c.key;
+        return '<button type="button" class="istat tone-' + c.tone + (on ? " on" : "") +
+                 '" data-card="' + c.key + '" aria-pressed="' + on + '">' +
+                 '<span class="istat-ic">' + UI.icon(c.icon) + "</span>" +
+                 '<span class="istat-body">' +
+                   '<span class="istat-top"><b>' + (X.loading || X.loadErr ? "–" : countOf(c.key)) +
+                     "</b><i>" + escHtml(c.label) + "</i></span>" +
+                   '<span class="istat-sub">' + escHtml(c.sub) + "</span>" +
+                 "</span>" +
+               "</button>";
+      }).join("");
+    }
+
+    function renderBanner() {
+      var h = "";
+      if (X.loadErr === "missing") {
+        h = '<div class="banner banner-amber">The punch Exceptions queue is not switched on in the database yet ' +
+            "(update 0124). This page fills in once it is applied.</div>";
+      } else if (X.loadErr) {
+        h = UI.errorBanner(X.loadErr);
+      }
+      if (X.err) h += '<div class="banner banner-red">' + escHtml(X.err) + "</div>";
+      if (X.ok) {
+        h += '<div class="banner banner-green">' + escHtml(X.ok) +
+             (X.undo ? '<button type="button" class="btn ex-undo" data-act="undo">Undo</button>' : "") + "</div>";
+      }
+      document.getElementById("error").innerHTML = h;
+    }
+
+    function renderRows() {
+      var tbody = document.getElementById("ex-rows");
+      var n = colCount();
+      var rows = visibleRows();
+      var count = document.getElementById("f-count");
+      var foot = document.getElementById("ex-foot");
+
+      if (X.loading) {
+        tbody.innerHTML = UI.loadingRow(n);
+        count.textContent = ""; foot.textContent = "";
+        return;
+      }
+      count.textContent = X.q.trim() ? rows.length + " shown" : "";
+      foot.textContent = X.rows.length
+        ? "Off-site punch-outs sort first within a kind. Accepting or ruling a shift takes it off this list."
+        : "";
+
+      if (X.loadErr) { tbody.innerHTML = UI.emptyRow(n, "Nothing to show."); return; }
+      if (!rows.length) {
+        var msg;
+        if (X.q.trim()) msg = "No shift from a worker matching “" + X.q.trim() + "”.";
+        else if (X.kind) msg = "No " + KIND_LABEL[X.kind] + " shifts in these dates.";
+        else msg = "Nothing to settle in these dates.";
+        tbody.innerHTML = UI.emptyRow(n, msg);
+        return;
+      }
+      tbody.innerHTML = rows.map(rowHtml).join("");
+    }
+
+    function renderPay() {
+      var tbody = document.getElementById("pay-rows");
+      var sum = document.getElementById("pay-sum");
+      if (X.loading) { tbody.innerHTML = UI.loadingRow(4); sum.textContent = ""; return; }
+      if (X.payErr === "missing" || X.unpriced === null) {
+        tbody.innerHTML = UI.emptyRow(4, "Not available until update 0124 is applied.");
+        sum.textContent = "";
+        return;
+      }
+      if (X.payErr) { tbody.innerHTML = UI.emptyRow(4, "Nothing to show."); sum.textContent = X.payErr; return; }
+      var rows = X.unpriced.filter(function (u) {
+        var q = X.q.trim().toLowerCase();
+        return !q || (String(u.full_name || "") + " " + String(u.employee_code || "")).toLowerCase().indexOf(q) !== -1;
+      });
+      if (!rows.length) {
+        tbody.innerHTML = UI.emptyRow(4, "Nothing unpriced in these dates.");
+        sum.textContent = "";
+        return;
+      }
+      var tally = {};
+      rows.forEach(function (u) { tally[u.why] = (tally[u.why] || 0) + 1; });
+      sum.textContent = rows.length + (rows.length === 1 ? " day" : " days") + ": " +
+        Object.keys(WHY_WORDS).filter(function (k) { return tally[k]; })
+          .map(function (k) { return tally[k] + " " + WHY_WORDS[k]; }).join(" · ");
+      tbody.innerHTML = rows.map(function (u) {
+        var pending = u.why === "pending_request";
+        var href = pending
+          ? "requests.html?status=pending&from=" + encodeURIComponent(X.from) + "&to=" + encodeURIComponent(X.to)
+          : "attendance.html?date=" + encodeURIComponent(String(u.work_date).slice(0, 10)) + "&open=" + encodeURIComponent(u.staff_id);
+        return "<tr>" +
+          UI.td("Worker", "<div><b>" + escHtml(u.full_name || "—") + "</b>" +
+            '<span class="ex-sub">' + escHtml([u.employee_code, u.company_code].filter(Boolean).join(" · ")) + "</span></div>", "wrap") +
+          UI.td("Date", "<div>" + escHtml(UI.dstr(u.work_date)) + '<span class="ex-sub">' + escHtml(weekday(u.work_date)) + "</span></div>") +
+          UI.td("Why", '<span class="chip ' + (WHY_CLASS[u.why] || "badge-gray") + '">' + escHtml(WHY_WORDS[u.why] || UI.label(u.why)) + "</span>") +
+          UI.td("", '<a class="section-link" href="' + esc(href) + '">' + (pending ? "Open Requests" : "Open The Day") + "</a>") +
+        "</tr>";
+      }).join("");
+    }
+
+    function render() { renderStats(); renderBanner(); renderRows(); renderPay(); }
+
+    function renderHead() {
+      document.getElementById("ex-head").innerHTML =
+        "<tr><th>Worker</th><th>Site</th><th>Date</th><th>Shift</th><th>What Is Wrong</th>" +
+        (X.canEdit ? "<th></th>" : "") + "</tr>";
+    }
+
+    // Site dropdown: the engine's project directory (active first), plus any
+    // site a row names that the directory did not return.
+    function fillSites() {
+      var sel = document.getElementById("f-site");
+      var seen = {}, opts = [];
+      X.projects.slice().sort(function (a, b) {
+        var aa = a.status === "active" ? 0 : 1, bb = b.status === "active" ? 0 : 1;
+        if (aa !== bb) return aa - bb;
+        return String(a.project_code || "").localeCompare(String(b.project_code || ""));
+      }).forEach(function (p) {
+        if (!p.project_id || seen[p.project_id]) return;
+        seen[p.project_id] = true;
+        var label = (p.project_code ? p.project_code + " — " : "") + (p.project_name || "");
+        if (p.status && p.status !== "active") label += " (" + UI.label(p.status) + ")";
+        opts.push([p.project_id, label]);
+      });
+      X.rows.forEach(function (r) {
+        if (!r.project_id || seen[r.project_id]) return;
+        seen[r.project_id] = true;
+        opts.push([r.project_id, r.project_name || "Unnamed site"]);
+      });
+      sel.innerHTML = '<option value="">All Sites</option>' + opts.map(function (o) {
+        return '<option value="' + esc(o[0]) + '"' + (o[0] === X.project ? " selected" : "") + ">" +
+               escHtml(o[1]) + "</option>";
+      }).join("");
+    }
+
+    /* --------------------------- data + actions ---------------------------- */
+
+    var loadSeq = 0;
+    // quiet = keep the current rows on screen while refreshing (after a save)
+    async function load(quiet) {
+      var my = ++loadSeq;
+      if (!quiet) { X.loading = true; render(); }
+      var got;
+      try {
+        got = await Promise.all([
+          Dash.getPunchExceptions(X.from, X.to),
+          Dash.getUnpricedDays(X.from, X.to).catch(function (e) { return { payErr: (e && e.message) || String(e) }; })
+        ]);
+      } catch (e) {
+        if (my !== loadSeq) return;
+        X.loading = false; X.rows = []; X.unpriced = null;
+        X.loadErr = isMissingFunction(e) ? "missing" : ((e && e.message) || String(e));
+        render();
+        return;
+      }
+      if (my !== loadSeq) return;        // a newer filter change already asked
+      X.loading = false;
+      var rows = got[0], pay = got[1];
+      if (rows === null) {               // the database predates 0124
+        X.rows = []; X.unpriced = null; X.loadErr = "missing"; X.payErr = "missing";
+        render();
+        return;
+      }
+      X.loadErr = "";
+      X.rows = Array.isArray(rows) ? rows : [];
+      if (pay && pay.payErr) { X.unpriced = []; X.payErr = pay.payErr; }
+      else { X.unpriced = Array.isArray(pay) ? pay : null; X.payErr = pay === null ? "missing" : ""; }
+      if (X.confirm && !byKey(X.confirm.key)) X.confirm = null;   // its row was settled meanwhile
+      if (X.crew && !byKey(X.crew.key)) X.crew = null;
+      fillSites();
+      render();
+    }
+
+    function focusNote() {
+      var el = document.getElementById("ex-note");
+      if (el) el.focus();
+    }
+
+    function openConfirm(key, act) {
+      if (X.confirm && X.confirm.busy) return;
+      if (X.confirm && X.confirm.key === key && X.confirm.act === act) {
+        X.confirm = null;                // pressing the same button again closes it
+      } else {
+        var keep = X.confirm && X.confirm.key === key ? X.confirm.note : "";
+        X.confirm = { key: key, act: act, note: keep, err: "", busy: false, invalid: false };
+      }
+      X.ok = ""; X.err = ""; X.undo = null;
+      renderBanner(); renderRows();
+      focusNote();
+    }
+
+    async function toggleCrew(key) {
+      if (X.crew && X.crew.key === key) { X.crew = null; renderRows(); return; }
+      var r = byKey(key);
+      if (!r) return;
+      var date = String(r.work_date).slice(0, 10);
+      X.crew = { key: key, date: date, projectId: r.project_id, staffId: r.staff_id };
+      renderRows();
+      if (!r.project_id) return;
+      var ck = date + "|" + r.project_id;
+      if (X.crewCache[ck]) return;
+      try {
+        var rows = await Dash.getShifts(date, r.project_id);
+        X.crewCache[ck] = Array.isArray(rows) ? rows : [];
+      } catch (e) {
+        X.crewCache[ck] = { err: (e && e.message) || String(e) };
+      }
+      if (X.crew && X.crew.key === key) renderRows();
+    }
+
+    async function submitConfirm() {
+      var c = X.confirm;
+      if (!c || c.busy) return;
+      var r = byKey(c.key);
+      if (!r) { X.confirm = null; renderRows(); return; }
+      var note = String(c.note || "").trim();
+      if (c.act === "rejected" && !note) {
+        c.invalid = true;
+        c.err = "Write a short reason — it is required to reject a request.";
+        renderRows(); focusNote();
+        return;
+      }
+      c.busy = true; c.err = ""; c.invalid = false;
+      renderRows();
+
+      var res;
+      try {
+        if (c.act === "accept" || c.act === "early") {
+          res = await Dash.acceptShiftAsPunched(r.staff_id, String(r.work_date).slice(0, 10), r.shift_no,
+                                                c.act === "accept" ? "long" : "early", note || null);
+        } else {
+          res = await Dash.reviewAttendanceRequest(r.request_id, c.act, note || null);
+        }
+      } catch (e) {
+        c.busy = false;
+        c.err = (e && e.message) || String(e);
+        renderRows(); focusNote();
+        return;
+      }
+      c.busy = false;
+
+      if (!res || res.ok === false) {
+        var msg = (res && (res.message || res.code)) || "The server did not answer.";
+        // the shift moved on under us — say so up top and show the list as it is now
+        if (res && (res.code === "already_reviewed" || res.code === "not_found" || res.code === "no_such_shift" ||
+                    res.code === "shift_open" || res.code === "not_overlong" || res.code === "not_early")) {
+          X.confirm = null; X.err = msg; X.ok = ""; X.undo = null;
+          await load(true);
+          return;
+        }
+        c.err = msg;                     // verbatim, kept beside the form it belongs to
+        renderRows(); focusNote();
+        return;
+      }
+
+      var who = whoWords(r) + ", " + dayWords(r) + shiftWords(r);
+      X.confirm = null; X.err = ""; X.undo = null;
+      if (c.act === "accept" || c.act === "early") {
+        X.ok = (c.act === "accept" ? "Accepted as punched — " : "Credited from the punch-in — ") + who +
+               (res.working_minutes != null ? ". The day now prices at " + minsText(res.working_minutes) + "." : ".");
+        X.undo = { staffId: r.staff_id, workDate: String(r.work_date).slice(0, 10), shiftNo: r.shift_no,
+                   kind: c.act === "accept" ? "long" : "early", who: who };
+      } else {
+        X.ok = res.message || (c.act === "approved" ? "Request approved." : "Request rejected.");
+      }
+      await load(true);
+    }
+
+    async function undoAcceptance() {
+      var u = X.undo;
+      if (!u) return;
+      X.undo = null; renderBanner();
+      var res;
+      try {
+        res = await Dash.clearShiftAcceptance(u.staffId, u.workDate, u.shiftNo, u.kind);
+      } catch (e) {
+        X.ok = ""; X.err = (e && e.message) || String(e); renderBanner(); return;
+      }
+      if (!res || res.ok === false) {
+        X.ok = ""; X.err = (res && (res.message || res.code)) || "The server did not answer."; renderBanner(); return;
+      }
+      X.err = ""; X.ok = "Acceptance withdrawn — " + u.who + ". The shift is back on the list.";
+      await load(true);
+    }
+
+    /* -------------------------------- boot --------------------------------- */
+
+    window.onShellReady = async function () {
+      try {
+        X.canEdit = Dash.can("attendance.edit");
+        var today = Dash.todayKL();
+        X.to = today;
+        X.from = addDays(today, -30);                  // the last 31 days, today included
+
+        // deep links: exceptions.html?kind=missed&project=<uuid>&from=…&to=…
+        var p = new URLSearchParams(location.search);
+        if (p.get("kind") && KIND_LABEL[p.get("kind")]) X.kind = p.get("kind");
+        if (p.get("project")) X.project = p.get("project");
+        if (/^\d{4}-\d{2}-\d{2}$/.test(p.get("from") || "")) X.from = p.get("from");
+        if (/^\d{4}-\d{2}-\d{2}$/.test(p.get("to") || "")) X.to = p.get("to");
+
+        var fFrom = document.getElementById("f-from"), fTo = document.getElementById("f-to");
+        fFrom.value = X.from; fTo.value = X.to;
+        fFrom.max = today; fTo.max = today;
+
+        if (!X.canEdit) {
+          document.getElementById("ex-sub").insertAdjacentHTML("beforeend",
+            '<br><span class="muted">View only — settling a shift needs the Attendance edit permission.</span>');
+        }
+        renderHead();
+
+        // the site list is a nice-to-have: a failure leaves the sites the rows themselves name
+        Dash.getProjectDirectory().then(function (rows) {
+          X.projects = rows || [];
+          fillSites();
+        }).catch(function () { /* keep the row-derived list */ });
+
+        document.getElementById("ex-stats").addEventListener("click", function (ev) {
+          var b = ev.target.closest("button[data-card]");
+          if (!b) return;
+          var k = b.getAttribute("data-card");
+          X.kind = X.kind === k ? "" : k;               // pressing the lit card again shows all
+          renderStats(); renderRows();
+        });
+
+        function setRange(f, t) {
+          if (t > today) t = today;
+          if (f === X.from && t === X.to) return;
+          X.from = f; X.to = t; fFrom.value = f; fTo.value = t;
+          X.ok = ""; X.err = ""; X.undo = null;
+          load();
+        }
+        document.getElementById("ex-controls").addEventListener("click", function (ev) {
+          var b = ev.target.closest("button[data-range]");
+          if (!b) return;
+          var which = b.getAttribute("data-range");
+          if (which === "month") setRange(monthStart(today), today);
+          else if (which === "last") {
+            var lastEnd = addDays(monthStart(today), -1);
+            setRange(monthStart(lastEnd), lastEnd);
+          } else setRange(addDays(today, -30), today);
+        });
+
+        document.getElementById("f-site").addEventListener("change", function () {
+          X.project = this.value;
+          renderStats(); renderRows();
+        });
+
+        function onDates(ev) {
+          var f = fFrom.value, t = fTo.value;
+          if (!f || !t) return;                          // half-typed: wait
+          if (f > t) {                                   // keep the range the right way round
+            if (ev.target === fFrom) fTo.value = t = f; else fFrom.value = f = t;
+          }
+          setRange(f, t);
+        }
+        fFrom.addEventListener("change", onDates);
+        fTo.addEventListener("change", onDates);
+
+        document.getElementById("f-text").addEventListener("input", function () {
+          X.q = this.value;
+          renderStats(); renderRows(); renderPay();
+        });
+
+        document.getElementById("error").addEventListener("click", function (ev) {
+          if (ev.target.closest("button[data-act='undo']")) undoAcceptance();
+        });
+
+        var tbody = document.getElementById("ex-rows");
+        tbody.addEventListener("click", function (ev) {
+          var b = ev.target.closest("button[data-act]");
+          if (!b || b.disabled) return;
+          var act = b.getAttribute("data-act"), key = b.getAttribute("data-key");
+          if (act === "accept" || act === "early" || act === "approved" || act === "rejected") openConfirm(key, act);
+          else if (act === "crew") toggleCrew(key);
+          else if (act === "cancel") { X.confirm = null; renderRows(); }
+          else if (act === "confirm") submitConfirm();
+        });
+        tbody.addEventListener("input", function (ev) {
+          if (ev.target.id !== "ex-note" || !X.confirm) return;
+          X.confirm.note = ev.target.value;
+          if (X.confirm.invalid && ev.target.value.trim()) {
+            X.confirm.invalid = false; X.confirm.err = "";
+            ev.target.removeAttribute("aria-invalid");
+            var errEl = document.querySelector(".ex-confirm-err");
+            if (errEl) errEl.textContent = "";             // the "required" line no longer applies
+          }
+        });
+        tbody.addEventListener("keydown", function (ev) {
+          if (ev.target.id !== "ex-note") return;
+          if (ev.key === "Enter") { ev.preventDefault(); submitConfirm(); }
+        });
+        document.addEventListener("keydown", function (ev) {
+          if (ev.key === "Escape" && X.confirm && !X.confirm.busy) { X.confirm = null; renderRows(); }
+        });
+
+        await load();
+      } catch (e) {
+        document.getElementById("ex-rows").innerHTML = "";
+        document.getElementById("error").innerHTML = UI.errorBanner((e && e.message) || String(e));
+      }
+    };
+  </script>
+</body>
+</html>

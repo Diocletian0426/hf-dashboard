@@ -55,6 +55,7 @@ Note the repo itself is public (free-plan requirement for Pages).
 | `manpower.html` | Site manpower roster + moves |
 | `attendance.html` | Punch attendance — **owned by the attendance collaborator, do not edit** (see `docs/ATTENDANCE-HANDOFF.md`) |
 | `requests.html` | Attendance Requests — office approves/rejects the punch app's Missed Shift + Change Times asks (`?demo=1` = invented data, no login, writes nothing) |
+| `exceptions.html` | Punch Exceptions (DB 0124) — the shifts the punch system could not settle: Punch Out Missing, Open 16 h+, Overlong, Early Start, Declared Time; Compare With Crew, Accept As Punched, the Before Payroll Closes list (`?demo=1` = invented data, no login, writes nothing). Needs attendance.edit |
 | `tests.html` | Cross-project test chasing queue (deliberately thin — locked decision) |
 
 ## Shared architecture
