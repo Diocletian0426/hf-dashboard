@@ -56,6 +56,7 @@
     return {
       request_id: o.id, type: o.type, status: o.status,
       staff_id: "demo-" + o.name, full_name: o.name, employee_code: o.code,
+      company_code: o.code.indexOf("HS") === 0 ? "Hai Fu" : "HF-BP",
       project_id: site.id, project_name: site.name,
       work_date: o.date, shift_no: o.shift || null,
       requested_in_at: at(o.date, o.inL), requested_out_at: at(o.date, o.outL),
@@ -83,6 +84,10 @@
     req({ id: "demo-r4", type: "missed_shift", status: "pending", name: "Captain America (demo)", code: "BP-D02",
           site: 1, date: day(5), inL: "08:00", outL: "17:00", created: hoursAgo(98),
           reason: "phone rosak. kerja full day" }),
+    // a pending ask filed with a date far back (the September-date case): shown whatever the dates
+    req({ id: "demo-r9", type: "missed_shift", status: "pending", name: "Vision (demo)", code: "HS-D09",
+          site: 0, date: day(45), inL: "08:00", outL: "17:30", created: hoursAgo(30),
+          reason: "salah pilih tarikh, sepatutnya minggu lepas" }),
     req({ id: "demo-r5", type: "missed_shift", status: "approved", name: "Iron-Man (demo)", code: "BP-D01",
           site: 0, date: day(8), inL: "08:00", outL: "18:00", created: hoursAgo(8 * 24 - 5),
           reason: "new phone, app not install yet",

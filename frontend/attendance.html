@@ -129,7 +129,11 @@
       <span><span class="badge badge-gray">No OT</span> Not paid overtime — every hour counts as a normal hour</span>
       <span><span class="badge badge-amended">Corrected By Office</span> Click the row for details</span>
       <span><span class="badge badge-anomaly">Closed By Office</span> Punch out entered by the office</span>
-      <span><span class="badge badge-anomaly">Auto Closed</span> Closed by the system at 5:00 PM, no overtime</span>
+      <span><span class="badge badge-anomaly">Punch Out Missing</span> Left without a punch-out — settle it on the Exceptions page</span>
+      <span><span class="badge badge-anomaly">Overlong</span> Over 16 hours, unpriced until accepted or ruled</span>
+      <span><span class="badge badge-gray">Early Start</span> Started before 6 AM, counted from 8 AM until credited</span>
+      <span><span class="badge badge-amended">Accepted By Office</span> Accepted as punched, or early start credited</span>
+      <span><span class="badge badge-anomaly">Auto Closed</span> Closed by the system at 5:00 PM, no overtime (older days)</span>
     </div>
 
     <div class="table-wrap" id="month-wrap" hidden>
@@ -195,6 +199,8 @@
 
       <p class="dl-hint" id="dl-hint" aria-live="polite"></p>
       <div class="dl-actions">
+        <!-- 15 Oct review: a month with unpriced days downloads only on a deliberate tick -->
+        <label class="dl-anyway" id="dl-anyway-wrap" hidden><input type="checkbox" id="dl-anyway"> Download Anyway</label>
         <button type="button" class="btn-primary" id="dl-go">Download</button>
       </div>
     </div>
@@ -704,8 +710,23 @@
       // closing a shift is an attendance.edit act, and the database refuses the
       // list to anyone else — so a view-only login is not asked at all
       if (!Dash.can("attendance.edit")) { OS.list = null; renderOpenShifts(); return; }
-      try { OS.list = await Dash.getOpenShifts(); }
-      catch (e) { OS.list = null; }        // DB said no — section stays absent
+      // 0124 (Koon Sheng's review, 15 Oct): the count is the queue's own — Punch
+      // Out Missing, and an earlier day's shift still open — so this line and
+      // the Exceptions page always agree. get_open_shifts counts every shift
+      // with no punch-out, which keeps counting a shift the office has already
+      // ruled a time for (it left the queue, it never got a tap). Before 0124
+      // the queue read is null and the old list stands.
+      try {
+        var q = await Dash.getPunchExceptions(null, null);
+        if (Array.isArray(q)) {
+          var today = Dash.todayKL();
+          OS.list = q.filter(function (r) {
+            return r.kind === "missed" || (r.kind === "long_open" && String(r.work_date).slice(0, 10) < today);
+          });
+        } else {
+          OS.list = await Dash.getOpenShifts();
+        }
+      } catch (e) { OS.list = null; }      // DB said no — section stays absent
       renderOpenShifts();
     }
 
@@ -715,21 +736,11 @@
       if (OS.err) html += '<div class="banner banner-red">' + esc(OS.err) + "</div>";
 
       if (OS.list && OS.list.length) {
+        // 15 Oct review: one line, one door — the Exceptions page settles these
+        // (nothing is auto-closed since 0124); each row carries its own badge
         html += '<div class="banner banner-amber"><strong>' + OS.list.length +
-          " shift(s) never punched out</strong> — the system closes these at 06:05 the next morning. " +
-          "To record the real knock-off time, correct the day." +
-          '<ul style="margin:8px 0 0;padding-left:18px">' +
-          OS.list.map(function (s) {
-            // the same door as the month view's "Correct This Day": opens that
-            // worker's row on that date with the correction form ready
-            return "<li style='margin:4px 0'><strong>" + esc(s.full_name) + "</strong> — " +
-              esc(s.project_name || "no site") + " · in " + esc(Dash.klDateTime(s.in_at)) +
-              ' <span class="muted">(' + esc(s.days_open) + " day" + (s.days_open === 1 ? "" : "s") + " ago)</span> " +
-              '<a class="fix-link" href="attendance.html?date=' + encodeURIComponent(s.work_date) +
-              "&open=" + encodeURIComponent(s.staff_id) + '">Correct This Day</a>' +
-              "</li>";
-          }).join("") +
-          "</ul></div>";
+          " shift(s) never punched out</strong> — settle them on the " +
+          '<a class="fix-link" href="exceptions.html">Exceptions page</a>.</div>';
       }
       el.innerHTML = html;
     }
@@ -957,6 +968,19 @@
               flags.push('<span class="badge badge-anomaly" title="At least one punch that day ' +
                          'could not be location-verified — outside the site fence, weak GPS, or ' +
                          'the site has no fence set.">Location Not Confirmed</span>');
+            }
+            // 0124 (15 Oct review): the states the Exceptions page settles, visible on the row too
+            if (s.missed_out) {
+              flags.push('<span class="badge badge-anomaly" title="Left without a punch-out — the worker said so, or 48 hours passed. Unpriced until HR rules the finish time (Exceptions page).">Punch Out Missing</span>');
+            }
+            if (s.long_shift) {
+              flags.push('<span class="badge badge-anomaly" title="A shift over 16 hours, not yet accepted or ruled. Unpriced until then (Exceptions page).">Overlong</span>');
+            }
+            if (s.early_start) {
+              flags.push('<span class="badge badge-gray" title="A site worker\'s start before 6 AM, counted from 8 AM until the office credits it (Exceptions page).">Early Start</span>');
+            }
+            if (s.long_accepted || s.early_accepted) {
+              flags.push('<span class="badge badge-amended" title="The office accepted this shift as punched, or credited its early start.">Accepted By Office</span>');
             }
             if (s.in_count && !s.out_count) {
               flags.push('<span class="badge badge-gray" title="Punched in, no punch out yet.">Still Working</span>');
@@ -1541,9 +1565,9 @@
         // the month per worker, rounded down to the half hour (0111); the Total
         // row is =SUM of these rounded rows, so it never argues with them
         var mwm = monthMins(w.wm), mom = monthMins(w.om);
-        tDays += w.days; tWm += mwm; tOm += mom; tFix += w.broken; tOpen += w.open;
+        tDays += w.days; tWm += mwm; tOm += mom; tFix += w.broken + w.overlong + w.missed; tOpen += w.open;
         sum.push([CODES[w.staff_id] || "", w.name, companyFull(COMPANY[w.staff_id]), Object.keys(w.sites).join(", "),
-                  w.days, H(mwm), H(mom), H(mwm + mom), w.broken, w.open]);
+                  w.days, H(mwm), H(mom), H(mwm + mom), w.broken + w.overlong + w.missed, w.open]);
       });
       var first = HEAD + 1, last = HEAD + list.length;
       function S(col, cached, hours) {            // =SUM down one column, with the value to show meanwhile
@@ -1604,9 +1628,10 @@
        (fetchMonth -> get_shifts_range), and kept, so stepping back to a month
        already looked at is instant. Nothing here writes anything.
        ======================================================================= */
-    var DL = { month: "", site: "", company: "", cache: {}, ticket: 0 };
+    var DL = { month: "", site: "", company: "", cache: {}, unpriced: {}, ticket: 0 };
 
     function dlKey() { return DL.month + "|" + DL.site; }
+    function monthEndIso(m) { return new Date(Date.UTC(+m.slice(0, 4), +m.slice(5, 7), 0)).toISOString().slice(0, 10); }
     function dlSiteName() {
       var el = document.getElementById("dl-site");
       return (el && el.value && el.selectedIndex >= 0) ? el.options[el.selectedIndex].text : "All Sites";
@@ -1630,15 +1655,34 @@
             : k + " worker" + (k === 1 ? "" : "s")) + "</span></label>";
       }).join("");
       var can = !!workers && dlCount(workers, DL.company) > 0;
-      document.getElementById("dl-go").disabled = !can;
-      document.getElementById("dl-hint").className = "dl-hint";
-      document.getElementById("dl-hint").textContent = !workers ? ""
-        : can ? "" : "No Data Available";
+      // 15 Oct review: nothing unpriced slips into a month end unseen. Every
+      // unpriced day of the month for this company is counted (all sites), and
+      // a sheet that would be short by those days downloads only on a tick.
+      var u = DL.unpriced[DL.month], short = 0;
+      if (u) u.forEach(function (x) { if (!DL.company || x.company_code === DL.company) short++; });
+      var wrap = document.getElementById("dl-anyway-wrap"), tick = document.getElementById("dl-anyway");
+      wrap.hidden = !(can && short > 0);
+      if (wrap.hidden) tick.checked = false;
+      document.getElementById("dl-go").disabled = !can || (short > 0 && !tick.checked);
+      var hint = document.getElementById("dl-hint");
+      hint.className = "dl-hint" + (short > 0 ? " is-error" : "");
+      hint.innerHTML = !workers ? "" : !can ? "No Data Available"
+        : short > 0 ? short + (short === 1 ? " Day Unpriced" : " Days Unpriced") + " — the sheet is short by " +
+                      (short === 1 ? "that day" : "those days") + '. <a href="exceptions.html?from=' + esc(DL.month + "-01") +
+                      "&to=" + esc(monthEndIso(DL.month)) + (DL.company ? "&company=" + esc(DL.company) : "") + '">See Them</a>'
+        : "";
     }
 
     async function dlLoad() {
       var key = dlKey(), mine = ++DL.ticket;
       dlRender();
+      if (DL.unpriced[DL.month] === undefined) {
+        DL.unpriced[DL.month] = null;                         // asked; nothing to say yet
+        Dash.getUnpricedDays(DL.month + "-01", monthEndIso(DL.month)).then(function (rows) {
+          DL.unpriced[DL.month] = rows || [];                  // null = the database predates 0124: nothing to warn
+          if (mine === DL.ticket) dlRender();
+        }).catch(function () { DL.unpriced[DL.month] = []; });
+      }
       if (DL.cache[key]) return;
       try {
         var rows = await fetchMonth(DL.month, DL.site);
@@ -1695,6 +1739,7 @@
         if (ev.target.name === "dl-company") { DL.company = ev.target.value; dlRender();
           var again = document.querySelector('#dl-companies input[value="' + DL.company + '"]'); if (again) again.focus(); }
       });
+      document.getElementById("dl-anyway").addEventListener("change", dlRender);
       document.getElementById("dl-cancel").addEventListener("click", dlClose);
       window.addEventListener("resize", function () { if (!document.getElementById("dl-back").hidden) dlPlace(); });
       window.addEventListener("scroll", function () { if (!document.getElementById("dl-back").hidden) dlPlace(); }, { passive: true });
@@ -1760,13 +1805,16 @@
         var key = r.staff_id || ("name:" + (r.full_name || "(unnamed)"));
         var w = map[key] || (map[key] = {
           staff_id: r.staff_id || null, name: r.full_name || "(unnamed)",
-          sites: {}, days: 0, normal: 0, ot: 0, wm: 0, om: 0, broken: 0, open: 0, rows: []
+          sites: {}, days: 0, normal: 0, ot: 0, wm: 0, om: 0, broken: 0, open: 0, missed: 0, overlong: 0, early: 0, rows: []
         });
         if (r.project_name) w.sites[r.project_name] = true;
         if (r.out_project_name) w.sites[r.out_project_name] = true;   // a day that ended elsewhere (0102)
         // the database's price for the day, or null — never re-worked-out here
         var h = hoursOf(r);
-        if (r.overlong_shift) w.broken++;
+        if (r.early_start) w.early++;                 // 0124: priced from 8 AM; the office may credit it
+        if (r.missed_out) w.missed++;                 // 0124: left without a punch-out — unpriced
+        else if (r.overlong_shift) w.broken++;
+        else if (r.long_shift) w.overlong++;          // 0124: over 16 h, unpriced until accepted or ruled
         else if (!h) w.open++;
         else {
           w.days++; w.normal += h.normal; w.ot += h.ot;
@@ -1855,6 +1903,12 @@
           'in this worker\'s totals until corrected.">' + w.broken + " To Fix</span>");
         if (w.open) att.push('<span class="badge badge-gray" title="Day(s) with a punch in and ' +
           'no punch out. No hours to count yet.">' + w.open + " Still Open</span>");
+        if (w.missed) att.push('<span class="badge badge-anomaly" title="Day(s) left without a punch-out. ' +
+          'Unpriced until HR rules the finish time on the Exceptions page.">' + w.missed + " Punch Out Missing</span>");
+        if (w.overlong) att.push('<span class="badge badge-anomaly" title="Day(s) with a shift over 16 hours, not yet ' +
+          'accepted or ruled. Unpriced until then.">' + w.overlong + " Overlong</span>");
+        if (w.early) att.push('<span class="badge badge-gray" title="Day(s) started before 6 AM, counted from 8 AM ' +
+          'until the office credits them.">' + w.early + " Early Start</span>");
         // the month figures, rounded down to the half hour (monthMins); the
         // footer adds THESE, so it agrees with the rows and the Excel Summary
         var mwm = monthMins(w.wm), mom = monthMins(w.om);

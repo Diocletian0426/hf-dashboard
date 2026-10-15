@@ -1,0 +1,1128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nexus — Punch Exceptions</title>
+  <link rel="stylesheet" href="styles.css" />
+  <!-- Page-only bits, tokens only. Kept here rather than in styles.css so this
+       page ships as one new file (the Requests page did the same). -->
+  <style>
+    /* the cards: one line each (15 Oct review: the sub-lines made them thick) */
+    .istats-slim .istat { padding: 8px 14px; gap: 10px; }
+    .istats-slim .istat-ic { width: 30px; height: 30px; }
+    .istats-slim .istat-ic .ic { width: 16px; height: 16px; }
+    .istats-slim .istat-top b { font-size: var(--fs-lg); }
+    .ex-counts { margin-left: auto; }
+    .tbl-ex td { vertical-align: top; }
+    .tbl-ex th, .tbl-ex td { padding-left: 12px; padding-right: 12px; }
+    .tbl-ex td.ex-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .ex-sub { display: block; margin-top: 2px; color: var(--ink-3); font-size: var(--fs-xs); font-weight: 400; }
+    .ex-k { display: inline-block; min-width: 30px; text-align: left; color: var(--ink-3);
+            font-size: var(--fs-xs); font-weight: 600; }
+    .ex-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+    .ex-kind-missed      { background: var(--danger-soft); color: var(--danger-ink); }
+    .ex-kind-overlong    { background: var(--danger-soft); color: var(--danger-ink); }
+    .ex-kind-early_start { background: var(--warn-soft);   color: var(--warn-ink); }
+    .ex-kind-long_open   { background: rgba(15, 42, 84, 0.07); color: var(--ink-2); }
+    .ex-kind-declared    { background: var(--brand-soft);  color: var(--brand-ink); }
+    /* the row opens into a panel under it: the story on the left, the answer on the right */
+    tr.ex-row { cursor: pointer; }
+    tr.ex-open > td, tr.ex-panel-row > td { background: var(--brand-soft); }
+    tr.ex-panel-row > td { white-space: normal; padding: 4px 12px 16px; }
+    .ex-toggle { white-space: nowrap; }
+    .ex-panel { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: var(--sp-5); align-items: start; }
+    .ex-panel-l, .ex-panel-r { min-width: 0; }
+    .ex-panel-r { background: var(--surface-solid); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 12px 14px; }
+    .ex-h { margin: 8px 0 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.8px; text-transform: uppercase; color: var(--ink-3); }
+    .ex-why { margin: 0; color: var(--ink); font-size: var(--fs-md); line-height: 1.45; }
+    .ex-note { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0 0; color: var(--ink-2); font-size: var(--fs-sm); }
+    .ex-note b { font-weight: 600; color: var(--ink); }
+    .ex-punches { list-style: none; margin: 0; padding: 0; }
+    .ex-punches li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; line-height: 1.9;
+                     font-variant-numeric: tabular-nums; font-size: var(--fs-sm); }
+    .ex-req { margin-top: 12px; padding: 10px 12px; border-radius: var(--r-md);
+              background: var(--surface-solid); border: 1px solid var(--brand-border); }
+    .ex-req p { margin: 0 0 8px; font-size: var(--fs-sm); color: var(--ink); }
+    .ex-req p b { font-weight: 600; }
+    .ex-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+    .ex-acts .btn { text-align: center; text-decoration: none; }
+    .ex-acts .btn.ex-accept { color: var(--ok-ink); }
+    .ex-acts .btn.ex-accept:hover { background: var(--ok-soft); border-color: #bbf7d0; color: var(--ok-ink); }
+    .ex-acts .btn[aria-pressed="true"] { background: var(--charcoal); border-color: var(--charcoal); color: #fff; }
+    .ex-day-link { display: inline-block; margin-top: 10px; }
+    /* the inline confirm (accept / credit / keep / approve / reject) — not a modal */
+    .ex-confirm { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--sp-3); margin-top: 12px;
+                  padding-top: 12px; border-top: 1px solid var(--line); }
+    .ex-confirm-q { flex: 1 1 100%; margin: 0; color: var(--ink); font-size: var(--fs-md); }
+    .ex-confirm-q + .muted { flex: 1 1 100%; margin: -6px 0 0; }
+    .ex-confirm label { display: flex; flex-direction: column; gap: 4px; flex: 1 1 100%;
+                        font-size: var(--fs-xs); font-weight: 600; color: var(--ink-2); }
+    .ex-confirm input[type="text"], .cf input[type="text"], .cf input[type="time"] {
+      font-family: var(--font); font-size: 13.5px; color: var(--ink);
+      padding: 8px 10px; border: 1px solid var(--line-strong);
+      border-radius: var(--r-sm); background: var(--surface-solid); }
+    .ex-confirm input[aria-invalid="true"], .cf input[aria-invalid="true"] { border-color: var(--danger); }
+    .ex-confirm-err, .cf-err { flex: 1 1 100%; color: var(--danger-ink); font-size: var(--fs-sm); white-space: pre-wrap; }
+    .ex-confirm-err:empty, .cf-err:empty { display: none; }
+    .ex-reasons, .cf-reasons { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 100%; }
+    .ex-reasons button, .cf-reasons button { font-family: var(--font); font-size: 12.5px; padding: 6px 12px; border-radius: var(--r-pill);
+                         border: 1px solid var(--line-strong); background: #fff; color: var(--ink); cursor: pointer; }
+    .ex-reasons button:hover, .cf-reasons button:hover { background: var(--surface-2); }
+    /* Rule The Times (correct-form.js) */
+    .cf { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+    .cf-times { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: flex-end; }
+    .cf-times label, .cf-why { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-xs); font-weight: 600; color: var(--ink-2); }
+    .cf-times label.cf-next { flex-direction: row; align-items: center; gap: 6px; font-weight: 500; padding-bottom: 8px; }
+    .cf-reasons { margin-top: 10px; }
+    .cf-why { margin-top: 8px; }
+    .cf-why input { width: 100%; box-sizing: border-box; }
+    .cf-err { margin-top: 6px; }
+    .cf-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+    /* Compare With Crew: the same site, the same day, everyone's taps */
+    .ex-crew { margin-top: 12px; }
+    .ex-crew-head { margin: 0 0 6px; font-size: var(--fs-sm); color: var(--ink-2); }
+    .ex-crew-head b { color: var(--ink); }
+    table.ex-crew-tbl { width: auto; min-width: 420px; font-size: 13px;
+                        background: var(--surface-solid); border: 1px solid var(--line); }
+    table.ex-crew-tbl th, table.ex-crew-tbl td { padding: 6px 10px; position: static; white-space: nowrap; }
+    table.ex-crew-tbl tr.ex-me > td { font-weight: 600; background: #fff7ed; }
+    .ex-undo { margin-left: 10px; }
+    .ex-foot { margin: var(--sp-3) 0 0; }
+    .ex-pay { margin-top: var(--sp-6); }
+    .ex-pay h2 { font-size: var(--fs-xl); margin: 0 0 var(--sp-2); }
+    .ex-pay-sum { margin: 0 0 var(--sp-3); color: var(--ink-2); font-size: var(--fs-sm); }
+    .tbl-pay td:nth-child(1) { min-width: 150px; }
+    @media (min-width: 761px) {
+      .tbl-ex td:nth-child(1) { min-width: 130px; }
+      .tbl-ex td:nth-child(3) { min-width: 100px; }
+    }
+    @media (max-width: 900px) {
+      .ex-panel { grid-template-columns: 1fr; }
+      table.ex-crew-tbl { min-width: 0; width: 100%; }
+    }
+    @media (max-width: 760px) {
+      .ex-acts .btn { flex: 1; min-height: var(--tap); }
+      .table-stack tr.ex-panel-row > td { display: block; text-align: left; }
+    }
+  </style>
+</head>
+<body>
+
+  <header id="nav"></header>
+
+  <main id="main">
+    <!-- ================= PUNCH EXCEPTIONS (office side, DB 0124) ===========
+         The shifts the punch system could not settle on its own. Since 0124
+         nothing is auto-closed: a forgotten punch-out is a question to the
+         worker, and what is still unsettled lands here for the office.
+         One row per shift AND kind (get_punch_exceptions):
+           missed       left without a punch-out — the worker said so (Start
+                        New Shift) or 48 h passed. Unpriced until the office
+                        rules a finish time.
+           overlong     closed over 16 h and not accepted: unpriced until the
+                        office accepts it as punched or rules a time.
+           early_start  a site worker's start before 06:00: counted from 08:00
+                        until the office credits the real punch-in (or keeps
+                        it at 8 AM — settled, no pay change).
+           long_open    still open 16 h or more. The phone asks the worker at
+                        punch-out; today's is just someone at work (Still
+                        Running), an earlier day's can be ruled.
+         THE PAGE (15 Oct review, second round):
+           - every unresolved shift since the rule's start date is shown by
+             default (All Unresolved); the dates narrow it when the office
+             wants a period. The card counts follow the same filters as the
+             table (site, company, dates); the lit card is the kind filter.
+           - a row is one line of facts (worker, site, date, in, out, hours,
+             problem). Clicking it opens a panel under it: the story on the
+             left (what is wrong, the worker's reason, the punches as tapped
+             and as ruled, the worker's request if one waits, Compare With
+             Crew), the answer on the right — Accept As Punched / Credit From
+             Punch-In / Keep From 8 AM with a reason, and RULE THE TIMES in
+             place (correct-form.js → set_day_correction, per shift), so no
+             trip to the Attendance page is needed. A worker's Change Times
+             request is answered here too (review_attendance_request); until
+             it is, accepting and ruling are held.
+         Compare With Crew = get_daily_shifts(work_date, project_id): the same
+         site, the same day, everyone's taps — the supervisor evidence. A true
+         night shows the crew ending together; a forgotten punch-out shows one
+         worker ending at 08:00 while the crew ended at 17:30.
+         Before Payroll Closes = get_unpriced_days: every worker day in the
+         month (or the chosen dates) that would reach payroll with no figure
+         or a request waiting.
+         Opening needs attendance.edit (shell PAGE_ACCESS) and the database
+         re-checks every call on the same permission. Punches are never
+         edited here: an acceptance is a mark beside them (undone with Undo),
+         a ruling is a row in the corrections layer the worker can read. -->
+    <div class="page-eyebrow">Attendance</div>
+    <h1>Punch Exceptions</h1>
+    <p class="page-caption" id="ex-sub">Shifts the office must settle before payroll. Times are Malaysia time.</p>
+
+    <div id="error"></div>
+    <!-- the counts ARE the kind filter, same as the Issues and Requests pages -->
+    <div class="istats istats-slim" id="ex-stats"></div>
+
+    <div class="mp-controls" id="ex-controls">
+      <span>Site: <select id="f-site" aria-label="Site"><option value="">All Sites</option></select></span>
+      <span>Company: <select id="f-company" aria-label="Company">
+        <option value="">All Companies</option>
+        <option value="HF-BP">HF Bored Piles Malaysia Sdn Bhd</option>
+        <option value="Hai Fu">Hai Fu Sheet Piles Sdn Bhd</option></select></span>
+      <span>
+        <button type="button" data-range="all">All Unresolved</button>
+        <button type="button" data-range="month">This Month</button>
+        <button type="button" data-range="last">Last Month</button>
+        <button type="button" data-range="31">Last 31 Days</button>
+      </span>
+      <span>From <input type="date" id="f-from" aria-label="From date">
+            to <input type="date" id="f-to" aria-label="To date"></span>
+      <span class="tool-search">
+        <svg class="ric" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="11" cy="11" r="6.5"/><path d="M15.8 15.8 20.5 20.5"/>
+        </svg>
+        <input type="search" id="f-text" placeholder="Search worker name or code…"
+               aria-label="Search by worker name or code" />
+        <span class="muted" id="f-count"></span>
+      </span>
+      <span class="muted ex-counts">Counts follow these filters.</span>
+    </div>
+
+    <div class="table-wrap table-stack tbl-ex">
+      <table>
+        <thead id="ex-head"></thead>
+        <tbody id="ex-rows"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
+      </table>
+    </div>
+    <p class="muted ex-foot" id="ex-foot"></p>
+
+    <section class="ex-pay" id="ex-pay">
+      <h2>Before Payroll Closes</h2>
+      <p class="page-caption">Every worker day in <span id="pay-range">this month</span>, all sites, that would
+        reach payroll with no figure or with a request still waiting. Settle each one above, or on the
+        Attendance page.</p>
+      <p class="ex-pay-sum" id="pay-sum"></p>
+      <div class="table-wrap table-stack tbl-pay">
+        <table>
+          <thead><tr><th>Worker</th><th>Date</th><th>Why</th><th></th></tr></thead>
+          <tbody id="pay-rows"><tr><td colspan="4" class="empty">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="vendor/supabase.js"></script>
+  <script src="config.js"></script>
+  <script src="dashboard-client.js"></script>
+  <script src="ui.js"></script>
+  <script src="correct-form.js"></script>
+  <!-- DEV ONLY: does nothing unless the URL has ?demo=1, and never writes.
+       Must sit BEFORE shell.js (it stands in for the sign-in the shell asks
+       for). Delete this line + exceptions-demo.js before the pilot starts. -->
+  <script src="exceptions-demo.js"></script>
+  <script src="shell.js"></script>
+
+  <script>
+    var esc = UI.esc, escHtml = UI.escHtml;
+
+    // the cards, in the order the office works them: act, act, review, watch
+    var KINDS = [
+      { key: "missed",      label: "Punch Out Missing", icon: "alert", tone: "bad"  },
+      { key: "overlong",    label: "Overlong",          icon: "clock", tone: "bad"  },
+      { key: "early_start", label: "Early Start",       icon: "play",  tone: "warn" },
+      { key: "long_open",   label: "Open 16 h+",        icon: "clock", tone: "grey" }
+    ];
+    var KIND_ORDER = {};
+    KINDS.forEach(function (k, i) { KIND_ORDER[k.key] = i; });
+    // the office answers: the database kind behind each button
+    var KIND_OF = { accept: "long", early: "early", keep: "early_keep" };
+    var KIND_LABEL = {};
+    KINDS.forEach(function (k) { KIND_LABEL[k.key] = k.label; });
+    var WHY_WORDS = { missed: "Punch Out Missing", open: "Still Open", overlong: "Overlong",
+                      unpriced: "Unpriced", pending_request: "Request Pending" };
+    var WHY_CLASS = { missed: "ex-kind-missed", open: "ex-kind-long_open", overlong: "ex-kind-overlong",
+                      unpriced: "chip-warn", pending_request: "ex-kind-declared" };
+    var UNKNOWN = "Unknown Location";
+    var COLS = 8;
+    // one tap is a reason (15 Oct review): what the office checked before accepting
+    var ACCEPT_REASONS = ["Crew Finished Together", "Supervisor Confirmed", "Site Record", "Other"];
+
+    var X = {
+      rows: [], unpriced: null, projects: [],
+      canEdit: false, loading: true, loadErr: "", payErr: "",
+      kind: "", project: "", company: "", q: "",
+      all: true, from: "", to: "",   // All Unresolved (the database's floor to today) or a chosen range
+      open: null,             // the key of the row whose panel is open (one at a time)
+      act: null,              // { key, act, note, form, err, busy, invalid } — the answer being given
+      crewCache: {},          // "date|projectId" -> rows | { err }
+      ok: "", err: "",        // the result banner of the last action
+      undo: null              // { staffId, workDate, shiftNo, kind, who } — Undo for the last acceptance
+    };
+
+    /* ---------------------------- small helpers ---------------------------- */
+
+    function addDays(iso, n) {
+      var d = new Date(iso + "T00:00:00Z");
+      d.setUTCDate(d.getUTCDate() + n);
+      return d.toISOString().slice(0, 10);
+    }
+    function monthStart(iso) { return iso.slice(0, 7) + "-01"; }
+    function weekday(iso) {
+      return new Date(iso + "T00:00:00").toLocaleDateString("en-MY", { weekday: "short" });
+    }
+    // a time on the work day reads "07:58 am"; on a later day "14 Oct, 05:10 am"
+    function timeWord(ts, workDate) {
+      if (!ts) return "";
+      return CorrectForm.klDate(ts) === String(workDate || "").slice(0, 10) ? Dash.klTime(ts) : Dash.klDateTime(ts);
+    }
+    function minsText(min) {
+      min = Math.max(0, Math.round(Number(min) || 0));
+      var h = Math.floor(min / 60), m = min % 60;
+      if (!h) return m + " m";
+      return h + " h" + (m ? " " + (m < 10 ? "0" : "") + m + " m" : "");
+    }
+    function hoursText(hours) { return minsText((Number(hours) || 0) * 60); }
+    function sameTs(a, b) { return !!a && !!b && new Date(a).getTime() === new Date(b).getTime(); }
+    // a site worker's start before 06:00: the minutes before 08:00 that are not credited
+    function uncreditedMins(r) {
+      var eight = new Date(String(r.work_date).slice(0, 10) + "T08:00:00+08:00").getTime();
+      var start = new Date(r.official_in_at || r.in_at).getTime();
+      var end = r.out_at ? new Date(r.out_at).getTime() : Date.now();
+      return Math.max(0, (Math.min(end, eight) - start) / 60000);
+    }
+    function isMissingFunction(e) {
+      var code = (e && e.code) || "";
+      return code === "PGRST202" || /could not find the function/i.test(String((e && e.message) || ""));
+    }
+    function rowKey(r) { return r.kind + "|" + r.staff_id + "|" + String(r.work_date).slice(0, 10) + "|" + (r.shift_no || 1); }
+    function byKey(key) { return X.rows.filter(function (r) { return rowKey(r) === key; })[0]; }
+    function whoWords(r) {
+      return (r.full_name || "—") + (r.employee_code ? " (" + r.employee_code + ")" : "");
+    }
+    function dayWords(r) { return weekday(r.work_date) + " " + UI.dstr(r.work_date); }
+    function shiftWords(r) { return Number(r.shift_no) > 1 ? ", Shift " + r.shift_no : ""; }
+    function isToday(r) { return String(r.work_date).slice(0, 10) >= Dash.todayKL(); }
+    function dayHref(r) {
+      var no = Number(r.shift_no) || 1;
+      return "attendance.html?date=" + encodeURIComponent(String(r.work_date).slice(0, 10)) +
+             "&open=" + encodeURIComponent(r.staff_id) + (no > 1 ? "&shift=" + no : "");
+    }
+    function formSpec(r) {
+      return { id: rowKey(r), workDate: String(r.work_date).slice(0, 10), inAt: r.in_at, outAt: r.out_at,
+               officialInAt: r.official_in_at, officialOutAt: r.official_out_at, adjusted: !!r.adjusted };
+    }
+
+    /* ------------------------------ the row -------------------------------- */
+
+    function kindChip(kind) {
+      return '<span class="chip ex-kind-' + esc(kind) + '">' + escHtml(KIND_LABEL[kind] || UI.label(kind)) + "</span>";
+    }
+    function outWord(r) {
+      if (r.out_at) return escHtml(timeWord(r.out_at, r.work_date));
+      return '<span class="muted">' + (r.kind === "missed" ? "Not Recorded" : "Still Open") + "</span>";
+    }
+    function hoursWord(r) {
+      return escHtml(hoursText(r.hours)) + (r.out_at ? "" : ' <span class="muted">elapsed</span>');
+    }
+
+    function rowHtml(r) {
+      var key = rowKey(r), open = X.open === key;
+      var chips = kindChip(r.kind) +
+        (r.request_pending ? ' <span class="chip ex-kind-declared">Request Pending</span>' : "") +
+        (r.off_site_out ? ' <span class="chip chip-warn">Off-Site Punch-Out</span>' : "");
+      return '<tr class="ex-row' + (open ? " ex-open" : "") + '" data-key="' + esc(key) + '">' +
+          UI.td("Worker", "<div><b>" + escHtml(r.full_name || "—") + "</b>" +
+            '<span class="ex-sub">' + escHtml([r.employee_code, r.company_code].filter(Boolean).join(" · ")) + "</span></div>", "wrap") +
+          UI.td("Site", r.project_name ? escHtml(r.project_name) : '<span class="muted">' + UNKNOWN + "</span>", "wrap") +
+          UI.td("Date", "<div>" + escHtml(UI.dstr(r.work_date)) + '<span class="ex-sub">' + escHtml(weekday(r.work_date)) +
+            (Number(r.shift_no) > 1 ? " · Shift " + escHtml(r.shift_no) : "") + "</span></div>") +
+          UI.td("In", escHtml(Dash.klTime(r.in_at)), "ex-num") +
+          UI.td("Out", outWord(r), "ex-num") +
+          UI.td("Hours", hoursWord(r), "ex-num") +
+          UI.td("Problem", '<div class="ex-chips">' + chips + "</div>", "wrap") +
+          UI.td("", '<button type="button" class="btn ex-toggle" data-act="open" data-key="' + esc(key) +
+            '" aria-expanded="' + open + '">' + (open ? "Close" : "Details") + "</button>") +
+        "</tr>" +
+        (open ? panelRow(r) : "");
+    }
+
+    /* ------------------------------ the panel ------------------------------ */
+
+    // what is wrong, in a sentence the office acts on
+    function whySentence(r) {
+      switch (r.kind) {
+        case "missed":
+          return "Left without a punch-out. Unpriced until the office rules the finish time.";
+        case "long_open":
+          return "Open for " + hoursText(r.hours) + (isToday(r) ? ", still running" : "") +
+                 ". The worker is asked when punching out; nothing is priced yet.";
+        case "overlong":
+          return "Over 16 hours and not accepted. Unpriced until accepted as punched or a time is ruled.";
+        case "early_start":
+          return "Started " + Dash.klTime(r.official_in_at || r.in_at) + ". " + minsText(uncreditedMins(r)) +
+                 " before 8 AM is not credited until accepted.";
+      }
+      return "";
+    }
+
+    // the punches as tapped, and as ruled when the office has ruled on an end
+    function punchesHtml(r) {
+      var st = CorrectForm.standing(formSpec(r));
+      function line(label, tap, ruled, extra) {
+        var h = '<li><span class="ex-k">' + label + "</span>";
+        if (ruled) {
+          h += "<b>" + escHtml(timeWord(ruled, r.work_date)) + '</b><span class="chip badge-gray">Set By Office</span>' +
+               (tap ? '<span class="muted">tapped ' + escHtml(timeWord(tap, r.work_date)) + "</span>" : "");
+        } else if (tap) {
+          h += escHtml(timeWord(tap, r.work_date));
+        } else {
+          h += '<span class="muted">' + (r.kind === "missed" ? "Not Recorded" : "Still Open") + "</span>";
+        }
+        return h + (extra || "") + "</li>";
+      }
+      var outExtra = r.off_site_out ? '<span class="chip chip-warn">Off-Site Punch-Out</span>' : "";
+      var h = '<ul class="ex-punches">' +
+        line("In",  r.in_at,  st.ruledIn) +
+        line("Out", r.out_at, st.ruledOut, outExtra) +
+        (r.flexible_hours ? '<li><span class="ex-k"></span><span class="chip badge-gray">Flexible Hours</span>' +
+          '<span class="muted">comes and goes at own times</span></li>' : "") +
+        "</ul>";
+      if (r.adjusted && r.adjust_reason) {
+        h += '<p class="ex-note"><b>Office ruling:</b> ' + escHtml(r.adjust_reason) + "</p>";
+      }
+      return h;
+    }
+
+    // the worker's Change Times request on this shift: answered here (15 Oct review, second round)
+    function requestHtml(r) {
+      if (!r.request_pending) return "";
+      var key = rowKey(r);
+      var a = X.act && X.act.key === key ? X.act.act : "";
+      var h = '<div class="ex-req"><p><b>Request Pending</b> — the worker asked to finish at <b>' +
+        (r.declared_out_at ? escHtml(timeWord(r.declared_out_at, r.work_date)) : "a different time") +
+        "</b> (Change Times).</p>";
+      if (X.canEdit) {
+        h += '<div class="ex-acts">' +
+          '<button type="button" class="btn ex-accept" data-act="approve" data-key="' + esc(key) +
+            '" aria-pressed="' + (a === "approve") + '">Approve</button>' +
+          '<button type="button" class="btn" data-act="reject" data-key="' + esc(key) +
+            '" aria-pressed="' + (a === "reject") + '">Reject</button>' +
+          '<a class="btn" href="requests.html?status=pending">Open Requests</a>' +
+        "</div>";
+        if (a === "approve" || a === "reject") h += confirmHtml(r);
+      } else {
+        h += '<a class="section-link" href="requests.html?status=pending">Open Requests</a>';
+      }
+      return h + "</div>";
+    }
+
+    // Compare With Crew: everyone at the same site that day, the subject first
+    function crewHtml(r) {
+      var inner;
+      if (!r.project_id) {
+        inner = '<p class="ex-crew-head">No site on record for this shift, so there is no crew to compare.</p>';
+      } else {
+        var got = X.crewCache[String(r.work_date).slice(0, 10) + "|" + r.project_id];
+        if (!got) {
+          inner = '<p class="ex-crew-head">Loading the crew…</p>';
+        } else if (got.err) {
+          inner = '<p class="ex-crew-head" style="color:var(--danger-ink)">Could not load the crew: ' + escHtml(got.err) + "</p>";
+        } else {
+          var rows = got.slice().sort(function (a, b) {
+            var am = a.staff_id === r.staff_id ? 0 : 1, bm = b.staff_id === r.staff_id ? 0 : 1;
+            if (am !== bm) return am - bm;
+            var ao = a.last_out_at || "", bo = b.last_out_at || "";
+            if (ao !== bo) return ao < bo ? -1 : 1;
+            return String(a.full_name || "").localeCompare(String(b.full_name || ""));
+          });
+          var others = rows.length - 1;
+          inner = '<p class="ex-crew-head"><b>' + escHtml(r.project_name || UNKNOWN) + "</b> on " +
+                  escHtml(dayWords(r)) + " — " + (others < 1 ? "nobody else punched here that day."
+                    : others + (others === 1 ? " other worker" : " other workers") + ", taps as recorded.") + "</p>";
+          if (rows.length) {
+            inner += '<table class="ex-crew-tbl"><thead><tr><th>Worker</th><th>In</th><th>Out</th><th>Hours</th></tr></thead><tbody>' +
+              rows.map(function (w) {
+                var missed = (w.shifts || []).some(function (s) { return s && s.missed; });
+                var out = w.open_shift && !w.last_out_at ? '<span class="chip chip-warn">Still Open</span>'
+                        : escHtml(timeWord(w.last_out_at, r.work_date));
+                var tags = "";
+                if (missed) tags += ' <span class="chip ex-kind-missed">Punch Out Missing</span>';
+                if (w.flexible_hours) tags += ' <span class="chip badge-gray">Flexible Hours</span>';   // comes and goes at its own times
+                if (w.has_correction) tags += ' <span class="chip badge-gray">Corrected</span>';
+                if (Number(w.shift_count) > 1) tags += ' <span class="chip badge-gray">' + w.shift_count + " Shifts</span>";
+                return '<tr class="' + (w.staff_id === r.staff_id ? "ex-me" : "") + '"><td>' + escHtml(w.full_name || "—") +
+                       "</td><td>" + escHtml(Dash.klTime(w.first_in_at)) + "</td><td>" + out + tags + "</td><td>" +
+                       escHtml(w.hours_on_site == null ? "—" : hoursText(w.hours_on_site)) + "</td></tr>";
+              }).join("") + "</tbody></table>";
+          }
+        }
+      }
+      return '<div class="ex-crew"><p class="ex-h">Compare With Crew</p>' + inner + "</div>";
+    }
+
+    // the answer: the buttons for this kind, and the form of the one pressed
+    function settleHtml(r) {
+      var key = rowKey(r);
+      var a = X.act && X.act.key === key ? X.act.act : "";
+      var h = '<p class="ex-h">Settle</p>';
+      if (!X.canEdit) {
+        h += '<p class="muted">View only — settling a shift needs the Attendance edit permission.</p>';
+      } else if (r.request_pending) {
+        // 15 Oct review: a shift with a worker's request waiting is answered first
+        h += '<p class="muted">Answer the worker’s request first. Accepting and ruling are held until then.</p>';
+      } else if (r.kind === "long_open" && isToday(r)) {
+        h += '<p class="muted">Still Running — nothing to do yet. The worker is asked when punching out.</p>';
+      } else {
+        var b = "";
+        function btn(act, label, cls) {
+          return '<button type="button" class="btn ' + (cls || "") + '" data-act="' + act + '" data-key="' + esc(key) +
+                 '" aria-pressed="' + (a === act) + '">' + label + "</button>";
+        }
+        if (r.kind === "overlong")    b += btn("accept", "Accept As Punched", "ex-accept");
+        if (r.kind === "early_start") b += btn("early", "Credit From Punch-In", "ex-accept") + btn("keep", "Keep From 8 AM");
+        b += btn("rule", "Rule The Times");
+        h += '<div class="ex-acts">' + b + "</div>";
+        if (a === "accept" || a === "early" || a === "keep") h += confirmHtml(r);
+        if (a === "rule") h += CorrectForm.html(formSpec(r), X.act.form,
+          { busy: X.act.busy, err: X.act.err, invalid: X.act.invalid });
+      }
+      h += '<a class="section-link ex-day-link" href="' + esc(dayHref(r)) + '">Open The Day</a>';
+      return h;
+    }
+
+    // the small inline confirm — accept / credit / keep / approve / reject
+    function confirmHtml(r) {
+      var c = X.act, act = c.act;
+      var who = escHtml(whoWords(r)), when = escHtml(dayWords(r) + shiftWords(r));
+      var span = escHtml(Dash.klTime(r.in_at) + " to " + (r.out_at ? timeWord(r.out_at, r.work_date) : "open") +
+                         " (" + hoursText(r.hours) + ")");
+      var what, hint, label, placeholder, required = false, go, reasons = null;
+      if (act === "accept") {
+        what = "Accept <b>" + who + "</b>’s shift on " + when + " as punched — " + span + "?";
+        hint = "The shift is priced exactly as tapped. The punches stay as they are; the acceptance and your reason are " +
+               "recorded under your name and can be undone.";
+        label = "Reason (required)"; placeholder = "pick one above, or write it"; go = "Accept As Punched"; required = true; reasons = ACCEPT_REASONS;
+      } else if (act === "early") {
+        what = "Count <b>" + who + "</b>’s shift on " + when + " from the real punch-in, " +
+               escHtml(Dash.klTime(r.official_in_at || r.in_at)) + "?";
+        hint = minsText(uncreditedMins(r)) + " more is credited. Site workers normally count from 8 AM; the credit and your " +
+               "reason are recorded under your name and can be undone.";
+        label = "Reason (required)"; placeholder = "pick one above, or write it"; go = "Credit From Punch-In"; required = true; reasons = ACCEPT_REASONS;
+      } else if (act === "keep") {
+        what = "Keep <b>" + who + "</b>’s shift on " + when + " counted from 8 AM?";
+        hint = "The " + minsText(uncreditedMins(r)) + " before 8 AM stay uncredited, as the rule says. The row leaves the queue; " +
+               "this can be undone.";
+        label = "Note (optional)"; placeholder = "e.g. arrived early by choice"; go = "Keep From 8 AM";
+      } else if (act === "approve") {
+        what = "Approve <b>" + who + "</b>’s request: finished at " +
+               (r.declared_out_at ? escHtml(timeWord(r.declared_out_at, r.work_date)) : "the asked time") + " on " + when + "?";
+        hint = "The asked time then stands on the shift as the office’s ruling, the shift is priced, and the worker is told.";
+        label = "Note (optional)"; placeholder = "e.g. matches the crew"; go = "Approve Request";
+      } else {
+        what = "Reject <b>" + who + "</b>’s request on " + when + "?";
+        hint = "The punches stand as tapped and the shift stays on this list to settle. The worker reads your note in their app.";
+        label = "Note (required)"; placeholder = "why the request is refused"; go = "Reject Request"; required = true;
+      }
+      return '<div class="ex-confirm" role="group" aria-label="Confirm">' +
+          '<p class="ex-confirm-q">' + what + "</p>" +
+          '<p class="muted">' + escHtml(hint) + "</p>" +
+          (reasons ? '<div class="ex-reasons">' + reasons.map(function (t) {
+              return '<button type="button" data-reason="' + esc(t) + '"' + (c.busy ? " disabled" : "") + ">" + escHtml(t) + "</button>";
+            }).join("") + "</div>" : "") +
+          "<label>" + escHtml(label) +
+            '<input type="text" id="ex-note" maxlength="500" autocomplete="off" value="' + esc(c.note) + '"' +
+            (c.invalid ? ' aria-invalid="true"' : "") + (c.busy ? " disabled" : "") +
+            ' placeholder="' + esc(placeholder) + '"' + (required ? ' data-required="1"' : "") + "></label>" +
+          '<button type="button" class="btn btn-primary" data-act="confirm"' +
+            (c.busy ? " disabled" : "") + ">" + (c.busy ? "Saving…" : escHtml(go)) + "</button>" +
+          '<button type="button" class="btn" data-act="cancel"' + (c.busy ? " disabled" : "") + ">Cancel</button>" +
+          '<div class="ex-confirm-err" role="alert">' + escHtml(c.err || "") + "</div>" +
+        "</div>";
+    }
+
+    function panelRow(r) {
+      return '<tr class="ex-panel-row"><td colspan="' + COLS + '"><div class="ex-panel">' +
+        '<div class="ex-panel-l">' +
+          '<p class="ex-why">' + escHtml(whySentence(r)) + "</p>" +
+          (r.worker_note ? '<p class="ex-note"><b>Worker’s reason:</b> ' + escHtml(r.worker_note) + "</p>" : "") +
+          '<p class="ex-h">Punches</p>' + punchesHtml(r) +
+          requestHtml(r) +
+          crewHtml(r) +
+        "</div>" +
+        '<div class="ex-panel-r">' + settleHtml(r) + "</div>" +
+      "</div></td></tr>";
+    }
+
+    /* ------------------------------- render -------------------------------- */
+
+    // site + search narrow the whole page; the kind cards narrow the table
+    function matchesFilters(r) {
+      if (X.project && r.project_id !== X.project) return false;
+      if (X.company && (r.company_code || "") !== X.company) return false;
+      var q = X.q.trim().toLowerCase();
+      if (q && (String(r.full_name || "") + " " + String(r.employee_code || "")).toLowerCase().indexOf(q) === -1) return false;
+      return true;
+    }
+    function visibleRows() {
+      return X.rows.filter(function (r) { return matchesFilters(r) && (!X.kind || r.kind === X.kind); });
+    }
+    function countOf(kind) {
+      return X.rows.filter(function (r) { return r.kind === kind && matchesFilters(r); }).length;
+    }
+    // the cards' order, off-site punch-outs first within a kind, newest day first
+    function sortRows(rows) {
+      return rows.slice().sort(function (a, b) {
+        var ka = KIND_ORDER[a.kind] == null ? 9 : KIND_ORDER[a.kind], kb = KIND_ORDER[b.kind] == null ? 9 : KIND_ORDER[b.kind];
+        if (ka !== kb) return ka - kb;
+        if (!!a.off_site_out !== !!b.off_site_out) return a.off_site_out ? -1 : 1;
+        var da = String(a.work_date), db = String(b.work_date);
+        if (da !== db) return da < db ? 1 : -1;
+        var n = String(a.full_name || "").localeCompare(String(b.full_name || ""));
+        if (n) return n;
+        return (Number(a.shift_no) || 1) - (Number(b.shift_no) || 1);
+      });
+    }
+
+    function renderStats() {
+      document.getElementById("ex-stats").innerHTML = KINDS.map(function (c) {
+        var on = X.kind === c.key;
+        return '<button type="button" class="istat tone-' + c.tone + (on ? " on" : "") +
+                 '" data-card="' + c.key + '" aria-pressed="' + on + '">' +
+                 '<span class="istat-ic">' + UI.icon(c.icon) + "</span>" +
+                 '<span class="istat-body">' +
+                   '<span class="istat-top"><b>' + (X.loading || X.loadErr ? "–" : countOf(c.key)) +
+                     "</b><i>" + escHtml(c.label) + "</i></span>" +
+                 "</span>" +
+               "</button>";
+      }).join("");
+    }
+
+    function renderBanner() {
+      var h = "";
+      if (X.loadErr === "missing") {
+        h = '<div class="banner banner-amber">The punch Exceptions queue is not switched on in the database yet ' +
+            "(update 0124). This page fills in once it is applied.</div>";
+      } else if (X.loadErr) {
+        h = UI.errorBanner(X.loadErr);
+      }
+      if (X.err) h += '<div class="banner banner-red">' + escHtml(X.err) + "</div>";
+      if (X.ok) {
+        h += '<div class="banner banner-green">' + escHtml(X.ok) +
+             (X.undo ? '<button type="button" class="btn ex-undo" data-act="undo">Undo</button>' : "") + "</div>";
+      }
+      document.getElementById("error").innerHTML = h;
+    }
+
+    function rangeWords() {
+      if (X.all) return "";
+      return " in " + (X.from === X.to ? UI.dstr(X.from) : UI.dstr(X.from) + " to " + UI.dstr(X.to));
+    }
+
+    function renderRows() {
+      var tbody = document.getElementById("ex-rows");
+      var rows = sortRows(visibleRows());
+      var count = document.getElementById("f-count");
+      var foot = document.getElementById("ex-foot");
+
+      if (X.loading) {
+        tbody.innerHTML = UI.loadingRow(COLS);
+        count.textContent = ""; foot.textContent = "";
+        return;
+      }
+      count.textContent = X.q.trim() ? rows.length + " shown" : "";
+      foot.textContent = X.rows.length
+        ? "Click a row for the punches, the crew and the answers. Settling a shift takes it off this list. " +
+          "Off-site punch-outs sort first within a kind."
+        : "";
+
+      if (X.loadErr) { tbody.innerHTML = UI.emptyRow(COLS, "Nothing to show."); return; }
+      if (!rows.length) {
+        var msg;
+        if (X.q.trim()) msg = "No shift from a worker matching “" + X.q.trim() + "”.";
+        else if (X.kind) msg = "No " + KIND_LABEL[X.kind] + " shifts" + rangeWords() + ".";
+        else msg = "Nothing to settle" + rangeWords() + ".";
+        tbody.innerHTML = UI.emptyRow(COLS, msg);
+        return;
+      }
+      tbody.innerHTML = rows.map(rowHtml).join("");
+    }
+
+    function payRange() {
+      var today = Dash.todayKL();
+      return X.all ? [monthStart(today), today] : [X.from, X.to];
+    }
+
+    function renderPay() {
+      var tbody = document.getElementById("pay-rows");
+      var sum = document.getElementById("pay-sum");
+      var pr = payRange();
+      document.getElementById("pay-range").textContent = X.all ? "this month"
+        : (pr[0] === pr[1] ? UI.dstr(pr[0]) : UI.dstr(pr[0]) + " to " + UI.dstr(pr[1]));
+      if (X.loading) { tbody.innerHTML = UI.loadingRow(4); sum.textContent = ""; return; }
+      if (X.payErr === "missing" || X.unpriced === null) {
+        tbody.innerHTML = UI.emptyRow(4, "Not available until update 0124 is applied.");
+        sum.textContent = "";
+        return;
+      }
+      if (X.payErr) { tbody.innerHTML = UI.emptyRow(4, "Nothing to show."); sum.textContent = X.payErr; return; }
+      var rows = X.unpriced.filter(function (u) {
+        if (X.company && (u.company_code || "") !== X.company) return false;
+        var q = X.q.trim().toLowerCase();
+        return !q || (String(u.full_name || "") + " " + String(u.employee_code || "")).toLowerCase().indexOf(q) !== -1;
+      });
+      if (!rows.length) {
+        tbody.innerHTML = UI.emptyRow(4, "Nothing unpriced" + (X.all ? " this month" : rangeWords()) + ".");
+        sum.textContent = "";
+        return;
+      }
+      var tally = {};
+      rows.forEach(function (u) { tally[u.why] = (tally[u.why] || 0) + 1; });
+      sum.textContent = rows.length + (rows.length === 1 ? " day" : " days") + ": " +
+        Object.keys(WHY_WORDS).filter(function (k) { return tally[k]; })
+          .map(function (k) { return tally[k] + " " + WHY_WORDS[k]; }).join(" · ");
+      tbody.innerHTML = rows.map(function (u) {
+        var pending = u.why === "pending_request";
+        var href = pending
+          ? "requests.html?status=pending&from=" + encodeURIComponent(pr[0]) + "&to=" + encodeURIComponent(pr[1])
+          : "attendance.html?date=" + encodeURIComponent(String(u.work_date).slice(0, 10)) + "&open=" + encodeURIComponent(u.staff_id);
+        return "<tr>" +
+          UI.td("Worker", "<div><b>" + escHtml(u.full_name || "—") + "</b>" +
+            '<span class="ex-sub">' + escHtml([u.employee_code, u.company_code].filter(Boolean).join(" · ")) + "</span></div>", "wrap") +
+          UI.td("Date", "<div>" + escHtml(UI.dstr(u.work_date)) + '<span class="ex-sub">' + escHtml(weekday(u.work_date)) + "</span></div>") +
+          UI.td("Why", '<span class="chip ' + (WHY_CLASS[u.why] || "badge-gray") + '">' + escHtml(WHY_WORDS[u.why] || UI.label(u.why)) + "</span>") +
+          UI.td("", '<a class="section-link" href="' + esc(href) + '">' + (pending ? "Open Requests" : "Open The Day") + "</a>") +
+        "</tr>";
+      }).join("");
+    }
+
+    function render() { renderStats(); renderBanner(); renderRows(); renderPay(); }
+
+    function renderHead() {
+      document.getElementById("ex-head").innerHTML =
+        "<tr><th>Worker</th><th>Site</th><th>Date</th><th>In</th><th>Out</th><th>Hours</th><th>Problem</th><th></th></tr>";
+    }
+
+    // the range buttons and the date boxes say which view is on
+    function syncControls() {
+      var today = Dash.todayKL();
+      var lastEnd = addDays(monthStart(today), -1);
+      var is = function (f, t) { return !X.all && X.from === f && X.to === t; };
+      var on = { all: X.all, month: is(monthStart(today), today), last: is(monthStart(lastEnd), lastEnd), "31": is(addDays(today, -30), today) };
+      Array.prototype.forEach.call(document.querySelectorAll("#ex-controls button[data-range]"), function (b) {
+        b.classList.toggle("active", !!on[b.getAttribute("data-range")]);
+      });
+      document.getElementById("f-from").value = X.all ? "" : X.from;
+      document.getElementById("f-to").value = X.all ? "" : X.to;
+    }
+
+    // Site dropdown: the engine's project directory (active first), plus any
+    // site a row names that the directory did not return.
+    function fillSites() {
+      var sel = document.getElementById("f-site");
+      var seen = {}, opts = [];
+      X.projects.slice().sort(function (a, b) {
+        var aa = a.status === "active" ? 0 : 1, bb = b.status === "active" ? 0 : 1;
+        if (aa !== bb) return aa - bb;
+        return String(a.project_code || "").localeCompare(String(b.project_code || ""));
+      }).forEach(function (p) {
+        if (!p.project_id || seen[p.project_id]) return;
+        seen[p.project_id] = true;
+        var label = (p.project_code ? p.project_code + " — " : "") + (p.project_name || "");
+        if (p.status && p.status !== "active") label += " (" + UI.label(p.status) + ")";
+        opts.push([p.project_id, label]);
+      });
+      X.rows.forEach(function (r) {
+        if (!r.project_id || seen[r.project_id]) return;
+        seen[r.project_id] = true;
+        opts.push([r.project_id, r.project_name || "Unnamed site"]);
+      });
+      sel.innerHTML = '<option value="">All Sites</option>' + opts.map(function (o) {
+        return '<option value="' + esc(o[0]) + '"' + (o[0] === X.project ? " selected" : "") + ">" +
+               escHtml(o[1]) + "</option>";
+      }).join("");
+    }
+
+    /* --------------------------- data + actions ---------------------------- */
+
+    var loadSeq = 0;
+    // quiet = keep the current rows on screen while refreshing (after a save)
+    async function load(quiet) {
+      var my = ++loadSeq;
+      if (!quiet) { X.loading = true; render(); }
+      var pr = payRange();
+      var got;
+      try {
+        got = await Promise.all([
+          Dash.getPunchExceptions(X.all ? null : X.from, X.all ? null : X.to),
+          Dash.getUnpricedDays(pr[0], pr[1]).catch(function (e) { return { payErr: (e && e.message) || String(e) }; })
+        ]);
+      } catch (e) {
+        if (my !== loadSeq) return;
+        X.loading = false; X.rows = []; X.unpriced = null;
+        X.loadErr = isMissingFunction(e) ? "missing" : ((e && e.message) || String(e));
+        render();
+        return;
+      }
+      if (my !== loadSeq) return;        // a newer filter change already asked
+      X.loading = false;
+      var rows = got[0], pay = got[1];
+      if (rows === null) {               // the database predates 0124
+        X.rows = []; X.unpriced = null; X.loadErr = "missing"; X.payErr = "missing";
+        render();
+        return;
+      }
+      X.loadErr = "";
+      X.rows = Array.isArray(rows) ? rows : [];
+      if (pay && pay.payErr) { X.unpriced = []; X.payErr = pay.payErr; }
+      else { X.unpriced = Array.isArray(pay) ? pay : null; X.payErr = pay === null ? "missing" : ""; }
+      if (X.open && !byKey(X.open)) X.open = null;       // its row was settled meanwhile
+      if (X.act && !byKey(X.act.key)) X.act = null;
+      fillSites();
+      render();
+    }
+
+    function focusField(sel) {
+      var el = document.querySelector(sel);
+      if (el) el.focus();
+    }
+
+    // the row's panel: one open at a time; the crew loads as it opens
+    async function togglePanel(key) {
+      if (X.act && X.act.busy) return;
+      if (X.open === key) { X.open = null; X.act = null; renderRows(); return; }
+      var r = byKey(key);
+      if (!r) return;
+      X.open = key; X.act = null;
+      renderRows();
+      if (!r.project_id) return;
+      var date = String(r.work_date).slice(0, 10), ck = date + "|" + r.project_id;
+      if (X.crewCache[ck]) return;
+      try {
+        var rows = await Dash.getShifts(date, r.project_id);
+        X.crewCache[ck] = Array.isArray(rows) ? rows : [];
+      } catch (e) {
+        X.crewCache[ck] = { err: (e && e.message) || String(e) };
+      }
+      if (X.open === key) renderRows();
+    }
+
+    function openAct(key, act) {
+      if (X.act && X.act.busy) return;
+      var r = byKey(key);
+      if (!r) return;
+      if (X.act && X.act.key === key && X.act.act === act) {
+        X.act = null;                    // pressing the same button again closes it
+      } else {
+        var keep = X.act && X.act.key === key ? X.act.note : "";
+        X.act = { key: key, act: act, note: keep, err: "", busy: false, invalid: false,
+                  form: act === "rule" ? CorrectForm.start(formSpec(r)) : null };
+      }
+      X.open = key;
+      X.ok = ""; X.err = ""; X.undo = null;
+      renderBanner(); renderRows();
+      if (X.act && X.act.act === "rule") focusField('[data-cf="' + (r.out_at ? "tIn" : "tOut") + '"]');
+      else if (X.act) focusField("#ex-note");
+    }
+
+    // a refusal that means the shift moved on under us: say so up top, reload the list
+    function movedOn(res) {
+      return res && ["no_such_shift", "shift_open", "not_overlong", "not_early", "already_ruled",
+                     "not_found", "already_reviewed", "punches_changed"].indexOf(res.code) !== -1;
+    }
+
+    async function submitConfirm() {
+      var c = X.act;
+      if (!c || c.busy) return;
+      var r = byKey(c.key);
+      if (!r) { X.act = null; renderRows(); return; }
+      var note = String(c.note || "").trim();
+      var needs = c.act === "accept" || c.act === "early" || c.act === "reject";
+      if (needs && !note) {
+        c.invalid = true;
+        c.err = c.act === "reject" ? "Say why the request is refused — the worker reads it."
+                                   : "Pick a reason or write one — it is required to accept this shift.";
+        renderRows(); focusField("#ex-note");
+        return;
+      }
+      c.busy = true; c.err = ""; c.invalid = false;
+      renderRows();
+
+      var res, review = c.act === "approve" || c.act === "reject";
+      try {
+        res = review
+          ? await Dash.reviewAttendanceRequest(r.request_id, c.act === "approve" ? "approved" : "rejected", note || null)
+          : await Dash.acceptShiftAsPunched(r.staff_id, String(r.work_date).slice(0, 10), r.shift_no, KIND_OF[c.act], note || null);
+      } catch (e) {
+        c.busy = false;
+        c.err = (e && e.message) || String(e);
+        renderRows(); focusField("#ex-note");
+        return;
+      }
+      c.busy = false;
+
+      if (!res || res.ok === false) {
+        var msg = (res && (res.message || res.code)) || "The server did not answer.";
+        if (movedOn(res)) {
+          X.act = null; X.err = msg; X.ok = ""; X.undo = null;
+          await load(true);
+          return;
+        }
+        c.err = msg;                     // verbatim, kept beside the form it belongs to
+        renderRows(); focusField("#ex-note");
+        return;
+      }
+
+      var who = whoWords(r) + ", " + dayWords(r) + shiftWords(r);
+      X.act = null; X.err = ""; X.undo = null;
+      if (review) {
+        X.ok = res.message || (c.act === "approve" ? "Request approved — " + who + "." : "Request rejected — " + who + ".");
+      } else {
+        X.ok = (c.act === "accept" ? "Accepted as punched — " : c.act === "early" ? "Credited from the punch-in — " : "Kept from 8 AM — ") + who +
+               (c.act !== "keep" && res.working_minutes != null ? ". The day now prices at " + minsText(res.working_minutes) + "." : ".");
+        X.undo = { staffId: r.staff_id, workDate: String(r.work_date).slice(0, 10), shiftNo: r.shift_no, kind: KIND_OF[c.act], who: who };
+      }
+      await load(true);
+    }
+
+    // Rule The Times: the ruling goes to the corrections layer, per shift
+    async function submitRule() {
+      var c = X.act;
+      if (!c || c.busy || c.act !== "rule") return;
+      var r = byKey(c.key);
+      if (!r) { X.act = null; renderRows(); return; }
+      var got = CorrectForm.read(formSpec(r), c.form);
+      if (got.error) {
+        c.err = got.error; c.invalid = got.field;
+        renderRows(); focusField('[data-cf="' + got.field + '"]');
+        return;
+      }
+      c.busy = true; c.err = ""; c.invalid = "";
+      renderRows();
+      var res;
+      try {
+        res = await Dash.setDayCorrection(r.staff_id, String(r.work_date).slice(0, 10), got.inISO, got.outISO, got.why, r.shift_no || 1);
+      } catch (e) {
+        c.busy = false; c.err = (e && e.message) || String(e);
+        renderRows(); focusField('[data-cf="why"]');
+        return;
+      }
+      c.busy = false;
+      if (!res || res.ok === false) {
+        var msg = (res && (res.message || res.code)) || "The server did not answer.";
+        if (res && (res.code === "unknown_staff" || res.code === "already_ruled")) {
+          X.act = null; X.err = msg; X.ok = ""; X.undo = null;
+          await load(true);
+          return;
+        }
+        c.err = msg;                     // the database's words, kept beside the form
+        renderRows(); focusField('[data-cf="why"]');
+        return;
+      }
+      var who = whoWords(r) + ", " + dayWords(r) + shiftWords(r);
+      var span = String(res.in_at_local || "").slice(11) + " to " + String(res.out_at_local || "").slice(11);
+      X.act = null; X.err = ""; X.undo = null;
+      X.ok = "Ruled — " + who + ": " + span + ". The worker will see the reason in their app. Undo it on the Attendance page.";
+      await load(true);
+    }
+
+    async function undoAcceptance() {
+      var u = X.undo;
+      if (!u) return;
+      X.undo = null; renderBanner();
+      var res;
+      try {
+        res = await Dash.clearShiftAcceptance(u.staffId, u.workDate, u.shiftNo, u.kind);
+      } catch (e) {
+        X.ok = ""; X.err = (e && e.message) || String(e); renderBanner(); return;
+      }
+      if (!res || res.ok === false) {
+        X.ok = ""; X.err = (res && (res.message || res.code)) || "The server did not answer."; renderBanner(); return;
+      }
+      X.err = ""; X.ok = "Acceptance withdrawn — " + u.who + ". The shift is back on the list.";
+      await load(true);
+    }
+
+    /* -------------------------------- boot --------------------------------- */
+
+    window.onShellReady = async function () {
+      try {
+        X.canEdit = Dash.can("attendance.edit");
+        var today = Dash.todayKL();
+
+        // deep links: exceptions.html?kind=missed&project=<uuid>&from=…&to=…
+        var p = new URLSearchParams(location.search);
+        if (p.get("kind") && KIND_LABEL[p.get("kind")]) X.kind = p.get("kind");
+        if (p.get("project")) X.project = p.get("project");
+        if (p.get("company") === "HF-BP" || p.get("company") === "Hai Fu") X.company = p.get("company");
+        if (/^\d{4}-\d{2}-\d{2}$/.test(p.get("from") || "") && /^\d{4}-\d{2}-\d{2}$/.test(p.get("to") || "")) {
+          X.all = false; X.from = p.get("from"); X.to = p.get("to") > today ? today : p.get("to");
+        }
+
+        var fFrom = document.getElementById("f-from"), fTo = document.getElementById("f-to");
+        fFrom.max = today; fTo.max = today;
+        syncControls();
+
+        if (!X.canEdit) {
+          document.getElementById("ex-sub").insertAdjacentHTML("beforeend",
+            ' <span class="muted">View only — settling a shift needs the Attendance edit permission.</span>');
+        }
+        renderHead();
+
+        // the site list is a nice-to-have: a failure leaves the sites the rows themselves name
+        Dash.getProjectDirectory().then(function (rows) {
+          X.projects = rows || [];
+          fillSites();
+        }).catch(function () { /* keep the row-derived list */ });
+
+        document.getElementById("ex-stats").addEventListener("click", function (ev) {
+          var b = ev.target.closest("button[data-card]");
+          if (!b) return;
+          var k = b.getAttribute("data-card");
+          X.kind = X.kind === k ? "" : k;               // pressing the lit card again shows all
+          renderStats(); renderRows();
+        });
+
+        function setRange(f, t) {
+          if (t > today) t = today;
+          if (!X.all && f === X.from && t === X.to) return;
+          X.all = false; X.from = f; X.to = t;
+          X.ok = ""; X.err = ""; X.undo = null;
+          syncControls();
+          load();
+        }
+        function setAll() {
+          if (X.all) return;
+          X.all = true; X.from = ""; X.to = "";
+          X.ok = ""; X.err = ""; X.undo = null;
+          syncControls();
+          load();
+        }
+        document.getElementById("ex-controls").addEventListener("click", function (ev) {
+          var b = ev.target.closest("button[data-range]");
+          if (!b) return;
+          var which = b.getAttribute("data-range");
+          if (which === "all") setAll();
+          else if (which === "month") setRange(monthStart(today), today);
+          else if (which === "last") {
+            var lastEnd = addDays(monthStart(today), -1);
+            setRange(monthStart(lastEnd), lastEnd);
+          } else setRange(addDays(today, -30), today);
+        });
+
+        document.getElementById("f-site").addEventListener("change", function () {
+          X.project = this.value;
+          renderStats(); renderRows();
+        });
+        document.getElementById("f-company").addEventListener("change", function () {
+          X.company = this.value; document.getElementById("f-company").value = X.company;
+          renderStats(); renderRows(); renderPay();
+        });
+        if (X.company) document.getElementById("f-company").value = X.company;
+
+        function onDates(ev) {
+          var f = fFrom.value, t = fTo.value;
+          if (f && !t) { fTo.value = t = today; }         // one date typed: up to today
+          if (!f || !t) return;                          // half-typed: wait
+          if (f > t) {                                   // keep the range the right way round
+            if (ev.target === fFrom) fTo.value = t = f; else fFrom.value = f = t;
+          }
+          setRange(f, t);
+        }
+        fFrom.addEventListener("change", onDates);
+        fTo.addEventListener("change", onDates);
+
+        document.getElementById("f-text").addEventListener("input", function () {
+          X.q = this.value;
+          renderStats(); renderRows(); renderPay();
+        });
+
+        document.getElementById("error").addEventListener("click", function (ev) {
+          if (ev.target.closest("button[data-act='undo']")) undoAcceptance();
+        });
+
+        var tbody = document.getElementById("ex-rows");
+        tbody.addEventListener("click", function (ev) {
+          // a reason chip fills the note; Other clears it for typing
+          var rb = ev.target.closest("button[data-reason]");
+          if (rb && X.act && !X.act.busy) {
+            var t = rb.getAttribute("data-reason"), inp = document.getElementById("ex-note");
+            if (inp) {
+              inp.value = t === "Other" ? "" : t; X.act.note = inp.value;
+              X.act.invalid = false; X.act.err = ""; inp.removeAttribute("aria-invalid");
+              var errEl = document.querySelector(".ex-confirm-err"); if (errEl) errEl.textContent = "";
+              inp.focus();
+            }
+            return;
+          }
+          // Rule The Times: its chips and buttons
+          var cr = ev.target.closest("button[data-cf-reason]");
+          if (cr && X.act && X.act.act === "rule" && !X.act.busy) {
+            var why = document.querySelector('[data-cf="why"]');
+            if (why) {
+              why.value = cr.getAttribute("data-cf-reason"); X.act.form.why = why.value;
+              why.removeAttribute("aria-invalid"); X.act.invalid = ""; X.act.err = "";
+              var ce = document.querySelector(".cf-err"); if (ce) ce.textContent = "";
+              why.focus();
+            }
+            return;
+          }
+          if (ev.target.closest("button[data-cf-save]")) { submitRule(); return; }
+          if (ev.target.closest("button[data-cf-cancel]")) {
+            if (X.act && !X.act.busy) { X.act = null; renderRows(); }
+            return;
+          }
+          var b = ev.target.closest("button[data-act]");
+          if (b && !b.disabled) {
+            var act = b.getAttribute("data-act"), key = b.getAttribute("data-key");
+            if (act === "open") togglePanel(key);
+            else if (act === "accept" || act === "early" || act === "keep" || act === "rule" ||
+                     act === "approve" || act === "reject") openAct(key, act);
+            else if (act === "cancel") { if (X.act && !X.act.busy) { X.act = null; renderRows(); } }
+            else if (act === "confirm") submitConfirm();
+            return;
+          }
+          // anywhere else on the row: open or close its panel
+          if (ev.target.closest("a, button, input, label, select, .ex-panel-row")) return;
+          var tr = ev.target.closest("tr.ex-row");
+          if (tr) togglePanel(tr.getAttribute("data-key"));
+        });
+        tbody.addEventListener("input", function (ev) {
+          if (!X.act) return;
+          if (ev.target.id === "ex-note") {
+            X.act.note = ev.target.value;
+            if (X.act.invalid && ev.target.value.trim()) {
+              X.act.invalid = false; X.act.err = "";
+              ev.target.removeAttribute("aria-invalid");
+              var errEl = document.querySelector(".ex-confirm-err");
+              if (errEl) errEl.textContent = "";           // the "required" line no longer applies
+            }
+            return;
+          }
+          var f = ev.target.getAttribute && ev.target.getAttribute("data-cf");
+          if (f && X.act.form) {
+            X.act.form[f] = f === "next" ? ev.target.checked : ev.target.value;
+            if (X.act.invalid === f) {
+              X.act.invalid = ""; X.act.err = "";
+              ev.target.removeAttribute("aria-invalid");
+              var ce = document.querySelector(".cf-err"); if (ce) ce.textContent = "";
+            }
+          }
+        });
+        tbody.addEventListener("keydown", function (ev) {
+          if (ev.key !== "Enter") return;
+          if (ev.target.id === "ex-note") { ev.preventDefault(); submitConfirm(); }
+          else if (ev.target.getAttribute && ev.target.getAttribute("data-cf") === "why") { ev.preventDefault(); submitRule(); }
+        });
+        document.addEventListener("keydown", function (ev) {
+          if (ev.key === "Escape" && X.act && !X.act.busy) { X.act = null; renderRows(); }
+        });
+
+        await load();
+      } catch (e) {
+        document.getElementById("ex-rows").innerHTML = "";
+        document.getElementById("error").innerHTML = UI.errorBanner((e && e.message) || String(e));
+      }
+    };
+  </script>
+</body>
+</html>
