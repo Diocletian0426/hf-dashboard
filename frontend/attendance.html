@@ -710,8 +710,23 @@
       // closing a shift is an attendance.edit act, and the database refuses the
       // list to anyone else — so a view-only login is not asked at all
       if (!Dash.can("attendance.edit")) { OS.list = null; renderOpenShifts(); return; }
-      try { OS.list = await Dash.getOpenShifts(); }
-      catch (e) { OS.list = null; }        // DB said no — section stays absent
+      // 0124 (Koon Sheng's review, 15 Oct): the count is the queue's own — Punch
+      // Out Missing, and an earlier day's shift still open — so this line and
+      // the Exceptions page always agree. get_open_shifts counts every shift
+      // with no punch-out, which keeps counting a shift the office has already
+      // ruled a time for (it left the queue, it never got a tap). Before 0124
+      // the queue read is null and the old list stands.
+      try {
+        var q = await Dash.getPunchExceptions(null, null);
+        if (Array.isArray(q)) {
+          var today = Dash.todayKL();
+          OS.list = q.filter(function (r) {
+            return r.kind === "missed" || (r.kind === "long_open" && String(r.work_date).slice(0, 10) < today);
+          });
+        } else {
+          OS.list = await Dash.getOpenShifts();
+        }
+      } catch (e) { OS.list = null; }      // DB said no — section stays absent
       renderOpenShifts();
     }
 

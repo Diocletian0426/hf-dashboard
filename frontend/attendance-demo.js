@@ -210,6 +210,17 @@
       { staff_id: "demo-Thor (demo)", employee_code: "", full_name: "Thor (demo)", company_code: "HF-BP", work_date: m + "-19", why: "overlong" }
     ].filter(function (u) { return (!from || u.work_date >= from) && (!to || u.work_date <= to); });
   };
+  // 0124 (Koon Sheng's review, 15 Oct): the never-punched-out line counts the
+  // queue — one Punch Out Missing shift of Thor's, two days back
+  Dash.getPunchExceptions = async function () {
+    var d = new Date(Dash.todayKL() + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() - 2);
+    var day = d.toISOString().slice(0, 10);
+    return [{ kind: "missed", staff_id: "demo-Thor (demo)", employee_code: "", full_name: "Thor (demo)", company_code: "HF-BP",
+              flexible_hours: false, project_id: SITES[0].id, project_name: SITES[0].name, work_date: day, shift_no: 1,
+              in_at: day + "T07:55:00+08:00", out_at: null, hours: 0, off_site_out: false, worker_note: null,
+              request_id: null, declared_out_at: null, request_pending: false }];
+  };
+  Dash.getOpenShifts = async function () { return []; };   // the old list: not asked once the queue answers
   Dash.getSitesMissingGeofence = async function () {
     return [{ project_name: SITES[1].name, active_workers_assigned: 3 }];
   };
