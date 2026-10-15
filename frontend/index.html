@@ -65,7 +65,11 @@
           <span><i class="dot status-ok"></i> Reported yesterday or today</span>
           <span><i class="dot status-warn"></i> 2–3 days silent</span>
           <span><i class="dot status-bad"></i> 4+ days silent</span>
+          <!-- the worker + driver keys are appended by the people layer (§2b),
+               drawn from the same SVGs the map uses so the two never differ -->
         </div>
+        <!-- workers on site · drivers on the road, filled by the people layer -->
+        <p class="muted map-people" id="map-people"></p>
         <!-- the pin popup is created here by JS -->
       </section>
 
@@ -116,6 +120,9 @@
   <script src="config.js"></script>
   <script src="dashboard-client.js"></script>
   <script src="ui.js"></script>
+  <!-- DEV ONLY: does nothing unless the URL has ?demo=truck, and never writes.
+       Delete this line + overview-demo.js before the pilot starts. -->
+  <script src="overview-demo.js"></script>
   <script src="shell.js"></script>
 
   <script>
@@ -380,6 +387,284 @@
       });
 
       return { map: map, markers: markers };
+    }
+
+    /* =====================================================================
+       2b. PEOPLE AND DRIVERS — who stands on which site, who is on the road
+       ===================================================================== */
+
+    // A layer ON TOP of the pins, never instead of them: it is drawn after the
+    // pins and the count line and catches its own failures, so a bad manpower
+    // row or a refused deliveries call can cost the figures and the lorries
+    // but never the map.
+    //
+    // Workers: one standing figure per company per site, ABOVE the site's dot
+    // — the label owns the space beside it, and a figure there would hide the
+    // code. Two payrolls, two blues (HF-BP dark, Hai Fu light), with a count
+    // once there is more than one. Red, amber and green stay with the pins: on
+    // this map they mean report freshness and nothing else.
+    //
+    // Drivers: today's trips (Malaysia date) not yet ticked as arrived. A trip
+    // is a STRAIGHT line from its FROM site's dot to its TO site's dot with the
+    // lorry sat on it — straight because the book records two sites, not the
+    // road between them, and the sites themselves are only state-placed. A trip
+    // whose two ends are not both sites on this map is left off, not guessed.
+
+    // One colour per driver on the road today, handed out in driver-list order
+    // so a given day always paints the same way. Tones picked to stay clear of
+    // the status red / amber / green (#dc2626 / #d97706 / #16a34a).
+    var DRIVER_COLOURS = ["#0fb3c7", "#5b4fd6", "#c2255c", "#2f6b4f", "#f08a3e", "#b5179e"];
+
+    // a standing figure; colour comes from the wrapper (currentColor)
+    function figSvg() {
+      return '<svg viewBox="0 0 10 20" aria-hidden="true">' +
+               '<circle cx="5" cy="2.9" r="2.6"/>' +
+               '<path d="M2.2 6.4h5.6a1.6 1.6 0 0 1 1.6 1.6v5.2a.9 .9 0 0 1-1.8 0V9.1h-.3V19a1 1 0 0 1-2 0v-5.6h-.6V19' +
+                 'a1 1 0 0 1-2 0V9.1h-.3v4.1a.9 .9 0 0 1-1.8 0V8a1.6 1.6 0 0 1 1.6-1.6z"/>' +
+             "</svg>";
+    }
+
+    // a lorry facing east (cab on the right); the stripe takes --drv
+    function truckSvg() {
+      return '<svg viewBox="0 0 32 18" aria-hidden="true">' +
+               '<rect class="truck-box" x="1" y="1.5" width="19.5" height="10.5" rx="1.3"/>' +
+               '<rect class="truck-stripe" x="1.6" y="5.6" width="18.3" height="3.2"/>' +
+               '<path class="truck-cab" d="M21.5 4.5h4.6l4.4 4.6v4.4h-9z"/>' +
+               '<path class="truck-glass" d="M23 6h2.6l2.8 3H23z"/>' +
+               '<rect class="truck-cab" x="1" y="12" width="29.5" height="1.8" rx=".5"/>' +
+               '<circle class="truck-wheel" cx="6" cy="14.6" r="2.4"/>' +
+               '<circle class="truck-wheel" cx="11.6" cy="14.6" r="2.4"/>' +
+               '<circle class="truck-wheel" cx="26" cy="14.6" r="2.4"/>' +
+             "</svg>";
+    }
+
+    function plural(n, one, many) { return n + " " + (n === 1 ? one : many); }
+
+    // for a title="" — names can carry quotes and ampersands
+    function attr(s) { return UI.esc(UI.escHtml(s)); }
+
+    // Free text off the trip book -> a key. The book types site NAMES
+    // ("Umech - Rawang"); codes are accepted too, with or without the HF-
+    // prefix. Case and spacing never matter.
+    function siteKey(t) {
+      return String(t === null || t === undefined ? "" : t).toLowerCase().replace(/\s+/g, " ").trim();
+    }
+
+    function shortCode(p) { return String(p.project_code || "").replace(/^HF-/, ""); }
+
+    function drawWorkers(map, markers, fan, staff) {
+      var bySite = {}, count = 0;
+      (staff || []).forEach(function (s) {
+        var id = String(s.current_project_id);
+        if (!markers[id]) return;                 // not a site this map shows
+        // the view knows two payrolls; anything else is drawn with HF-BP (the
+        // line this page is about) rather than quietly dropped from the count
+        var co = String(s.company || "").trim().toLowerCase() === "hai fu" ? "hf" : "bp";
+        var g = bySite[id] || (bySite[id] = { bp: [], hf: [] });
+        g[co].push(s.full_name || "Unnamed");
+        count++;
+      });
+
+      var NAME = { bp: "HF-BP", hf: "Hai Fu" };
+      var groups = [];
+      Object.keys(bySite).forEach(function (id) {
+        var g = bySite[id];
+        var figs = ["bp", "hf"].filter(function (k) { return g[k].length; }).map(function (k) {
+          return '<span class="pfig ' + k + '" title="' + attr(NAME[k] + ": " + g[k].join(", ")) + '">' +
+                   figSvg() +
+                   (g[k].length > 1 ? '<b class="pfig-count">×' + g[k].length + "</b>" : "") +
+                 "</span>";
+        }).join("");
+        // anchored on the site's TRUE point like its pin; settle() below moves
+        // the figures beside the pin's (fanned) dot
+        var mk = L.marker(markers[id].getLatLng(), {
+          icon: L.divIcon({
+            className: "pfig-mk", iconSize: [0, 0], iconAnchor: [0, 0],
+            html: '<span class="pfig-row">' + figs + "</span>"
+          }),
+          interactive: false, keyboard: false,
+          zIndexOffset: -1000                     // under every pin, label included
+        }).addTo(map);
+        groups.push({ id: id, mk: mk, left: !!(fan[id] && fan[id].left) });
+      });
+
+      // Where the figures stand. Zoomed out, the peninsula's pins sit close
+      // enough that ONE fixed spot always lands on somebody's label (the first
+      // try put Johor's crew on top of "MLK-001"). So each crew tries a few
+      // spots around its own dot — beside it on the side away from its label
+      // first, then above, then below — and takes the first that covers no
+      // label, no dot, no lorry and no crew already placed. Measured off the
+      // screen, so it is re-run whenever the zoom settles.
+      function rect(el, pad) {
+        var r = el.getBoundingClientRect();
+        return { l: r.left - pad, t: r.top - pad, r: r.right + pad, b: r.bottom + pad };
+      }
+      function overlap(a, b) {
+        var x = Math.min(a.r, b.r) - Math.max(a.l, b.l), y = Math.min(a.b, b.b) - Math.max(a.t, b.t);
+        return x > 0 && y > 0 ? x * y : 0;
+      }
+      function settle() {
+        var host = map.getContainer(), walls = [];
+        host.querySelectorAll(".pin-label").forEach(function (el) { walls.push(rect(el, 1)); });
+        host.querySelectorAll(".pin-dot").forEach(function (el) { walls.push(rect(el, 3)); });
+        host.querySelectorAll(".truck").forEach(function (el) { walls.push(rect(el, 0)); });
+        groups.forEach(function (g) {
+          var row = g.mk.getElement() && g.mk.getElement().firstChild;
+          var dotEl = markers[g.id].getElement() && markers[g.id].getElement().querySelector(".pin-dot");
+          if (!row || !dotEl) return;
+          var at = g.mk.getElement().getBoundingClientRect();     // the true point
+          var d = dotEl.getBoundingClientRect();
+          var cx = d.left + d.width / 2, cy = d.top + d.height / 2;
+          var w = row.offsetWidth, h = row.offsetHeight, gap = 9;
+          var away = g.left ? 1 : -1;                              // the side with no label
+          var spots = [
+            [away > 0 ? cx + gap : cx - gap - w, cy - h / 2],      // beside
+            [cx - w / 2, cy - gap - h],                            // above
+            [cx - w / 2, cy + gap],                                // below
+            [away > 0 ? cx - 4 : cx + 4 - w, cy - gap - h],        // above, leaning away
+            [away > 0 ? cx - 4 : cx + 4 - w, cy + gap]             // below, leaning away
+          ];
+          var best = null, bestCost = Infinity;
+          for (var i = 0; i < spots.length && bestCost > 0; i++) {
+            var box = { l: spots[i][0], t: spots[i][1], r: spots[i][0] + w, b: spots[i][1] + h };
+            var cost = walls.reduce(function (s, wall) { return s + overlap(box, wall); }, 0);
+            if (cost < bestCost) { best = box; bestCost = cost; }
+          }
+          row.style.left = (best.l - at.left).toFixed(1) + "px";
+          row.style.top = (best.t - at.top).toFixed(1) + "px";
+          walls.push(best);
+        });
+      }
+      return { count: count, settle: settle };
+    }
+
+    function drawDrivers(map, markers, fan, siteOf, res) {
+      var none = { count: 0, seat: function () {} };
+      if (!res || res.ok === false) return none;
+      var today = Dash.todayKL();
+
+      var look = {};
+      Object.keys(siteOf).forEach(function (id) {
+        var p = siteOf[id], code = siteKey(p.project_code);
+        if (p.project_name) look[siteKey(p.project_name)] = id;
+        if (code) { look[code] = id; look[code.replace(/^hf-/, "")] = id; }
+      });
+
+      // the driver list decides the colour order; a name on a trip but not on
+      // the list is still drawn, after the listed ones
+      var vehicle = {}, order = [];
+      (res.drivers || []).forEach(function (d) {
+        var n = String((d && d.name) || "").trim();
+        if (n && !vehicle.hasOwnProperty(n)) { vehicle[n] = String(d.vehicle || ""); order.push(n); }
+      });
+
+      var legs = [];
+      (res.deliveries || []).forEach(function (r) {
+        if (!r || r.received || String(r.date || "") !== today) return;
+        var a = look[siteKey(r.from)], b = look[siteKey(r.to)];
+        if (!a || !b || a === b) return;
+        var who = String(r.driver || "").trim() || "No driver named";
+        if (order.indexOf(who) === -1) order.push(who);
+        legs.push({ a: a, b: b, r: r, who: who });
+      });
+      if (!legs.length) return none;
+
+      var onRoad = order.filter(function (n) {
+        return legs.some(function (l) { return l.who === n; });
+      });
+      var shared = {};
+      var drawn = legs.map(function (l) {
+        var colour = DRIVER_COLOURS[onRoad.indexOf(l.who) % DRIVER_COLOURS.length];
+        // two trips on one road would park one lorry on top of the other
+        var pair = [l.a, l.b].sort().join("|");
+        var nth = shared[pair] = (shared[pair] || 0) + 1;
+        var title = [l.who, vehicle[l.who] || "",
+                     shortCode(siteOf[l.a]) + " → " + shortCode(siteOf[l.b]),
+                     l.r.doNum ? "D.O. " + l.r.doNum : "No D.O."]
+                    .filter(Boolean).join(" · ");
+        var line = L.polyline([markers[l.a].getLatLng(), markers[l.b].getLatLng()], {
+          color: colour, weight: 3, opacity: 0.85, interactive: false, className: "drv-route"
+        }).addTo(map);
+        var truck = L.marker(markers[l.a].getLatLng(), {
+          icon: L.divIcon({
+            className: "truck-mk", iconSize: [30, 17], iconAnchor: [15, 9],
+            html: '<span class="truck" style="--drv:' + colour + '" title="' + attr(title) + '">' +
+                  truckSvg() + "</span>"
+          }),
+          interactive: false, keyboard: false,
+          zIndexOffset: -500                      // over the figures, under the pins
+        }).addTo(map);
+        return { a: l.a, b: l.b, at: Math.max(0.25, 0.55 - 0.15 * (nth - 1)), line: line, truck: truck };
+      });
+
+      // The fan is in SCREEN pixels, so a fanned dot's lat/lng changes with
+      // every zoom: the ends are worked out in pixels and re-seated whenever
+      // the zoom settles (drawPeople does the re-run). Two sites in one state
+      // share a true point — without this their line would have no length.
+      function dot(id) {
+        var f = fan[id] || { dx: 0, dy: 0 };
+        return map.latLngToLayerPoint(markers[id].getLatLng()).add([f.dx, f.dy]);
+      }
+      function seat() {
+        drawn.forEach(function (d) {
+          var a = dot(d.a), b = dot(d.b);
+          d.line.setLatLngs([map.layerPointToLatLng(a), map.layerPointToLatLng(b)]);
+          d.truck.setLatLng(map.layerPointToLatLng(a.add(b.subtract(a).multiplyBy(d.at))));
+          var el = d.truck.getElement();
+          if (el) el.classList.toggle("west", b.x < a.x);      // the cab leads
+        });
+      }
+      return { count: onRoad.length, seat: seat };
+    }
+
+    async function drawPeople(MAP, pins, staffP, delivP) {
+      var workers = 0, drivers = 0, crews = null, trips = null;
+      var fan = {}, siteOf = {};
+      try {
+        // the keys first: they explain the shapes even if the data never comes
+        document.querySelector(".map-legend").insertAdjacentHTML("beforeend",
+          '<span><i class="lg-ic pfig-ic bp">' + figSvg() + "</i>HF-BP worker</span>" +
+          '<span><i class="lg-ic pfig-ic hf">' + figSvg() + "</i>Hai Fu worker</span>" +
+          '<span><i class="lg-ic truck-ic" style="--drv:' + DRIVER_COLOURS[0] + '">' + truckSvg() + "</i>" +
+            "Driver (each driver's route in its own colour, matching the stripe on the truck)</span>");
+
+        // Where each pin's DOT is drawn: the marker sits on the true point and
+        // the dot is nudged off it by the fan (--fx/--fy, screen pixels), so
+        // anything meant to touch the dot takes the same nudge.
+        pins.forEach(function (pin) {
+          var id = String(pin.site.pulse.project_id);
+          fan[id] = { dx: pin.x - pin.ax, dy: pin.y - pin.ay, left: pin.side === "l" };
+          siteOf[id] = pin.site.pulse;
+        });
+        crews = drawWorkers(MAP.map, MAP.markers, fan, await staffP);
+        workers = crews.count;
+        crews.settle();                  // now, not after the trip book answers
+      } catch (e) {
+        console.warn("Overview map: worker figures skipped —", e);
+      }
+      try {
+        trips = drawDrivers(MAP.map, MAP.markers, fan, siteOf, await delivP);
+        drivers = trips.count;
+      } catch (e) {
+        drivers = 0;
+        console.warn("Overview map: driver routes skipped —", e);
+      }
+      // lorries first, then the crews step round them; again on every zoom
+      function relayout() {
+        try {
+          if (trips) trips.seat();
+          if (crews) crews.settle();
+        } catch (e) {
+          console.warn("Overview map: people layer could not re-seat —", e);
+        }
+      }
+      relayout();
+      MAP.map.on("zoomend viewreset", relayout);
+      var lineEl = document.getElementById("map-people");
+      if (lineEl) {
+        lineEl.textContent = plural(workers, "worker", "workers") + " on site · " +
+          (drivers ? plural(drivers, "driver", "drivers") + " on the road" : "no drivers on the road today");
+      }
     }
 
     /* =====================================================================
@@ -734,6 +1019,12 @@
         var machP  = Dash.getMachines().catch(function () { return []; });
         // powers each card's sparkline; a failure just means no sparklines
         var dailyP = Dash.getProjectDailyOutput().catch(function () { return []; });
+        // today's trips, for the lorries on the map. Only for a login that may
+        // read the delivery book (same reason as leave above); a refusal just
+        // means no lorries, never a broken map.
+        var delivP = Dash.can("deliveries.view")
+          ? Dash.getDeliveries(Dash.todayKL(), Dash.todayKL()).catch(function () { return null; })
+          : Promise.resolve(null);
         var pulse  = await pulseP;
 
         // freshness line: latest report anywhere + how many sites reported that day
@@ -762,6 +1053,11 @@
           placed.length + " of " + pulse.length + " sites shown" +
           (anyExact ? "" : " — positioned by state, not exact coordinates") +
           (offMap.length ? " · off-map: " + offMap.map(function (p) { return p.project_code; }).join(", ") : "");
+
+        // ---- workers + drivers over the pins ----
+        // Not awaited: the pins are live straight away, and this layer can
+        // only ever fail on its own (it catches everything itself).
+        drawPeople(MAP, pins, staffP, delivP);
 
         // ---- pin selection -> popup beside the pin ----
         var staff = await staffP, machines = await machP;

@@ -2356,11 +2356,57 @@ summary.zone-rich::before { float: left; margin: 4px 8px 0 0; }
 }
 
 .map-legend {
-  display: flex; gap: var(--sp-4); flex-wrap: wrap; align-items: center;
+  /* the row gap is tighter than the column gap: with the worker and driver
+     keys the legend wraps, and a full gap between its rows read as two legends */
+  display: flex; gap: var(--sp-2) var(--sp-4); flex-wrap: wrap; align-items: center;
   font-size: var(--fs-xs); color: var(--ink-2); margin-top: var(--sp-2);
 }
 .map-legend .dot { width: 8px; height: 8px; }
 .map-legend span { display: inline-flex; align-items: center; gap: 6px; }
+
+/* ---- people and drivers on the map (index.html §2b) ----
+   Workers stand ABOVE their site's dot — the label owns the space beside it —
+   one figure per company, with a count once there is a crowd. Drivers are a
+   lorry on a straight line between two sites, the stripe and the line in that
+   driver's own colour. Two blues for the payrolls and a fixed palette for the
+   drivers, on purpose: red, amber and green mean report freshness on this map
+   and nothing else may borrow them. Hover gives the names; a click falls
+   through to the map, so the pins stay the only thing that opens a popup. */
+/* left/top are set by settle() in index.html — beside the dot, or above /
+   below it when a neighbour's label is in the way */
+.pfig-row {
+  position: absolute; left: 0; top: 0;
+  display: flex; align-items: flex-end; gap: 2px;
+  white-space: nowrap; pointer-events: none;
+}
+.pfig { display: inline-flex; align-items: flex-end; pointer-events: auto; cursor: default; }
+.pfig svg, .pfig-ic svg {
+  display: block; width: 10px; height: 20px; fill: currentColor;
+  /* a white rim so a figure reads on green land and blue sea alike */
+  filter: drop-shadow(0 0 0.6px #fff) drop-shadow(0 0 0.6px #fff) drop-shadow(0 1px 1px rgba(20, 45, 90, 0.35));
+}
+.pfig.bp, .pfig-ic.bp { color: #1b2a6b; }      /* HF-BP — dark navy */
+.pfig.hf, .pfig-ic.hf { color: #7488f0; }      /* Hai Fu — lighter blue-violet */
+.pfig-count {
+  margin-left: 1px; padding: 0 3px; border-radius: 6px;
+  background: rgba(255, 255, 255, 0.92); color: inherit;
+  font-size: 9.5px; font-weight: 700; line-height: 1.4;
+  box-shadow: 0 0 0 1px rgba(20, 45, 90, 0.14);
+}
+.truck { display: block; pointer-events: auto; cursor: default; }
+.truck svg { display: block; width: 30px; height: 17px; filter: drop-shadow(0 1px 1.5px rgba(20, 45, 90, 0.45)); }
+/* heading west: mirror the lorry so the cab leads (Leaflet owns the marker's
+   own transform, so the flip goes on the drawing inside it) */
+.truck-mk.west .truck svg { transform: scaleX(-1); }
+.truck-box    { fill: #fff; stroke: var(--charcoal); stroke-width: 1.1; }
+.truck-stripe { fill: var(--drv, var(--brand)); }
+.truck-cab    { fill: #2b3550; }
+.truck-glass  { fill: #cfe0f5; }
+.truck-wheel  { fill: var(--charcoal); stroke: #fff; stroke-width: 0.9; }
+.map-legend .lg-ic { display: inline-flex; align-items: center; font-style: normal; }
+.map-legend .pfig-ic svg { width: 7px; height: 14px; }
+.map-legend .truck-ic svg { display: block; width: 22px; height: 12.5px; }
+.map-people { margin: var(--sp-1, 4px) 0 0; }
 
 /* ---- live issue feed ----
    Sits beside the map. New rows slide in highlighted; the chime is a
