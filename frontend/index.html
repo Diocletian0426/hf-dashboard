@@ -464,6 +464,50 @@
       return r === "driver" || r === "lorry_driver";
     }
 
+    // The drivers' base. Most drivers are assigned to the yard and start and
+    // end their day there, but the yard is not a piling site, so it has no pin
+    // of its own — without one, those lorries and their trips out to the sites
+    // would never be drawn. Its point is the yard project's own coordinates
+    // (HF-YARD-001, "North staging (Penang/Kedah)"; projects.site_latitude /
+    // site_longitude, 17 Oct 2026).
+    var YARD_POINT = [5.28519, 100.50536];
+    function isYard(code, name) {
+      return String(code || "").toUpperCase().indexOf("HF-YARD") === 0 ||
+             String(name || "").trim().toUpperCase().indexOf("YARD") === 0;
+    }
+
+    // One depot pin per yard a driver is assigned to or punched at today,
+    // returned as { project_id: marker } to sit beside the site pins for the
+    // lorries only — it is not a site, so no popup, no crew, no site card.
+    function drawDepots(map, markers, staff, punches) {
+      var drivers = {}, ids = {};
+      (staff || []).forEach(function (s) {
+        if (!isDriver(s)) return;
+        drivers[String(s.staff_id)] = true;
+        if (s.current_project_id && isYard(s.project_code, s.project_name)) {
+          ids[String(s.current_project_id)] = s.project_name || s.project_code;
+        }
+      });
+      (Array.isArray(punches) ? punches : []).forEach(function (p) {
+        if (p && drivers[String(p.staff_id)] && p.project_id && isYard(null, p.project_name)) {
+          ids[String(p.project_id)] = p.project_name;
+        }
+      });
+      var out = {};
+      Object.keys(ids).forEach(function (id) {
+        if (markers[id]) return;                 // already a site pin
+        out[id] = L.marker(YARD_POINT, {
+          icon: L.divIcon({
+            className: "pin depot", iconSize: [0, 0], iconAnchor: [0, 0],
+            html: '<i class="pin-dot"></i><b class="pin-label">YARD</b>'
+          }),
+          interactive: false, keyboard: false,
+          title: "Drivers' base: " + (ids[id] || "Yard / store")
+        }).addTo(map);
+      });
+      return out;
+    }
+
     function drawWorkers(map, markers, fan, staff) {
       var bySite = {}, count = 0;
       (staff || []).forEach(function (s) {
@@ -576,7 +620,9 @@
       }
       function siteName(p) {
         var id = String(p.project_id);
-        return siteOf[id] ? shortCode(siteOf[id]) : String(p.project_name || "a site off this map");
+        if (siteOf[id]) return shortCode(siteOf[id]);
+        if (isYard(null, p.project_name)) return "YARD";
+        return String(p.project_name || "a site off this map");
       }
 
       // today's punches per driver, oldest first (the RPC sends newest first;
@@ -720,7 +766,10 @@
         console.warn("Overview map: worker figures skipped —", e);
       }
       try {
-        trips = drawDrivers(MAP.map, MAP.markers, fan, siteOf, staff, await punchP);
+        var punches = await punchP;
+        // the yard joins the site pins for the lorries only
+        var stops = Object.assign({}, MAP.markers, drawDepots(MAP.map, MAP.markers, staff, punches));
+        trips = drawDrivers(MAP.map, stops, fan, siteOf, staff, punches);
       } catch (e) {
         trips = null;
         console.warn("Overview map: driver routes skipped —", e);

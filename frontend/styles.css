@@ -2346,6 +2346,9 @@ summary.zone-rich::before { float: left; margin: 4px 8px 0 0; }
 .pin.ok   { color: var(--ok); }
 .pin.warn { color: var(--warn); }
 .pin.bad  { color: var(--danger); }
+/* the drivers' base: a square, quiet dot that is not a site (no popup) */
+.pin.depot { color: var(--ink-3); cursor: default; }
+.pin.depot .pin-dot { border-radius: 3px; }
 .pin:hover .pin-label, .pin.sel .pin-label { color: var(--ink); background: #fff; }
 .pin:hover .pin-dot {
   box-shadow: 0 0 0 8px rgb(from currentColor r g b / 0.3), 0 1px 3px rgba(20, 45, 90, 0.35);
