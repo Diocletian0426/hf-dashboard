@@ -63,6 +63,16 @@
    await Dash.getAttendanceRequests(opts?)        -> { ok, requests, counts } missed-shift / change-times asks
    await Dash.reviewAttendanceRequest(id, decision, note?) -> { ok, status, message } | { ok:false, code, message }
    await Dash.revokeAttendanceRequest(id, note)   -> undo an approval (turns Rejected); same result shape
+   await Dash.getPunchExceptions(from, to)        -> the office's Exceptions queue (DB 0124): one row per
+                                                     shift AND kind — missed / long_open / overlong /
+                                                     early_start; both dates null = every unresolved
+                                                     shift since the rule's start date; null before 0124
+   await Dash.getUnpricedDays(from, to)           -> the payroll-close list: worker days with no figure
+                                                     or a request waiting; null before 0124
+   await Dash.acceptShiftAsPunched(staffId, date, shiftNo, 'long'|'early'|'early_keep', note)
+                                                     (note required for long and early)
+                                                  -> { ok, mark, working_minutes } or { ok:false, code, message }
+   await Dash.clearShiftAcceptance(staffId, date, shiftNo, 'long'|'early') -> undo the acceptance
    await Dash.getTests(showAll?)                  -> pile test tracker (hides completed/passed
                                                      unless showAll is true)
    await Dash.getTestTypes()                      -> test type directory (CSL/MLT/PDA/PIT:
@@ -925,14 +935,19 @@
   // the worker's raw punch for that end"; the two laid together must still make
   // a complete pair. The reason is required and the worker reads it in their
   // own app history, so it is written for them, not for us.
-  function setDayCorrection(staffId, workDate, inAtISO, outAtISO, reason) {
-    return q(sb.rpc("set_day_correction", {
+  // shiftNo (optional): rule ONE shift of a day that holds several (the
+  // Exceptions page always names it). Left out, the database rules the
+  // day's only shift and refuses a day with more than one.
+  function setDayCorrection(staffId, workDate, inAtISO, outAtISO, reason, shiftNo) {
+    var args = {
       p_staff_id: staffId,
       p_work_date: workDate,
       p_in_at:  inAtISO  || null,
       p_out_at: outAtISO || null,
       p_reason: reason
-    }));
+    };
+    if (shiftNo != null && shiftNo !== "") args.p_shift_no = Number(shiftNo);
+    return q(sb.rpc("set_day_correction", args));
   }
 
   // Drops the ruling; the worker's raw punches stand again. Both this and the
@@ -1010,6 +1025,68 @@
   function revokeAttendanceRequest(requestId, note) {
     return q(sb.rpc("revoke_attendance_request", {
       p_request_id: requestId, p_note: note || null
+    }));
+  }
+
+  // ---- the punch Exceptions queue (DB 0124, exceptions.html) ---------------
+  // Since 0124 nothing is auto-closed; what the punch system cannot settle on
+  // its own lands here for the office. One row per shift AND kind, for the
+  // dates from..to (both inclusive; null = the last 31 days):
+  //   missed       left without a punch-out (the worker said so, or 48 h passed)
+  //   long_open    still open 16 h or more
+  //   overlong     closed over 16 h and not accepted: unpriced
+  //   early_start  a site worker's start before 06:00, not accepted: counts from 08:00
+  // A finish time the worker declared rides on the row as request_id /
+  // declared_out_at / request_pending (it is a Change Times request). Each row
+  // also carries the shift AS RULED (official_in_at, official_out_at, adjusted,
+  // adjust_reason) so the office can rule a time in place. Both dates null =
+  // every unresolved shift since the rule's start date (the database's floor).
+  // Off-site punch-outs sort first within a kind. Compare With Crew is
+  // getShifts(work_date, project_id). Resolves to NULL — not an error — when
+  // the database predates 0124, so the page can ship before the migration.
+  async function getPunchExceptions(from, to) {
+    try {
+      return await q(sb.rpc("get_punch_exceptions", { p_from: from || null, p_to: to || null }));
+    } catch (e) {
+      if (isMissingFunction(e)) return null;
+      throw e;
+    }
+  }
+
+  // The payroll-close list: every worker day in from..to that would reach
+  // payroll with no figure (why = missed / open / overlong / unpriced) or with a
+  // request still waiting (pending_request). NULL before 0124, as above.
+  async function getUnpricedDays(from, to) {
+    try {
+      return await q(sb.rpc("get_unpriced_days", { p_from: from, p_to: to }));
+    } catch (e) {
+      if (isMissingFunction(e)) return null;
+      throw e;
+    }
+  }
+
+  // kind 'long'  = accept a shift over 16 h as punched (it prices as tapped);
+  // kind 'early' = credit a site worker's start before 06:00 from the punch-in;
+  // kind 'early_keep' = looked at, kept counted from 08:00 (settled, no pay change).
+  // A reason is required for long and early (note_required). Nobody settles
+  // their own shift (self_review; Super Administrator excepted); a shift the
+  // office already ruled answers already_ruled.
+  // The punches are untouched: a mark sits beside them (shift_marks) and an
+  // audit row names who accepted. Refusals come back as DATA — { ok:false,
+  // code, message }: no_such_shift, shift_open, not_overlong, not_early,
+  // flexible_hours, bad_kind, note_required, already_ruled, self_review. Success: { ok:true, mark, working_minutes } with
+  // the DAY's priced minutes after the acceptance.
+  function acceptShiftAsPunched(staffId, workDate, shiftNo, kind, note) {
+    return q(sb.rpc("accept_shift_as_punched", {
+      p_staff_id: staffId, p_work_date: workDate, p_shift_no: Number(shiftNo) || 1,
+      p_kind: kind, p_note: note || null
+    }));
+  }
+
+  // Takes the acceptance back (audited). { ok:true } or { ok:false, code } (not_found, bad_kind).
+  function clearShiftAcceptance(staffId, workDate, shiftNo, kind) {
+    return q(sb.rpc("clear_shift_acceptance", {
+      p_staff_id: staffId, p_work_date: workDate, p_shift_no: Number(shiftNo) || 1, p_kind: kind
     }));
   }
 
@@ -1822,6 +1899,10 @@
     getAttendanceRequests: getAttendanceRequests,
     reviewAttendanceRequest: reviewAttendanceRequest,
     revokeAttendanceRequest: revokeAttendanceRequest,
+    getPunchExceptions: getPunchExceptions,
+    getUnpricedDays: getUnpricedDays,
+    acceptShiftAsPunched: acceptShiftAsPunched,
+    clearShiftAcceptance: clearShiftAcceptance,
     getTests: getTests,
     getTestTypes: getTestTypes,
     getProjectTestSpecs: getProjectTestSpecs,

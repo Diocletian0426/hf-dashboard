@@ -55,6 +55,7 @@ Note the repo itself is public (free-plan requirement for Pages).
 | `manpower.html` | Site manpower roster + moves |
 | `attendance.html` | Punch attendance — **owned by the attendance collaborator, do not edit** (see `docs/ATTENDANCE-HANDOFF.md`) |
 | `requests.html` | Attendance Requests — office approves/rejects the punch app's Missed Shift + Change Times asks (`?demo=1` = invented data, no login, writes nothing) |
+| `exceptions.html` | Punch Exceptions (DB 0124) — every unresolved shift since the rule's start date: Punch Out Missing, Overlong, Early Start, Open 16 h+. A row opens into a panel: the punches, Compare With Crew, the worker's request (Approve / Reject), Accept As Punched / Credit / Keep with a reason, and Rule The Times in place (`correct-form.js`, shared with Attendance next). The Before Payroll Closes list below (`?demo=1` = invented data, no login, writes nothing). Needs attendance.edit |
 | `tests.html` | Cross-project test chasing queue (deliberately thin — locked decision) |
 
 ## Shared architecture
@@ -80,6 +81,10 @@ Every content page has the same skeleton and load order:
   helpers, open-card/scroll persistence, pile-stage + test-bucket constants.
 - `frontend/shell.js` — login guard + nav. Does **not** depend on ui.js
   (attendance.html loads shell without it).
+- `frontend/correct-form.js` — `window.CorrectForm`: the office's Rule The
+  Times form (two times, next-day tick, reason chips) and the rule for what
+  goes to `set_day_correction` (only the end that changed). Used by
+  exceptions.html; attendance.html switches to it in its next change.
 - Times are Malaysia time everywhere — use `Dash.todayKL()` / `Dash.klTime()`,
   never `new Date().toISOString()`.
 - Every fetch failure must show a red banner — never a silent empty page.
