@@ -5,1363 +5,1211 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nexus — Manpower</title>
   <link rel="stylesheet" href="styles.css" />
+  <!-- Page-only bits, tokens only (the Exceptions page did the same). -->
+  <style>
+    /* the tiles: one line each, like the Exceptions cards */
+    .istats-slim .istat { padding: 8px 14px; gap: 10px; }
+    .istats-slim .istat-ic { width: 30px; height: 30px; }
+    .istats-slim .istat-ic .ic { width: 16px; height: 16px; }
+    .istats-slim .istat-top b { font-size: var(--fs-lg); }
+    .istat.plain { cursor: default; }
+    .istat.plain:hover { transform: none; background: var(--surface); }
+
+    /* the one bar of controls */
+    .mp-bar { align-items: center; }
+    .mp-bar .tool-search { flex: 1 1 280px; }
+    .mp-filter-wrap { position: relative; }
+    .mp-filters { left: auto; right: 0; width: min(340px, 92vw); }
+    .mp-filters label { display: flex; flex-direction: column; gap: 4px; margin: 0 0 10px;
+                        font-size: var(--fs-xs); font-weight: 600; color: var(--ink-2); }
+    .mp-filters select { width: 100%; margin: 0; max-width: none; }
+    .mp-filters .mp-filters-foot { display: flex; gap: 8px; justify-content: flex-end; }
+    .mp-bar button.on { background: var(--brand-soft); border-color: var(--brand-border); color: var(--brand-ink); }
+
+    /* a site block: four things on the collapsed line, the rest inside */
+    details.zone.mp-site { margin: var(--sp-2) 0; }
+    details.zone.mp-site > summary { padding: 10px 14px; border-radius: var(--r-md);
+      background: var(--surface); border: 1px solid var(--line); align-items: center; }
+    details.zone.mp-site > summary:hover { background: var(--surface-solid); }
+    details.zone.mp-site[open] > summary { border-radius: var(--r-md) var(--r-md) 0 0; }
+    .mp-sum { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex: 1; min-width: 0; }
+    .mp-site-name { font-weight: 600; color: var(--ink); font-size: var(--fs-md); }
+    .mp-site-code { color: var(--ink-3); font-size: var(--fs-xs); }
+    .mp-sum .chip { font-weight: 600; }
+    .mp-body { background: rgba(255, 255, 255, 0.55); border: 1px solid var(--line); border-top: 0;
+               border-radius: 0 0 var(--r-md) var(--r-md); padding: 10px 14px 14px; }
+    .mp-meta { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center;
+               color: var(--ink-2); font-size: 12.5px; margin: 0 0 8px; }
+    .mp-meta b { color: var(--ink); font-weight: 600; }
+    .mp-meta a { color: var(--brand); text-decoration: none; }
+    .mp-meta a:hover { text-decoration: underline; }
+    .mp-trades { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+    .mp-body .table-wrap { background: var(--surface-solid); }
+    tr.mp-row { cursor: pointer; }
+    tr.mp-row:hover > td { background: var(--surface-2); }
+    tr.mp-row.mp-sel > td { background: var(--brand-soft); }
+    .mp-sub { display: block; margin-top: 2px; color: var(--ink-3); font-size: var(--fs-xs); font-weight: 400; }
+    .st { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 2px 10px;
+          font-size: var(--fs-xs); font-weight: 600; white-space: nowrap; cursor: help; }
+    .st-match    { background: var(--ok-soft);   color: var(--ok-ink); }
+    .st-mismatch { background: var(--warn-soft); color: var(--warn-ink); }
+    .st-none     { background: #f1f5f9;          color: var(--ink-2); }
+    .mp-empty { padding: var(--sp-5); text-align: center; color: var(--ink-2); }
+
+    /* the bottom tabs (office only) */
+    .mp-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: var(--sp-5) 0 var(--sp-3); }
+    .mp-tab-body { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); padding: 12px 14px; }
+    .mp-tab-body .table-wrap { background: var(--surface-solid); }
+    .mp-tab-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 10px; color: var(--ink-2); font-size: var(--fs-sm); }
+    .mp-tab-head .spacer { flex: 1; }
+    .mp-dq { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--sp-3); }
+    .mp-dq-col h3 { margin: 0 0 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase; color: var(--ink-2); }
+    .mp-dq-col ul { list-style: none; margin: 0; padding: 0; }
+    .mp-dq-col li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 4px 0;
+                    border-bottom: 1px solid var(--rule); font-size: var(--fs-sm); }
+    .mp-dq-col li:last-child { border-bottom: 0; }
+
+    /* the worker panel: slides in from the right, over the list */
+    .mp-drawer { position: fixed; top: 0; right: 0; bottom: 0; z-index: 70; width: min(480px, 96vw);
+                 overflow-y: auto; background: rgba(255, 255, 255, 0.97); box-shadow: var(--shadow-2);
+                 border-radius: var(--r-lg) 0 0 var(--r-lg); padding: var(--sp-4) var(--sp-5) var(--sp-6);
+                 animation: drawer-in 0.2s cubic-bezier(0.2, 0.9, 0.3, 1); }
+    .mp-drawer[hidden] { display: none; }
+    .dr-top { display: flex; align-items: flex-start; gap: 8px; }
+    .dr-top h2 { margin: 0; font-size: var(--fs-xl); line-height: 1.2; flex: 1; }
+    .dr-top .dr-close { flex: none; }
+    .dr-who { color: var(--ink-2); font-size: var(--fs-sm); margin: 2px 0 10px; }
+    .dr-facts { display: grid; grid-template-columns: 110px 1fr; gap: 4px 10px; font-size: var(--fs-sm); margin: 0 0 12px; }
+    .dr-facts dt { color: var(--ink-3); } .dr-facts dd { margin: 0; color: var(--ink); }
+    .dr-links { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
+    .dr-links .btn { text-decoration: none; }
+    .dr-sec { margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px solid var(--rule); }
+    .dr-sec > h3 { margin: 0 0 8px; font-size: 11px; font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase; color: var(--ink-2);
+                   display: flex; align-items: center; gap: 8px; }
+    .dr-sec > h3 .spacer { flex: 1; }
+    .dr-line { font-size: var(--fs-sm); padding: 3px 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+    .dr-line .muted { font-size: var(--fs-xs); }
+    .dr-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .dr-form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; margin-top: 6px; }
+    .dr-form label { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-xs); font-weight: 600; color: var(--ink-2); min-width: 0; }
+    .dr-form label.wide { grid-column: 1 / -1; }
+    .dr-form label.check { flex-direction: row; align-items: center; gap: 6px; font-weight: 500; }
+    .dr-form input, .dr-form select { width: 100%; min-width: 0; box-sizing: border-box;
+      font-family: var(--font); font-size: 13px; color: var(--ink); padding: 8px 10px;
+      border: 1px solid var(--line-strong); border-radius: var(--r-sm); background: var(--surface-solid); }
+    .dr-form select { -webkit-appearance: none; appearance: none; padding-right: 30px;
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8' fill='none' stroke='%234b5b76' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M1.5 1.8 6 6.2l4.5-4.4'/></svg>");
+      background-repeat: no-repeat; background-position: right 10px center; background-size: 11px 7px; }
+    .dr-form .acts { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .dr-err { color: var(--danger-ink); font-size: var(--fs-sm); margin: 6px 0 0; white-space: pre-wrap; }
+    .dr-err:empty { display: none; }
+    .dr-ok { color: var(--ok-ink); font-size: var(--fs-sm); margin: 6px 0 0; }
+    .dr-ok:empty { display: none; }
+    .dr-confirm { margin-top: 8px; padding: 10px 12px; border-radius: var(--r-md);
+                  background: var(--surface-solid); border: 1px solid var(--brand-border); }
+    .dr-confirm p { margin: 0 0 8px; font-size: var(--fs-sm); color: var(--ink); }
+    .dr-confirm.danger { border-color: #fecaca; }
+    .dr-code { font-family: ui-monospace, Consolas, monospace; font-size: 22px; letter-spacing: 3px; }
+    .dr-foot { margin-top: var(--sp-5); padding-top: var(--sp-3); border-top: 1px solid var(--rule); }
+    .mp-inline-form { margin: 8px 0 12px; padding: 10px 12px; background: var(--surface-solid); border: 1px solid var(--line-strong); border-radius: var(--r-md); }
+
+    @media (max-width: 760px) {
+      .mp-drawer { width: 100vw; border-radius: 0; padding: var(--sp-3) var(--sp-4) var(--sp-6); }
+      .dr-form { grid-template-columns: 1fr; }
+      .dr-facts { grid-template-columns: 1fr; gap: 2px; }
+      .mp-bar .tool-search { flex-basis: 100%; }
+    }
+  </style>
 </head>
 <body>
 
   <header id="nav"></header>
 
   <main id="main">
-
-    <!-- ================= MANPOWER (whereabouts + office self-service) =========
-         Who is on which site, combined across HF-BP and Hai Fu — the same
-         truth the WhatsApp summaries read (staff.current_project_id).
-         Any signed-in login can LOOK (code / name / role / company / site
-         only — the locked staff table stays locked; no IC/phone in the view).
-         Management/office additionally: ADD a worker (0040 add_staff, with
-         duplicate-name/code guards), MOVE workers (0039 move_staff, logged
-         to transfer_log), MARK LEFT + reactivate (0040 set_staff_active —
-         departure also locks the phone out of the punch app, intended),
-         and PLAN moves (0048 movement_plans — an intention, when/where/why;
-         nothing moves until the office presses Execute in "Upcoming moves",
-         which applies it through the same validated move path and logs it).
-         All of it database-enforced; the buttons are convenience. -->
+    <!-- ================= MANPOWER (Round 1 of the frontend overhaul, Oct 2026)
+         Who is on which site, across HF-BP and Hai Fu: the worker's current
+         site on the staff record (staff.current_project_id), the same field the
+         nightly WhatsApp summary and the Overview read. The page never works a
+         site out; the office changes it through the move functions, which log
+         every change, and since DB 0105 a worker's own verified punch moves
+         them too (By Punch).
+         THE SHAPE (24 Oct review): summary first, operational issues second,
+         administration only when asked for.
+           - tiles: active workers, sites, mismatches, awaiting deployment
+           - one search, a company switch, By Site / By Trade, Filters
+           - sites collapsed by default, remembered per browser; a collapsed
+             line is name, headcount, warnings; trades, supervisor, machines
+             and scope sit inside the expanded block
+           - rows: worker, trade, status (Match / Mismatch / No Recent Report);
+             the real last report lives in the worker panel
+           - the worker panel (right) opens with Move first; Details, History,
+             Phone and Planning below it; Mark As Left at the bottom
+           - office tabs at the bottom: Movement History, Inactive Workers,
+             Data Quality
+           - Unassigned is split: Office Staff (admin, management, coordinator,
+             store keeper) and Awaiting Deployment (everyone else off site)
+           - the test site is hidden unless the URL has ?test=1
+         Reads: v_manpower_by_site, v_project_directory, v_project_supervisors,
+         v_machine_fleet, v_movement_plans (anyone with manpower.view);
+         get_transfer_log, get_staff_detail (manpower.edit); get_worker_devices
+         (devices.view). Writes re-check the caller in the database every time;
+         the buttons only stop the page lying to a viewer. -->
     <div class="page-eyebrow">Manpower</div>
-    <h1>Site manpower</h1>
-    <p id="manpower-sub" class="page-caption"></p>
+    <h1>Site Manpower</h1>
+    <p class="page-caption" id="mp-sub">Who is on which site, both companies.</p>
 
     <div id="error"></div>
-    <div id="housekeeping"></div>
-    <div class="mp-controls">
-      <span>Group:
-        <button type="button" data-mode="site" class="active">By site</button>
-        <button type="button" data-mode="role">By role</button>
+    <div class="istats istats-slim" id="mp-tiles"></div>
+
+    <div class="mp-controls mp-bar" id="mp-bar">
+      <span class="tool-search">
+        <svg class="ric" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="11" cy="11" r="6.5"/><path d="M15.8 15.8 20.5 20.5"/>
+        </svg>
+        <input type="search" id="mp-q" placeholder="Search workers or sites…" aria-label="Search workers or sites" autocomplete="off" />
+        <span class="muted" id="f-count"></span>
       </span>
-      <span>Company:
+      <span>
         <button type="button" data-co="all" class="active">All</button>
         <button type="button" data-co="HF-BP">HF-BP</button>
         <button type="button" data-co="Hai Fu">Hai Fu</button>
       </span>
-      <span id="mp-extra"></span>
+      <span>
+        <button type="button" data-view="site" class="active">By Site</button>
+        <button type="button" data-view="trade">By Trade</button>
+      </span>
+      <span class="mp-filter-wrap">
+        <button type="button" id="mp-filters-btn" aria-expanded="false">Filters</button>
+        <div class="filter-pop mp-filters" id="mp-filters" hidden>
+          <label>Trade <select id="f-trade"><option value="all">Any Trade</option></select></label>
+          <label>Site <select id="f-site"><option value="all">Any Site</option></select></label>
+          <label>Status <select id="f-status">
+            <option value="all">Any Status</option>
+            <option value="mismatch">Mismatch</option>
+            <option value="none">No Recent Report</option>
+            <option value="match">Match</option></select></label>
+          <div class="mp-filters-foot">
+            <button type="button" id="mp-filters-clear">Clear</button>
+            <button type="button" id="mp-filters-close">Done</button>
+          </div>
+        </div>
+      </span>
+      <span id="mp-add"></span>
     </div>
-    <div class="filter-wrap">
-      <input type="search" id="mp-search" class="filter-box"
-             placeholder="Search name, employee code or site…" autocomplete="off">
-    </div>
-    <div class="pipe-note" style="margin:-6px 0 10px">
-      "Last reported" comes from the WhatsApp bot's attendance — the bot skips
-      sites and days, so no recent report does <strong>not</strong> mean absent.
-      An amber ⚠ means the bot recently placed the worker on a different site
-      than this roster — check, then use Move to correct whichever is wrong.
-    </div>
-    <div id="groups"></div>
-    <div id="movelog"></div>
 
-    <!-- shared type-to-filter country suggestions (add + edit forms);
-         free text still allowed for anything not listed -->
-    <datalist id="country-list">
-      <option value="Malaysia"></option>
-      <option value="Myanmar"></option>
-      <option value="Bangladesh"></option>
-      <option value="Indonesia"></option>
-      <option value="Nepal"></option>
-      <option value="India"></option>
-      <option value="Pakistan"></option>
-      <option value="Vietnam"></option>
-      <option value="Thailand"></option>
-      <option value="Philippines"></option>
-      <option value="Cambodia"></option>
-      <option value="Sri Lanka"></option>
-      <option value="China"></option>
-    </datalist>
+    <div id="mp-upcoming"></div>
+    <div id="mp-groups"><div class="empty">Loading the roster…</div></div>
 
+    <section id="mp-more" hidden>
+      <div class="mp-tabs" id="mp-tabs"></div>
+      <div class="mp-tab-body" id="mp-tab-body"></div>
+    </section>
+
+    <aside id="mp-drawer" class="mp-drawer" hidden aria-label="Worker"></aside>
   </main>
 
   <script src="vendor/supabase.js"></script>
   <script src="config.js"></script>
   <script src="dashboard-client.js"></script>
   <script src="ui.js"></script>
+  <!-- DEV ONLY: does nothing unless the URL has ?demo=1, and never writes.
+       Must sit BEFORE shell.js (it stands in for the sign-in the shell asks
+       for). Delete this line + manpower-demo.js once the page is accepted. -->
+  <script src="manpower-demo.js"></script>
   <script src="shell.js"></script>
 
   <script>
     var esc = UI.esc, escHtml = UI.escHtml;
 
-    // payroll trades (staff_role_check values) — site trades first
+    // payroll trades (staff_role_check values), site trades first
     var ROLES = ["general_worker", "boring_operator", "crane_operator", "excavator_operator",
                  "vibro_operator", "welder", "rigger", "banksman", "fabricator", "driver",
                  "mechanic", "site_supervisor", "project_manager", "coordinator", "surveyor",
                  "safety_officer", "store_keeper", "admin", "management", "other"];
+    // off-site people who are not waiting for a site
+    var OFFICE_TRADES = ["admin", "management", "coordinator", "store_keeper"];
     var COMPANIES = ["HF-BP", "Hai Fu"];
-    var LEFT_GROUP_MAX = 15;   // "Recently left" shows the most recent departures
+    // machine type -> the trade that runs it (the "Needs …" warning)
+    var MACHINE_TRADE = { boring_rig: "boring_operator", crawler_crane: "crane_operator", vibro_hammer: "vibro_operator" };
+    var COUNTRIES = ["Malaysia", "Myanmar", "Bangladesh", "Indonesia", "Nepal", "India", "Pakistan",
+                     "Vietnam", "Thailand", "Philippines", "Cambodia", "Sri Lanka", "China"];
+    var REPORT_DAYS = 7;          // a report older than this is "No Recent Report"
+    var HISTORY_IN_PANEL = 8;
+    var HISTORY_IN_TAB = 50;
+    var OPEN_KEY = "hf-mp-open";  // which site blocks this browser keeps open
 
-    // page state: rows cached, open-groups + form visibility + grouping mode
-    // and company filter all survive re-renders
-    var MP = { rows: [], projects: [], canMove: false, open: {}, showAdd: false,
-               editing: null, planning: null, plans: [],   // 0048 movement planning
-               cardOpen: null, cardCache: {},              // worker record card (0051)
-               translog: [], histByStaff: {},              // transfer feed, keyed by staff_id
-               groupMode: "site", companyFilter: "all", err: "", okMsg: "",
-               hkFilter: null,               // 'joined' | 'code' | 'contact' | null
-               roleFilter: "all", siteFilter: "all", driftOnly: false,
-               supervisorsByPid: {},         // project_id -> "Name, Name"
-               machinesBySite: {},           // project_code -> [{code,type}]
-               canDevices: false, canDevicesView: false,   // 0082 punch-app enrolment
-               devByStaff: {},               // staff_id -> enrolment state row
-               shownCode: {} };              // staff_id -> the code just issued (shown ONCE)
+    var params = new URLSearchParams(location.search);
 
-    // machine type -> the trade that runs it (crew-vs-plant hint)
-    var MACHINE_TRADE = {
-      boring_rig: "boring_operator",
-      crawler_crane: "crane_operator",
-      vibro_hammer: "vibro_operator"
+    var M = {
+      rows: [], projects: [], dirByPid: {}, supervisorsByPid: {}, machinesBySite: {},
+      plans: [], translog: [], histByStaff: {}, translogErr: "",
+      canEdit: false, canDevView: false, canDev: false,
+      showTest: params.get("test") === "1",
+      q: "", company: "all", view: "site", trade: "all", site: "all", status: "all",
+      open: loadOpen(),
+      sel: null,                 // staff_id in the panel, or "__new"
+      mode: null,                // panel sub-state: "edit" | "plan" | "fix:<id>" | null
+      confirm: null,             // { kind, id, label } for the inline confirms
+      cache: {}, dev: {}, shownCode: {},
+      tab: "history", ok: "", err: "", panelErr: "", panelOk: "", busy: false
     };
 
-    var daysAgo = UI.daysSince;
+    /* ----------------------------- small helpers --------------------------- */
 
-    // drift = the bot placed this worker on a DIFFERENT site within the last 7 days
-    function isDrift(r) {
-      if (!r.is_active || !r.last_reported_date) return false;
-      var d = daysAgo(r.last_reported_date);
-      if (d === null || d > 7) return false;
-      return String(r.last_reported_project_id || "") !== String(r.current_project_id || "");
+    function loadOpen() {
+      try { return JSON.parse(localStorage.getItem(OPEN_KEY) || "{}"); } catch (e) { return {}; }
     }
-
-    function lastReportedCell(r) {
-      if (!r.last_reported_date) return '<td class="muted-line" data-label="Last reported">—</td>';
-      var label = new Intl.DateTimeFormat("en-MY", { day: "2-digit", month: "short" })
-        .format(new Date(r.last_reported_date + "T00:00:00"));
-      // 0083: this can now come from a GPS-verified punch instead of the bot's
-      // free text. Say which — a punch is evidence, a bot line is a claim.
-      var isGps = r.last_reported_source === "gps";
-      var src = r.last_reported_source ? (isGps ? " (GPS)" : " (bot)") : "";
-      var txt = label + " @ " + escHtml(r.last_reported_project_code || "?") + src;
-      if (isDrift(r)) {
-        return '<td class="drift" data-label="Last reported" title="' +
-               (isGps
-                 ? "This worker PUNCHED IN at "
-                 : "The bot last reported this worker at ") +
-               esc(r.last_reported_project_code || "?") + " on " + esc(r.last_reported_date) +
-               ' — different from the assigned site. Check, then Move whichever is wrong.">' +
-               txt + " &#9888;</td>";
-      }
-      return '<td class="muted-line" data-label="Last reported">' + txt + "</td>";
+    function saveOpen() {
+      try { localStorage.setItem(OPEN_KEY, JSON.stringify(M.open)); } catch (e) {}
     }
-
-    function activeRows() {
-      return MP.rows.filter(function (r) { return r.is_active; });
+    function isTest(code) { return String(code || "").indexOf("TEST") === 0; }
+    function active() {
+      return M.rows.filter(function (r) { return r.is_active && (M.showTest || !isTest(r.project_code)); });
     }
-    function recentlyLeft() {
-      return MP.rows.filter(function (r) { return !r.is_active; })
-        .sort(function (a, b) { return a.updated_at < b.updated_at ? 1 : -1; })
-        .slice(0, LEFT_GROUP_MAX);
+    function inCompany(r) { return M.company === "all" || r.company === M.company; }
+    function filtering() {
+      return !!(M.q || M.trade !== "all" || M.site !== "all" || M.status !== "all");
     }
-
-    function roleSummary(list) {
-      var counts = {};
-      list.forEach(function (r) { var k = r.role || "?"; counts[k] = (counts[k] || 0) + 1; });
-      return Object.keys(counts).sort().map(function (k) {
-        return counts[k] + " " + k.replace(/_/g, " ");
-      }).join(" · ");
+    function groupOf(r) {           // where an off-site worker sits
+      if (r.current_project_id) return r.project_code || "?";
+      return OFFICE_TRADES.indexOf(r.role) !== -1 ? "__office" : "__await";
     }
-
-    function moveTargets() {
-      // active first-class, completed still selectable (test/hacking crews are
-      // normal on completed sites); cancelled + TEST rows excluded
-      return MP.projects.filter(function (p) {
-        return (p.status === "active" || p.status === "completed") &&
-               p.project_code.indexOf("TEST") !== 0;
-      });
-    }
-
-    // shared site <option> list — code AND name (the office knows sites by name)
-    function siteOptions(withUnassign) {
-      return moveTargets().map(function (p) {
-        return '<option value="' + p.project_id + '">' +
-               escHtml(p.project_code + " — " + (p.project_name || "")) +
-               (p.status === "completed" ? " (completed)" : "") + "</option>";
-      }).join("") + (withUnassign ? '<option value="unassign">— unassigned —</option>' : "");
-    }
-
-    // The row shows one button. Seven controls per row — a site dropdown, a
-    // remarks box, a date, and four buttons — was either a horizontal scroll
-    // or a two-line row 110px tall, repeated for every worker on the page.
-    // They live in the record card that already opens under the row instead.
-    function actionCell(r) {
-      if (!MP.canMove) return "";
-      return '<td><button type="button" class="btn mp-open" data-action="card" data-staff="' +
-             r.staff_id + '" title="Open this worker\'s record — move, edit, plan, mark left">' +
-             "Manage</button></td>";
-    }
-
-    // the same controls as before, now inside the card
-    function moveControls(r) {
-      return '<span class="move-ctl">' +
-             '<select data-staff="' + r.staff_id + '"><option value="">move to…</option>' +
-             siteOptions(true) + "</select>" +
-             '<input type="text" data-staff-remarks="' + r.staff_id + '" size="8" placeholder="remarks"' +
-             ' title="optional — lands in the move log (say &quot;data correction&quot; when fixing old records)">' +
-             '<input type="date" data-staff-date="' + r.staff_id + '" value="' + Dash.todayKL() +
-             '" title="when the move really happened — backdate for catch-up moves">' +
-             '<button type="button" data-action="move" data-staff="' + r.staff_id + '">Move</button>' +
-             '<button type="button" data-action="edit" data-staff="' + r.staff_id + '">edit</button>' +
-             '<button type="button" data-action="plan" data-staff="' + r.staff_id +
-             '" data-name="' + esc(r.full_name) + '" title="record a FUTURE move — nothing changes until Execute">plan</button>' +
-             '<button type="button" class="danger" data-action="mark-left" data-staff="' + r.staff_id +
-             '" data-name="' + esc(r.full_name) + '">left</button>' +
-             "</span>";
-    }
-
-    function rowSearchAttr(r) {
-      return esc(((r.full_name || "") + " " + (r.employee_code || "") + " " +
-                  (r.project_code || "") + " " + (r.project_name || "")).toLowerCase());
-    }
-
     function siteLabel(r) {
-      return r.current_project_id
-        ? escHtml((r.project_code || "") + (r.project_name ? " — " + r.project_name : ""))
-        : "unassigned";
+      return r.current_project_id ? (r.project_name || r.project_code || "") : "Not On A Site";
+    }
+    function shortDate(iso) {
+      if (!iso) return "";
+      return new Intl.DateTimeFormat("en-MY", { day: "2-digit", month: "short" }).format(new Date(iso + "T00:00:00"));
+    }
+    function sourceWord(r) { return r.last_reported_source === "gps" ? "GPS" : r.last_reported_source ? "bot" : ""; }
+    function reportWords(r) {
+      if (!r.last_reported_date) return "No report yet";
+      return shortDate(r.last_reported_date) + " at " + (r.last_reported_project_code || "no site") +
+             (sourceWord(r) ? " (" + sourceWord(r) + ")" : "");
     }
 
-    // per-site counts, for the by-role group headers
-    function siteSummary(list) {
+    // Match / Mismatch / No Recent Report, and the sentence behind it
+    function statusOf(r) {
+      if (!r.last_reported_date) return { k: "none", label: "No Recent Report", why: "Nothing has placed this worker yet: no punch, no bot line." };
+      var days = UI.daysSince(r.last_reported_date);
+      if (days === null || days > REPORT_DAYS) {
+        return { k: "none", label: "No Recent Report", why: "Last report " + reportWords(r) + ", more than " + REPORT_DAYS + " days ago." };
+      }
+      var same = String(r.last_reported_project_id || "") === String(r.current_project_id || "");
+      if (same) return { k: "match", label: "Match", why: "Reported " + reportWords(r) + ", the roster site." };
+      var where = r.last_reported_project_code ? "at " + r.last_reported_project_code : "at no known site";
+      return { k: "mismatch", label: "Mismatch",
+               why: "Reported " + where + " on " + shortDate(r.last_reported_date) + (sourceWord(r) ? " (" + sourceWord(r) + ")" : "") +
+                    ", but the roster says " + (r.current_project_id ? r.project_code : "no site") +
+                    ". A verified punch moves a worker itself, so this is usually a punch that did not verify, or a site with no fence. Check, then Move whichever is wrong." };
+    }
+    function statusChip(r) {
+      var s = statusOf(r);
+      return '<span class="st st-' + s.k + '" title="' + esc(s.why) + '">' + escHtml(s.label) + "</span>";
+    }
+    function hit(r) {              // does this row pass the search and the Filters?
+      if (M.trade !== "all" && r.role !== M.trade) return false;
+      if (M.site !== "all" && groupOf(r) !== M.site) return false;
+      if (M.status !== "all" && statusOf(r).k !== M.status) return false;
+      if (M.q) {
+        var hay = ((r.full_name || "") + " " + (r.employee_code || "") + " " + (r.project_code || "") + " " + (r.project_name || "")).toLowerCase();
+        if (hay.indexOf(M.q) === -1) return false;
+      }
+      return true;
+    }
+    function byId(id) { return M.rows.filter(function (r) { return r.staff_id === id; })[0]; }
+    function projectById(id) { return M.dirByPid[id]; }
+    function siteOptions(selected, withNone, noneLabel) {
+      var opts = M.projects.filter(function (p) {
+        return (p.status === "active" || p.status === "completed") && !isTest(p.project_code);
+      }).map(function (p) {
+        return '<option value="' + p.project_id + '"' + (p.project_id === selected ? " selected" : "") + ">" +
+               escHtml(p.project_code + " — " + (p.project_name || "")) + (p.status === "completed" ? " (completed)" : "") + "</option>";
+      }).join("");
+      return (withNone ? '<option value=""' + (!selected ? " selected" : "") + ">" + escHtml(noneLabel || "— Not On A Site —") + "</option>" : "") + opts;
+    }
+    function tradeOptions(selected) {
+      return ROLES.map(function (ro) {
+        return '<option value="' + ro + '"' + (ro === selected ? " selected" : "") + ">" + escHtml(UI.label(ro)) + "</option>";
+      }).join("");
+    }
+    function companyOptions(selected) {
+      return COMPANIES.map(function (c) {
+        return '<option value="' + c + '"' + (c === selected ? " selected" : "") + ">" + c + "</option>";
+      }).join("");
+    }
+    function attendanceHref(r) {
+      return "attendance.html?find=" + encodeURIComponent(r.employee_code || r.full_name || "");
+    }
+    function projectHref(pid) { return "project.html?project=" + encodeURIComponent(pid); }
+    function plansFor(id) { return M.plans.filter(function (p) { return p.staff_id === id; }); }
+    function setPlans(all) {
+      M.plans = (all || []).filter(function (p) { return p.subject_type === "staff" && p.status === "planned"; });
+    }
+
+    /* -------------------------------- tiles -------------------------------- */
+
+    function tile(cls, icon, n, label, extra) {
+      return '<button type="button" class="istat tone-' + cls + (extra || "") + '">' +
+        '<span class="istat-ic">' + UI.icon(icon) + "</span>" +
+        '<span class="istat-body"><span class="istat-top"><b>' + n + "</b><i>" + escHtml(label) + "</i></span></span></button>";
+    }
+    function renderTiles() {
+      var rows = active().filter(inCompany);
+      var sites = {};
+      rows.forEach(function (r) { if (r.current_project_id) sites[r.project_code] = true; });
+      var mism = rows.filter(function (r) { return statusOf(r).k === "mismatch"; }).length;
+      var await_ = rows.filter(function (r) { return groupOf(r) === "__await"; }).length;
+      document.getElementById("mp-tiles").innerHTML =
+        tile("brand", "worker", rows.length, rows.length === 1 ? "Active Worker" : "Active Workers", " plain") +
+        tile("grey", "site", Object.keys(sites).length, Object.keys(sites).length === 1 ? "Site" : "Sites", " plain") +
+        tile(mism ? "warn" : "ok", "alert", mism, mism === 1 ? "Mismatch" : "Mismatches",
+             ' data-tile="mismatch"' + (M.status === "mismatch" ? " on" : "")) +
+        tile(await_ ? "info" : "grey", "clock", await_, "Awaiting Deployment",
+             ' data-tile="await"' + (M.site === "__await" ? " on" : ""));
+      var caption = M.company === "all"
+        ? "Who is on which site, both companies."
+        : "Who is on which site, " + M.company + " only.";
+      document.getElementById("mp-sub").textContent = caption +
+        (M.canEdit ? "" : " You can look; moves are made by the office.");
+    }
+
+    /* ------------------------------- the groups ---------------------------- */
+
+    function tradeMix(list) {
       var counts = {};
-      list.forEach(function (r) {
-        var k = r.project_code || "unassigned";
-        counts[k] = (counts[k] || 0) + 1;
+      list.forEach(function (r) { var k = r.role || "other"; counts[k] = (counts[k] || 0) + 1; });
+      return Object.keys(counts).sort(function (a, b) {
+        var ia = ROLES.indexOf(a), ib = ROLES.indexOf(b);
+        return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+      }).map(function (k) {
+        return '<span class="chip">' + counts[k] + " " + escHtml(UI.label(k)) + "</span>";
+      }).join("");
+    }
+    function warningsFor(key, list) {
+      var out = [];
+      if (key.indexOf("__") === 0) return out;
+      var mach = M.machinesBySite[key] || [];
+      var missing = {};
+      mach.forEach(function (m) {
+        var trade = MACHINE_TRADE[m.type];
+        if (trade && !list.some(function (r) { return r.role === trade; })) missing[trade] = m.code;
       });
-      return Object.keys(counts).sort().map(function (k) {
-        return counts[k] + " " + k;
-      }).join(" · ");
+      Object.keys(missing).forEach(function (t) {
+        out.push('<span class="chip chip-warn" title="' + esc(missing[t] + " is on this site and nobody here is a " + UI.label(t).toLowerCase() +
+          ". Move one here, or move the machine, if it is working.") + '">Needs ' + escHtml(UI.label(t)) + "</span>");
+      });
+      var mism = list.filter(function (r) { return statusOf(r).k === "mismatch"; }).length;
+      if (mism) out.push('<span class="chip chip-warn" title="Workers whose last report puts them somewhere else. Open the block and check their Status.">' +
+        mism + (mism === 1 ? " Mismatch" : " Mismatches") + "</span>");
+      return out;
     }
 
-    // one collapsible group. In "site" mode the third column is Role and the
-    // header summarises roles; in "role" mode the third column is Site and
-    // the header summarises sites.
-    // which housekeeping gaps a row has, for the strip's click-to-filter
-    function rowHkAttr(r) {
-      return ((r.has_date_joined ? "" : "joined ") +
-              (r.employee_code ? "" : "code ") +
-              (r.has_contact ? "" : "contact")).trim();
+    function rowHtml(r, byTrade) {
+      var sel = M.sel === r.staff_id;
+      return '<tr class="mp-row' + (sel ? " mp-sel" : "") + '" data-staff="' + r.staff_id + '" title="Open this worker">' +
+        UI.td("Worker", "<b>" + escHtml(r.full_name) + '</b><span class="mp-sub">' +
+          escHtml([r.employee_code, r.company].filter(Boolean).join(" · ")) + "</span>") +
+        UI.td(byTrade ? "Site" : "Trade", escHtml(byTrade ? siteLabel(r) : UI.label(r.role))) +
+        UI.td("Status", statusChip(r)) +
+        (M.canEdit ? UI.td("", '<button type="button" class="btn mp-open" data-act="open" data-staff="' + r.staff_id + '">Manage</button>') : "") +
+        "</tr>";
     }
 
-    // extra filter selects + drift chip (options depend on loaded data)
-    function renderExtraFilters() {
-      var el = document.getElementById("mp-extra");
-      if (!el) return;
-      var act = activeRows();
-      var driftN = act.filter(isDrift).length;
-      var roleOpts = ['<option value="all">any role</option>'].concat(ROLES.filter(function (ro) {
-        return act.some(function (r) { return r.role === ro; });
-      }).map(function (ro) {
-        return '<option value="' + ro + '"' + (MP.roleFilter === ro ? " selected" : "") + ">" +
-               UI.label(ro) + "</option>";
-      })).join("");
-      var siteKeys = {};
-      act.forEach(function (r) { if (r.project_code) siteKeys[r.project_code] = r.project_name || ""; });
-      var siteOptsF = ['<option value="all">any site</option>',
-                       '<option value="__none"' + (MP.siteFilter === "__none" ? " selected" : "") + ">— unassigned —</option>"]
-        .concat(Object.keys(siteKeys).sort().map(function (k) {
-          return '<option value="' + esc(k) + '"' + (MP.siteFilter === k ? " selected" : "") + ">" +
-                 escHtml(k + " — " + siteKeys[k]) + "</option>";
-        })).join("");
-      el.innerHTML =
-        '<select id="mp-role">' + roleOpts + "</select>" +
-        '<select id="mp-site">' + siteOptsF + "</select>" +
-        '<button type="button" data-chip="drift"' + (MP.driftOnly ? ' class="active"' : "") +
-        ' title="bot recently reported them at a DIFFERENT site than the roster">' + driftN + " drift</button>";
-    }
-
-    function groupBlock(key, title, list, mode) {
-      var byRole = mode === "role";
-      var isOpen = MP.open[key] !== false;   // default open
-      var rows = list.map(function (r) {
-        var tr = '<tr data-staffrow="' + r.staff_id + '" data-search="' + rowSearchAttr(r) +
-               '" data-hk="' + rowHkAttr(r) +
-               '" data-role="' + esc(r.role || "") + '" data-site="' + esc(r.project_code || "__none") +
-               '" data-drift="' + (isDrift(r) ? "1" : "") + '"' +
-               (MP.canMove ? ' style="cursor:pointer" title="Click for the worker record"' : "") + ">" +
-               UI.td("Code", r.employee_code ? escHtml(r.employee_code) : "—") +
-               UI.td("Name", "<strong>" + escHtml(r.full_name) + "</strong>") +
-               UI.td(byRole ? "Site" : "Role",
-                     byRole ? siteLabel(r) : escHtml(UI.label(r.role))) +
-               UI.td("Company", escHtml(r.company)) +
-               lastReportedCell(r) +
-               actionCell(r) + "</tr>";
-        // record card sits right under its worker row (0051, office only)
-        if (MP.canMove && MP.cardOpen === r.staff_id) tr += workerCard(r);
-        return tr;
-      }).join("");
-
-      // header: a scannable chip row (scope tag, headcount, warnings) plus one
-      // muted meta line (supervisor, company split, role/site mix, machines) —
-      // replaces the old run-on one-liner
-      var chips = [], metaBits = [];
-      if (!byRole && key !== "__unassigned") {
-        var dir = MP.dirByPid[list[0].current_project_id];
-        if (dir) {
-          var scopeT = dir.has_bored_scope && dir.has_sheet_scope ? "BP+SP"
-                     : dir.has_bored_scope ? "BP"
-                     : dir.has_sheet_scope ? "SP" : "";
-          if (scopeT) chips.push('<span class="chip chip-tag">' + scopeT + "</span>");
-        }
-      }
-      chips.push('<span class="chip">' + list.length + " worker" + (list.length === 1 ? "" : "s") + "</span>");
-
-      if (!byRole && key !== "__unassigned") {
-        var sv = MP.supervisorsByPid[list[0].current_project_id];
-        if (sv) metaBits.push("Supervisor " + escHtml(sv));
-        var bpN = list.filter(function (r) { return r.company === "HF-BP"; }).length;
-        if (bpN && bpN < list.length) {
-          metaBits.push("HF-BP " + bpN + " · Hai Fu " + (list.length - bpN));
-        }
-      }
-      metaBits.push(byRole ? siteSummary(list) : roleSummary(list));
-      if (!byRole && key !== "__unassigned") {
-        var mach = MP.machinesBySite[key] || [];
-        if (mach.length) {
-          metaBits.push("Machines " + mach.map(function (m) { return escHtml(m.code); }).join(", "));
-          var missing = {};
-          mach.forEach(function (m) {
-            var trade = MACHINE_TRADE[m.type];
-            if (trade && !list.some(function (r) { return r.role === trade; })) missing[trade] = true;
-          });
-          Object.keys(missing).forEach(function (t) {
-            chips.push('<span class="chip chip-warn">no ' + t.replace(/_/g, " ") + "</span>");
-          });
-        }
-      }
-      var driftN = list.filter(isDrift).length;
-      if (driftN) chips.push('<span class="chip chip-warn">' + driftN + " drift &#9888;</span>");
-
-      return '<details class="zone" data-group="' + esc(key) + '"' + (isOpen ? " open" : "") + ">" +
-             '<summary class="zone-rich">' +
-             '<div class="group-head"><span class="zone-name">' + escHtml(title) + "</span> " +
-             chips.join(" ") + "</div>" +
-             '<div class="group-meta">' + metaBits.join(" · ") + "</div></summary>" +
-             '<div class="table-wrap table-stack"><table class="mp-table">' +
-             "<thead><tr><th>Code</th><th>Name</th><th>" + (byRole ? "Site" : "Role") + "</th><th>Company</th>" +
-             "<th>Last reported</th>" +
-             (MP.canMove ? "<th>Actions</th>" : "") + "</tr></thead>" +
-             "<tbody>" + rows + "</tbody></table></div></details>";
-    }
-
-    function recentlyLeftBlock() {
-      var list = recentlyLeft();
-      if (!list.length || !MP.canMove) return "";   // office housekeeping view
-      var isOpen = MP.open.__left === true;         // default COLLAPSED
-      var rows = list.map(function (r) {
-        return '<tr data-search="' + rowSearchAttr(r) + '">' +
-               UI.td("Code", r.employee_code ? escHtml(r.employee_code) : "—") +
-               UI.td("Name", "<strong>" + escHtml(r.full_name) + "</strong>") +
-               UI.td("Role", escHtml(UI.label(r.role))) +
-               UI.td("Company", escHtml(r.company)) +
-               UI.td("", '<button type="button" data-action="reactivate" data-staff="' + r.staff_id +
-               '" data-name="' + esc(r.full_name) + '">reactivate</button>') + "</tr>";
-      }).join("");
-      return '<details class="zone" data-group="__left"' + (isOpen ? " open" : "") + ">" +
-             '<summary><span class="zone-name">Recently left</span>' +
-             '<span class="zone-count">' + list.length + " shown · reactivate = undo a mistake</span></summary>" +
-             '<div class="table-wrap table-stack"><table>' +
-             "<thead><tr><th>Code</th><th>Name</th><th>Role</th><th>Company</th><th></th></tr></thead>" +
-             "<tbody>" + rows + "</tbody></table></div></details>";
-    }
-
-    // ================= UPCOMING MOVES (0048) =================
-    // every PLANNED staff move, earliest first. Overdue (date passed, not
-    // executed) shows amber — reality updates the roster, never the calendar.
-    function upcomingMovesBlock() {
-      if (!MP.plans.length) return "";
-      var isOpen = MP.open.__plans !== false;       // default open — it's a to-do list
-      var overdue = 0;
-      var rows = MP.plans.map(function (p) {
-        var days = daysAgo(p.planned_date);
-        var late = days !== null && days > 0;
-        if (late) overdue++;
-        var dest = p.to_project_code
-          ? escHtml(p.to_project_code + (p.to_project_name ? " — " + p.to_project_name : ""))
-          : "unassigned (mob out)";
-        var when = new Intl.DateTimeFormat("en-MY", { day: "2-digit", month: "short" })
-          .format(new Date(p.planned_date + "T00:00:00"));
-        var label = (p.full_name || "") + " → " + (p.to_project_code || "unassigned");
-        return '<tr data-search="' +
-               esc(((p.full_name || "") + " " + (p.to_project_code || "") + " " +
-                    (p.to_project_name || "")).toLowerCase()) + '">' +
-               UI.td("Who", "<strong>" + escHtml(p.full_name) + "</strong>") +
-               UI.td("Move", "&rarr; " + dest +
-                 (p.remarks ? ' <span class="muted">(' + escHtml(p.remarks) + ")</span>" : "")) +
-               UI.td("Planned", when +
-                 (late ? " — " + days + " day" + (days === 1 ? "" : "s") + " ago" : ""),
-                 late ? "drift" : "muted-line") +
-               UI.td("By", escHtml(p.created_by_name || "")) +
-               (MP.canMove
-                 ? UI.td("", '<span class="move-ctl">' +
-                   '<button type="button" data-action="plan-execute" data-plan="' + p.plan_id +
-                   '" data-label="' + esc(label) + '">Execute now</button>' +
-                   '<button type="button" data-action="plan-cancel" data-plan="' + p.plan_id +
-                   '" data-label="' + esc(label) + '">Cancel</button></span>')
-                 : "") +
-               "</tr>";
-      }).join("");
-      return '<details class="zone" data-group="__plans"' + (isOpen ? " open" : "") + ">" +
-             '<summary><span class="zone-name">Upcoming moves</span>' +
-             '<span class="zone-count">' + MP.plans.length + " planned" +
-             (overdue ? " · " + overdue + " overdue" : "") +
-             " · plans never move anyone — Execute does</span></summary>" +
-             '<div class="table-wrap table-stack"><table>' +
-             "<thead><tr><th>Who</th><th>Move</th><th>Planned</th><th>By</th>" +
-             (MP.canMove ? "<th></th>" : "") + "</tr></thead>" +
-             "<tbody>" + rows + "</tbody></table></div></details>";
-    }
-
-    function addWorkerForm() {
-      if (!MP.canMove) return "";
-      if (!MP.showAdd) {
-        return '<div class="claim-actions" style="padding:0 0 10px">' +
-               '<button type="button" data-action="add-form">+ Add worker</button></div>';
-      }
-      var roleOpts = ROLES.map(function (r) {
-        return '<option value="' + r + '">' + UI.label(r) + "</option>";
-      }).join("");
-      var coOpts = COMPANIES.map(function (c) {
-        return '<option value="' + c + '">' + c + "</option>";
-      }).join("");
-      return '<div class="claim-form">' +
-        "<strong>New worker</strong>" +
-        '<label>full name <input type="text" id="aw-name" size="24"></label>' +
-        '<label>employee code <input type="text" id="aw-code" size="9" placeholder="optional"></label>' +
-        '<label>role <select id="aw-role">' + roleOpts + "</select></label>" +
-        '<label>company <select id="aw-company">' + coOpts + "</select></label>" +
-        '<label>site <select id="aw-site"><option value="">— unassigned —</option>' +
-          siteOptions(false) + "</select></label>" +
-        '<label>date joined <input type="date" id="aw-joined" title="drives the annual-leave entitlement tier"></label>' +
-        '<label>contact <input type="text" id="aw-contact" size="12" placeholder="optional"></label>' +
-        '<label>origin <input type="text" id="aw-origin" size="12" list="country-list" placeholder="type to pick…"></label>' +
-        '<button type="button" data-action="add-save">Add worker</button>' +
-        '<button type="button" data-action="add-cancel">Cancel</button>' +
-        "</div>";
-    }
-
-    // EDIT: prefilled from get_staff_detail (management/office-gated read —
-    // contact/date-joined never travel through the open whereabouts view).
-    // Blank field = unchanged (partial-update semantics); clearing a value
-    // stays a session job. whatsapp_name shown read-only: it is the bot's
-    // sender-match key and is deliberately not editable here.
-    // staff.designation was retired in migration 0069. "role" already says what
-    // somebody does on site, and the job title of anyone who signs in now lives
-    // on their dashboard account, where it is set by an administrator. Nothing
-    // here should be able to change what a person may reach.
-    function editWorkerForm() {
-      var d = MP.editing.d;
-      var roleOpts = ROLES.map(function (r) {
-        return '<option value="' + r + '"' + (r === d.role ? " selected" : "") + ">" +
-               UI.label(r) + "</option>";
-      }).join("");
-      var coOpts = COMPANIES.map(function (c) {
-        return '<option value="' + c + '"' + (c === d.company_code ? " selected" : "") + ">" + c + "</option>";
-      }).join("");
-      return '<div class="claim-form">' +
-        "<strong>Edit worker</strong>" +
-        '<label>full name <input type="text" id="ew-name" size="24" value="' + esc(d.full_name) + '"></label>' +
-        '<label>employee code <input type="text" id="ew-code" size="9" value="' + esc(d.employee_code || "") + '"></label>' +
-        '<label>role <select id="ew-role">' + roleOpts + "</select></label>" +
-        '<label>company <select id="ew-company">' + coOpts + "</select></label>" +
-        '<label>date joined <input type="date" id="ew-joined" value="' + esc(d.date_joined || "") + '"></label>' +
-        '<label>contact <input type="text" id="ew-contact" size="12" value="' + esc(d.contact_number || "") + '"></label>' +
-        '<label>origin <input type="text" id="ew-origin" size="12" list="country-list" value="' + esc(d.country_origin || "") + '"></label>' +
-        // Paid overtime? (DB 0106) From the salary listing's OT column. Unticked =
-        // every worked minute is a normal minute; the Attendance page then shows
-        // no Over Time for this worker, whatever the hours.
-        '<label class="ew-check"><input type="checkbox" id="ew-ot"' + (d.ot_eligible === false ? "" : " checked") + '> paid overtime</label>' +
-        (d.whatsapp_name
-          ? '<span class="muted-line">WhatsApp: ' + escHtml(d.whatsapp_name) + " (bot match key — not editable here)</span>"
-          : "") +
-        '<button type="button" data-action="edit-save" data-staff="' + d.staff_id + '">Save changes</button>' +
-        '<button type="button" data-action="edit-cancel">Cancel</button>' +
-        "</div>";
-    }
-
-    // PLAN a move (0048): records an INTENTION — when / where / why. Nothing
-    // moves until the office presses Execute in "Upcoming moves" (plans never
-    // auto-apply on their date). Destination "mob out" = leave site, unassigned.
-    function planWorkerForm() {
-      return '<div class="claim-form">' +
-        "<strong>Plan move — " + escHtml(MP.planning.name) + "</strong>" +
-        '<label>when <input type="date" id="pw-date" value="' + Dash.todayKL() + '"></label>' +
-        '<label>to <select id="pw-site"><option value="">destination…</option>' +
-          siteOptions(false) +
-          '<option value="unassign">— mob out / unassigned —</option></select></label>' +
-        '<label>remarks <input type="text" id="pw-remarks" size="18" placeholder="optional"></label>' +
-        '<button type="button" data-action="plan-save">Save plan</button>' +
-        '<button type="button" data-action="plan-form-cancel">Cancel</button>' +
-        '<span class="muted-line">nothing moves now — Execute it in Upcoming moves when it really happens</span>' +
-        "</div>";
-    }
-
-    // ================= WORKER RECORD CARD (0051) =================
-    // Office/management only: identity facts come from the gated
-    // get_staff_detail read (fetched once per worker, cached) and history
-    // from the gated feed — other logins never get a card (their row already
-    // shows everything they may see). History edits here follow the house
-    // rule: they fix the RECORD only; the roster changes via Move.
-    function whEditForm(sid, transferId, date, remarks) {
-      return '<div class="claim-form">' +
-        "<strong>Fix history row</strong>" +
-        '<label>happened on <input type="date" id="wh-date-' + sid + '" value="' + esc(date) + '"></label>' +
-        '<label>remarks <input type="text" id="wh-remarks-' + sid + '" size="16" value="' + esc(remarks) + '"></label>' +
-        '<button type="button" data-action="wh-edit-save" data-transfer="' + transferId +
-        '" data-staffcard="' + sid + '">Save</button>' +
-        '<button type="button" data-action="wh-form-cancel" data-staffcard="' + sid + '">Cancel</button>' +
-        '<span class="muted-line">wrong sites? delete the row and add a past move (Recent moves panel)</span>' +
-        "</div>";
-    }
-
-    // ================= PUNCH APP PHONE (0082) =================
-    // The office authorises a phone by issuing a one-time code FOR this worker;
-    // the worker types only that code, so the punch app never shows a list of
-    // names to pick from. The code is displayed ONCE — it cannot be read back
-    // from the database, only reissued.
-    function devicesBlock(r) {
-      if (!MP.canDevicesView) return "";     // no devices.view -> panel stays absent
-
-      var d = MP.devByStaff[r.staff_id];
-      var body;
-
-      if (d === undefined) {
-        body = '<div class="pc-line muted-line">Loading…</div>';
-      } else if (d === null) {
-        body = '<div class="pc-line muted-line">Could not read the enrolment state.</div>';
-      } else if (d.is_enrolled) {
-        body =
-          '<div class="pc-line">Phone: <strong>' + escHtml(d.device_label || "Registered") + "</strong>" +
-          (d.last_seen_at ? ' <span class="muted">last used ' + escHtml(Dash.klDateTime(d.last_seen_at)) + "</span>" : "") +
-          "</div>" +
-          (MP.canDevices
-            ? '<div class="pc-line"><span class="move-ctl">' +
-              '<button type="button" class="danger" data-action="dev-release" data-staff="' + r.staff_id +
-              '" data-name="' + esc(r.full_name) + '">Release Phone</button></span>' +
-              '<span class="muted-line">Releasing lets them enrol a replacement phone.</span></div>'
-            : "");
-      } else if (MP.shownCode[r.staff_id]) {
-        var c = MP.shownCode[r.staff_id];
-        body =
-          '<div class="pc-line">Give this code to <strong>' + escHtml(r.full_name) + "</strong>:</div>" +
-          '<div class="pc-line"><strong style="font-size:22px;letter-spacing:3px;font-family:ui-monospace,monospace">' +
-          escHtml(c.display) + "</strong></div>" +
-          '<div class="pc-line muted-line">Valid until ' + escHtml(c.expires) +
-          " · one use only · shown once, reissue if lost.</div>" +
-          (MP.canDevices
-            ? '<div class="pc-line"><span class="move-ctl">' +
-              '<button type="button" data-action="dev-issue" data-staff="' + r.staff_id +
-              '" data-name="' + esc(r.full_name) + '">Reissue</button>' +
-              '<button type="button" class="danger" data-action="dev-revoke" data-staff="' + r.staff_id +
-              '" data-name="' + esc(r.full_name) + '">Cancel Code</button></span></div>'
-            : "");
-      } else {
-        body =
-          '<div class="pc-line">Not enrolled' +
-          (d.has_live_code
-            ? ' · <span class="badge badge-gray">code issued</span> <span class="muted">expires ' +
-              escHtml(Dash.klDateTime(d.code_expires_at)) + "</span>"
-            : "") +
-          "</div>" +
-          (MP.canDevices
-            ? '<div class="pc-line"><span class="move-ctl">' +
-              '<button type="button" data-action="dev-issue" data-staff="' + r.staff_id +
-              '" data-name="' + esc(r.full_name) + '">' +
-              (d.has_live_code ? "Reissue Code" : "Issue Enrolment Code") + "</button>" +
-              (d.has_live_code
-                ? '<button type="button" class="danger" data-action="dev-revoke" data-staff="' + r.staff_id +
-                  '" data-name="' + esc(r.full_name) + '">Cancel Code</button>'
-                : "") +
-              "</span></div>"
-            : "");
-      }
-
-      return "<div><h3>Punch App Phone</h3>" + body + "</div>";
-    }
-
-    function workerCard(r) {
-      var d = MP.cardCache[r.staff_id] || {};
+    function groupBlock(key, title, list, shown, byTrade, forceOpen) {
+      var isOpen = forceOpen || M.open[key] === true;
       var chips = [];
-      if (r.employee_code) chips.push("Code " + escHtml(r.employee_code));
-      if (d.date_joined) chips.push("Joined " + mlDate(d.date_joined));
-      if (d.contact_number) chips.push("Contact " + escHtml(d.contact_number));
-      if (d.country_origin) chips.push("Origin " + escHtml(d.country_origin));
-      if (d.whatsapp_name) chips.push("WhatsApp " + escHtml(d.whatsapp_name));
-      if (d.ot_eligible === false) chips.push("No Overtime");     // DB 0106: hours count, never at 1.5x
+      var n = shown.length, total = list.length;
+      if (filtering() && n !== total) chips.push('<span class="chip chip-tag">' + n + " of " + total + "</span>");
+      else chips.push('<span class="chip">' + total + (total === 1 ? " Worker" : " Workers") + "</span>");
+      if (!byTrade) chips = chips.concat(warningsFor(key, list));
+      else {
+        var sites = {};
+        list.forEach(function (r) { sites[groupOf(r)] = true; });
+        var ns = Object.keys(sites).length;
+        chips.push('<span class="chip">' + ns + (ns === 1 ? " Site" : " Sites") + "</span>");
+      }
+      var code = "";
+      if (!byTrade && key.indexOf("__") !== 0 && list[0] && list[0].project_code) code = list[0].project_code;
 
-      var head =
-        '<div class="pc-head"><strong>' + escHtml(r.full_name) + "</strong> " +
-        escHtml(UI.label(r.role)) + " · " + escHtml(r.company) +
-        (chips.length ? ' <span class="pc-chips">' + chips.join(" · ") + "</span>" : "") + "</div>";
-
-      var where =
-        "<div><h3>Whereabouts</h3>" +
-        '<div class="pc-line">Site: ' + siteLabel(r) + "</div>" +
-        (r.last_reported_date
-          ? '<div class="pc-line">Last reported: ' + mlDate(r.last_reported_date) + " @ " +
-            escHtml(r.last_reported_project_code || "?") +
-            (isDrift(r) ? ' <span class="badge badge-anomaly">differs from roster</span>' : "") + "</div>"
-          : '<div class="pc-line muted-line">No bot attendance recorded (the bot skips sites and days).</div>') +
-        "</div>";
-
-      var plans = MP.plans.filter(function (p) { return p.staff_id === r.staff_id; });
-      var plansHtml = plans.map(function (p) {
-        var days = daysAgo(p.planned_date);
-        var late = days !== null && days > 0;
-        var dest = p.to_project_code
-          ? escHtml(p.to_project_code + (p.to_project_name ? " — " + p.to_project_name : ""))
-          : "unassigned (mob out)";
-        var label = (p.full_name || "") + " → " + (p.to_project_code || "unassigned");
-        return '<div class="pc-line"><span class="' + (late ? "stale-warn" : "") + '">' +
-               mlDate(p.planned_date) +
-               (late ? " — planned " + days + " day" + (days === 1 ? "" : "s") + " ago" : "") +
-               "</span> &rarr; " + dest +
-               (p.remarks ? ' <span class="muted">(' + escHtml(p.remarks) + ")</span>" : "") +
-               ' <span class="move-ctl">' +
-               '<button type="button" data-action="plan-execute" data-plan="' + p.plan_id +
-               '" data-label="' + esc(label) + '">Execute now</button>' +
-               '<button type="button" data-action="plan-cancel" data-plan="' + p.plan_id +
-               '" data-label="' + esc(label) + '">Cancel</button></span></div>';
-      }).join("");
-      var plansBlock = "<div><h3>Planned moves</h3>" +
-        (plansHtml || '<div class="muted-line">None — use the row&#39;s plan button.</div>') + "</div>";
-
-      var hist = MP.histByStaff[r.staff_id] || [];
-      var histHtml = hist.slice(0, 8).map(function (t) {
-        return '<div class="pc-line"><strong title="entered ' + esc(Dash.klDateTime(t.moved_at)) + '">' +
-               mlDate(t.effective_date) + "</strong> " +
-               escHtml(t.from_project) + " &rarr; " + escHtml(t.to_project) +
-               (t.source === "backfill" ? ' <span class="badge badge-gray">backfill</span>' : "") +
-               (t.source === "punch" ? ' <span class="badge badge-gray" title="Moved by a punch the worker made inside the fence of this site (DB 0105).">By Punch</span>' : "") +
-               (t.remarks ? ' <span class="muted">(' + escHtml(t.remarks) + ")</span>" : "") +
-               ' <span class="muted">by ' + escHtml(t.moved_by_name || t.source) + "</span>" +
-               ' <span class="move-ctl">' +
-               '<button type="button" data-action="wh-edit" data-transfer="' + t.transfer_id +
-               '" data-staffcard="' + r.staff_id + '" data-date="' + esc(t.effective_date) +
-               '" data-remarks="' + esc(t.remarks || "") + '">edit</button>' +
-               '<button type="button" class="danger" data-action="wh-del" data-transfer="' +
-               t.transfer_id + '">delete</button></span>' +
-               "</div>";
-      }).join("");
-      if (hist.length > 8) {
-        histHtml += '<div class="pc-meta">+ ' + (hist.length - 8) + " older move(s) recorded</div>";
+      // inside: the facts about the site, then the trade mix, then the rows
+      var meta = [];
+      if (!byTrade && key.indexOf("__") !== 0 && list[0]) {
+        var pid = list[0].current_project_id, dir = M.dirByPid[pid];
+        if (dir) {
+          var scope = dir.has_bored_scope && dir.has_sheet_scope ? "Bored + Sheet Piles" : dir.has_bored_scope ? "Bored Piles" : dir.has_sheet_scope ? "Sheet Piles" : "";
+          if (scope) meta.push("<b>" + escHtml(scope) + "</b>");
+        }
+        var sv = M.supervisorsByPid[pid];
+        meta.push("Supervisor " + (sv ? "<b>" + escHtml(sv) + "</b>" : '<span class="muted">none of record</span>'));
+        var bp = list.filter(function (r) { return r.company === "HF-BP"; }).length;
+        meta.push("HF-BP <b>" + bp + "</b> · Hai Fu <b>" + (total - bp) + "</b>");
+        var mach = M.machinesBySite[key] || [];
+        meta.push("Machines " + (mach.length ? "<b>" + escHtml(mach.map(function (m) { return m.code; }).join(", ")) + "</b>" : '<span class="muted">none</span>'));
+        if (pid) meta.push('<a href="' + esc(projectHref(pid)) + '">Open Project</a>');
+      } else if (key === "__await") {
+        meta.push("Site workers with no site on the record. Move each one when they are placed.");
+      } else if (key === "__office") {
+        meta.push("Admin, management, coordinators and store keepers. They never sit on a site roster.");
       }
 
-      var moveBlock = MP.canMove
-        ? '<div class="pc-move"><h3>Move this worker</h3>' + moveControls(r) + "</div>"
-        : "";
-
-      return '<tr class="pile-card-row" data-cardfor="' + r.staff_id + '"><td colspan="6"><div class="pile-card">' + head + moveBlock +
-             '<div class="pc-grid"><div><h3>Movement history</h3>' +
-             (histHtml || '<div class="muted-line">No moves recorded yet — backfill via the Recent moves panel.</div>') +
-             '<div id="wcf-' + r.staff_id + '"></div></div>' +
-             '<div class="pc-side">' + where + plansBlock + devicesBlock(r) + "</div></div>" +
-             "</div></td></tr>";
+      var rows = shown.map(function (r) { return rowHtml(r, byTrade); }).join("");
+      return '<details class="zone mp-site" data-group="' + esc(key) + '"' + (isOpen ? " open" : "") + ">" +
+        '<summary><span class="mp-sum"><span class="mp-site-name">' + escHtml(title) + "</span>" +
+        (code ? '<span class="mp-site-code">' + escHtml(code) + "</span>" : "") + chips.join("") + "</span></summary>" +
+        '<div class="mp-body">' +
+        (meta.length ? '<div class="mp-meta">' + meta.join('<span class="muted">·</span>') + "</div>" : "") +
+        (byTrade ? "" : '<div class="mp-trades">' + tradeMix(list) + "</div>") +
+        '<div class="table-wrap table-stack"><table><thead><tr><th>Worker</th><th>' + (byTrade ? "Site" : "Trade") + "</th><th>Status</th>" +
+        (M.canEdit ? "<th></th>" : "") + "</tr></thead><tbody>" +
+        (rows || '<tr><td colspan="4" class="empty">No worker matches here.</td></tr>') +
+        "</tbody></table></div></div></details>";
     }
 
-    function render() {
-      var act = activeRows();
-      var unassigned = act.filter(function (r) { return !r.current_project_id; });
-      var hfbp = act.filter(function (r) { return r.company === "HF-BP"; }).length;
-
-      document.getElementById("manpower-sub").innerHTML =
-        act.length + " active workers · HF-BP " + hfbp + " · Hai Fu " + (act.length - hfbp) +
-        " · " + unassigned.length + " unassigned" +
-        (MP.canMove ? "" : ' <span class="muted">(view only — changes are office/management)</span>');
-
-      document.getElementById("error").innerHTML =
-        (MP.err ? '<div class="banner banner-red">Could not save: ' + escHtml(MP.err) + "</div>" : "") +
-        (MP.okMsg ? UI.okBanner(MP.okMsg) : "");
-
-      // company chips narrow the lists (the headline totals above stay global)
-      var shown = MP.companyFilter === "all" ? act
-        : act.filter(function (r) { return r.company === MP.companyFilter; });
-
-      var html = MP.editing ? editWorkerForm()
-               : MP.planning ? planWorkerForm()
-               : addWorkerForm();
-      if (MP.groupMode === "role") {
+    function renderGroups() {
+      var rows = active().filter(inCompany);
+      var f = filtering();
+      var html = "", shownTotal = 0;
+      if (M.view === "trade") {
         var byRole = {};
-        shown.forEach(function (r) {
-          var k = r.role || "other";
-          (byRole[k] = byRole[k] || []).push(r);
-        });
-        html += Object.keys(byRole).sort(function (a, b) {
+        rows.forEach(function (r) { var k = r.role || "other"; (byRole[k] = byRole[k] || []).push(r); });
+        Object.keys(byRole).sort(function (a, b) {
           var ia = ROLES.indexOf(a), ib = ROLES.indexOf(b);
           return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
-        }).map(function (k) {
-          return groupBlock("role:" + k, UI.label(k), byRole[k], "role");
-        }).join("");
+        }).forEach(function (k) {
+          var list = byRole[k].sort(function (a, b) { return String(a.full_name).localeCompare(String(b.full_name)); });
+          var shown = f ? list.filter(hit) : list;
+          if (f && !shown.length) return;
+          shownTotal += shown.length;
+          html += groupBlock("trade:" + k, UI.label(k), list, shown, true, f);
+        });
       } else {
-        var bySite = {};
-        var shownUnassigned = shown.filter(function (r) { return !r.current_project_id; });
-        shown.forEach(function (r) {
-          if (!r.current_project_id) return;
-          var k = r.project_code || "?";
-          (bySite[k] = bySite[k] || { title: r.project_code + " — " + (r.project_name || ""), list: [] })
-            .list.push(r);
+        var groups = {};
+        rows.forEach(function (r) {
+          var k = groupOf(r);
+          (groups[k] = groups[k] || { title: k === "__await" ? "Awaiting Deployment" : k === "__office" ? "Office Staff" : (r.project_name || r.project_code), list: [] }).list.push(r);
         });
-        html += Object.keys(bySite).sort().map(function (k) {
-          return groupBlock(k, bySite[k].title, bySite[k].list, "site");
-        }).join("");
-        if (shownUnassigned.length) html += groupBlock("__unassigned", "Unassigned", shownUnassigned, "site");
+        var keys = Object.keys(groups).sort(function (a, b) {
+          var sa = a.indexOf("__") === 0, sb = b.indexOf("__") === 0;
+          if (sa !== sb) return sa ? 1 : -1;                       // the two off-site blocks last
+          if (sa) return a === "__await" ? -1 : 1;                 // Awaiting Deployment before Office Staff
+          var d = groups[b].list.length - groups[a].list.length;   // busiest site first
+          return d || a.localeCompare(b);
+        });
+        keys.forEach(function (k) {
+          var list = groups[k].list.sort(function (a, b) { return String(a.full_name).localeCompare(String(b.full_name)); });
+          var shown = f ? list.filter(hit) : list;
+          if (f && !shown.length) return;
+          shownTotal += shown.length;
+          html += groupBlock(k, groups[k].title, list, shown, false, f);
+        });
       }
-      html += upcomingMovesBlock();     // 0048: the office's move to-do list
-      html += recentlyLeftBlock();
-      document.getElementById("groups").innerHTML =
-        html || '<div class="muted-line">No active workers found.</div>';
-      renderHousekeeping();
-      renderExtraFilters();
-      applyFilter();
+      document.getElementById("mp-groups").innerHTML = html ||
+        '<div class="mp-empty">' + (rows.length ? "No worker matches. Clear the search or the Filters." : "No active workers.") + "</div>";
+      document.getElementById("f-count").textContent = f ? shownTotal + " of " + rows.length : "";
+      var el = document.getElementById("mp-filters-btn");
+      var nf = (M.trade !== "all" ? 1 : 0) + (M.site !== "all" ? 1 : 0) + (M.status !== "all" ? 1 : 0);
+      el.textContent = nf ? "Filters · " + nf : "Filters";
+      el.className = nf ? "on" : "";
     }
 
-    // type-to-filter + housekeeping filter: hides non-matching rows and empty
-    // groups — a lens, not a recount (group headers keep their true totals)
-    function applyFilter() {
-      var qstr = (document.getElementById("mp-search").value || "").trim().toLowerCase();
-      var hk = MP.hkFilter;
-      var filtering = qstr || hk || MP.roleFilter !== "all" ||
-                      MP.siteFilter !== "all" || MP.driftOnly;
-      document.querySelectorAll("#groups details.zone").forEach(function (det) {
-        var any = false;
-        // Upcoming moves and Recently left are not roster rows: only the
-        // search term applies to them. The role / site / drift / housekeeping
-        // lenses describe workers on the roster and used to blank both panels.
-        var grp = det.getAttribute("data-group");
-        var aux = grp === "__plans" || grp === "__left";
-        det.querySelectorAll("tbody tr").forEach(function (tr) {
-          // a worker's record card follows its own row — it carries no filter
-          // attributes of its own and used to vanish under any filter or search
-          if (tr.classList.contains("pile-card-row")) {
-            var host = tr.previousElementSibling;
-            tr.style.display = host && host.style.display !== "none" ? "" : "none";
-            return;
-          }
-          var hit = (!qstr || (tr.getAttribute("data-search") || "").indexOf(qstr) !== -1) &&
-                    (aux || (
-                      (!hk || (tr.getAttribute("data-hk") || "").indexOf(hk) !== -1) &&
-                      (MP.roleFilter === "all" || tr.getAttribute("data-role") === MP.roleFilter) &&
-                      (MP.siteFilter === "all" || tr.getAttribute("data-site") === MP.siteFilter) &&
-                      (!MP.driftOnly || tr.getAttribute("data-drift") === "1")));
-          tr.style.display = hit ? "" : "none";
-          if (hit) any = true;
-        });
-        det.style.display = any ? "" : "none";
-        if (filtering && any) det.open = true;
-      });
-    }
-
-    // office work queue: counts of missing facts, click -> filter to those
-    // workers, fix each via the edit form
-    function renderHousekeeping() {
-      var el = document.getElementById("housekeeping");
-      if (!MP.canMove) { el.innerHTML = ""; return; }
-      var act = activeRows();
-      var items = [
-        ["joined", act.filter(function (r) { return !r.has_date_joined; }).length,
-         "missing date joined", "needed for the annual-leave entitlement tier"],
-        ["code", act.filter(function (r) { return !r.employee_code; }).length,
-         "missing employee code", "payroll reference"],
-        ["contact", act.filter(function (r) { return !r.has_contact; }).length,
-         "missing contact", "phone number"]
-      ].filter(function (i) { return i[1] > 0; });
-      if (!items.length) { el.innerHTML = ""; return; }
-      el.innerHTML = '<div class="hk-strip"><span>Housekeeping:</span>' +
-        items.map(function (i) {
-          return '<button type="button" data-hk-btn="' + i[0] + '"' +
-                 (MP.hkFilter === i[0] ? ' class="active"' : "") +
-                 ' title="' + i[3] + ' — click to list them, fix via edit">' +
-                 i[1] + " " + i[2] + "</button>";
-        }).join("") +
-        (MP.hkFilter
-          ? '<span class="muted-line">showing only workers with that gap — click again to clear</span>'
-          : "") + "</div>";
-    }
-
-    // Recent moves = transfer_log, maintainable since 0050: the When column is
-    // the EFFECTIVE date (when it really happened; entry time in the tooltip),
-    // rows are editable/deletable, and old worker history can be backfilled
-    // ("Add past move…" — machines backfill from their own record card).
-    var mlDate = UI.dstr;
-
-    function mlEditForm(transferId, date, remarks) {
-      return '<div class="claim-form">' +
-        "<strong>Fix history row</strong>" +
-        '<label>happened on <input type="date" id="mle-date" value="' + esc(date) + '"></label>' +
-        '<label>remarks <input type="text" id="mle-remarks" size="16" value="' + esc(remarks) + '"></label>' +
-        '<button type="button" data-action="th-edit-save" data-transfer="' + transferId + '">Save</button>' +
-        '<button type="button" data-action="th-form-cancel">Cancel</button>' +
-        '<span class="muted-line">wrong sites? delete the row and add a past move instead</span>' +
-        "</div>";
-    }
-
-    function mlAddForm() {
-      var workers = MP.rows.slice().sort(function (a, b) {
-        return String(a.full_name).localeCompare(String(b.full_name));
-      }).map(function (r) {
-        return '<option value="' + r.staff_id + '">' + escHtml(r.full_name) +
-               (r.is_active ? "" : " (left)") + "</option>";
+    function renderUpcoming() {
+      var el = document.getElementById("mp-upcoming");
+      if (!M.plans.length) { el.innerHTML = ""; return; }
+      var overdue = 0;
+      var rows = M.plans.map(function (p) {
+        var days = UI.daysSince(p.planned_date), late = days !== null && days > 0;
+        if (late) overdue++;
+        var dest = p.to_project_code ? p.to_project_code + (p.to_project_name ? " — " + p.to_project_name : "") : "Not On A Site";
+        var c = M.confirm && M.confirm.kind === "plan" && M.confirm.id === p.plan_id ? M.confirm : null;
+        return '<tr data-plan="' + p.plan_id + '">' +
+          UI.td("Who", "<b>" + escHtml(p.full_name) + "</b>") +
+          UI.td("To", escHtml(dest) + (p.remarks ? ' <span class="muted">' + escHtml(p.remarks) + "</span>" : "")) +
+          UI.td("Planned", escHtml(UI.dstr(p.planned_date)) + (late ? ' <span class="chip chip-warn">' + days + (days === 1 ? " day" : " days") + " ago</span>" : "")) +
+          UI.td("By", escHtml(p.created_by_name || "")) +
+          (M.canEdit ? UI.td("", c
+            ? '<span class="move-ctl"><span class="muted">' + (c.act === "execute" ? "Move now?" : "Cancel this plan?") + "</span>" +
+              '<button type="button" class="btn btn-primary" data-act="plan-go" data-plan="' + p.plan_id + '" data-what="' + c.act + '">Yes</button>' +
+              '<button type="button" class="btn" data-act="confirm-clear">No</button></span>'
+            : '<span class="move-ctl"><button type="button" class="btn" data-act="plan-ask" data-plan="' + p.plan_id + '" data-what="execute">Execute Now</button>' +
+              '<button type="button" class="btn" data-act="plan-ask" data-plan="' + p.plan_id + '" data-what="cancel">Cancel</button></span>') : "") +
+          "</tr>";
       }).join("");
-      return '<div class="claim-form">' +
-        "<strong>Add past move (worker)</strong>" +
-        '<label>worker <select id="mla-worker"><option value="">choose…</option>' + workers + "</select></label>" +
-        '<label>from <select id="mla-from"><option value="">— unassigned —</option>' +
-          siteOptions(false) + "</select></label>" +
-        '<label>to <select id="mla-to"><option value="">— unassigned —</option>' +
-          siteOptions(false) + "</select></label>" +
-        '<label>happened on <input type="date" id="mla-date"></label>' +
-        '<label>remarks <input type="text" id="mla-remarks" size="14" placeholder="optional"></label>' +
-        '<button type="button" data-action="th-add-save">Add to history</button>' +
-        '<button type="button" data-action="th-form-cancel">Cancel</button>' +
-        '<span class="muted-line">history only — the current site is NOT changed (use Move for that)</span>' +
-        "</div>";
+      el.innerHTML = '<details class="zone mp-site" data-group="__plans" open>' +
+        '<summary><span class="mp-sum"><span class="mp-site-name">Upcoming Moves</span>' +
+        '<span class="chip">' + M.plans.length + (M.plans.length === 1 ? " Planned" : " Planned") + "</span>" +
+        (overdue ? '<span class="chip chip-warn">' + overdue + " Overdue</span>" : "") +
+        '<span class="muted">Plans never move anyone. Execute does.</span></span></summary>' +
+        '<div class="mp-body"><div class="table-wrap table-stack"><table><thead><tr><th>Who</th><th>To</th><th>Planned</th><th>By</th>' +
+        (M.canEdit ? "<th></th>" : "") + "</tr></thead><tbody>" + rows + "</tbody></table></div></div></details>";
     }
 
-    // one gated fetch feeds BOTH the Recent moves panel and the worker record
-    // cards; keyed by staff_id (0051 feed) because full names can duplicate
-    async function loadTranslog() {
-      if (!MP.canMove) return;
-      try { MP.translog = await Dash.getTransferLog(500); }
-      catch (e) { MP.translog = []; }               // DB said no — panels stay absent
-      MP.histByStaff = {};
-      MP.translog.forEach(function (t) {
-        if (t.subject_type !== "staff" || !t.staff_id) return;
-        (MP.histByStaff[t.staff_id] = MP.histByStaff[t.staff_id] || []).push(t);
-      });
+    /* ------------------------------ the tabs ------------------------------- */
+
+    function renderMore() {
+      var sec = document.getElementById("mp-more");
+      if (!M.canEdit) { sec.hidden = true; return; }
+      sec.hidden = false;
+      var act = active();
+      var inactive = M.rows.filter(function (r) { return !r.is_active; });
+      var gaps = act.filter(function (r) { return !r.has_date_joined || !r.employee_code || !r.has_contact; }).length;
+      var tabs = [
+        ["history", "Movement History"],
+        ["inactive", "Inactive Workers" + (inactive.length ? " · " + inactive.length : "")],
+        ["quality", "Data Quality" + (gaps ? " · " + gaps : "")]
+      ];
+      document.getElementById("mp-tabs").innerHTML = tabs.map(function (t) {
+        return '<button type="button" class="btn' + (M.tab === t[0] ? " btn-primary" : "") + '" data-tab="' + t[0] + '">' + escHtml(t[1]) + "</button>";
+      }).join("");
+      var body = document.getElementById("mp-tab-body");
+      if (M.tab === "history") body.innerHTML = historyTab();
+      else if (M.tab === "inactive") body.innerHTML = inactiveTab(inactive);
+      else body.innerHTML = qualityTab(act);
     }
 
-    // 0082: this worker's punch-app enrolment state, fetched when their card
-    // opens (one row, gated on devices.view). Re-renders on its own so opening
-    // a card never waits on it.
-    async function loadDevices(sid) {
-      if (!MP.canDevicesView) return;
-      try {
-        var rowsD = await Dash.getWorkerDevices(sid);
-        MP.devByStaff[sid] = (rowsD && rowsD[0]) || null;
-      } catch (e) {
-        MP.devByStaff[sid] = null;                  // gated read said no — panel says so
+    function historyLine(t, inPanel) {
+      var c = M.confirm && M.confirm.kind === "del-history" && M.confirm.id === t.transfer_id;
+      var fixing = M.mode === "fix:" + t.transfer_id;
+      var badge = t.source === "punch" ? ' <span class="badge badge-gray" title="Moved by a punch the worker made inside this site\'s fence (DB 0105).">By Punch</span>'
+                : t.source === "backfill" ? ' <span class="badge badge-gray">Backfill</span>' : "";
+      var acts = M.canEdit
+        ? (c ? '<span class="move-ctl"><span class="muted">Delete this row? It cannot be undone.</span>' +
+               '<button type="button" class="btn btn-danger" data-act="history-delete" data-transfer="' + t.transfer_id + '">Delete</button>' +
+               '<button type="button" class="btn" data-act="confirm-clear">Keep</button></span>'
+             : '<span class="move-ctl"><button type="button" class="btn" data-act="history-fix" data-transfer="' + t.transfer_id +
+               '" data-date="' + esc(t.effective_date) + '" data-remarks="' + esc(t.remarks || "") + '">Edit</button>' +
+               '<button type="button" class="btn btn-danger" data-act="history-ask" data-transfer="' + t.transfer_id + '">Delete</button></span>')
+        : "";
+      var line = "<b>" + escHtml(UI.dstr(t.effective_date)) + "</b> " + escHtml(t.from_project) + " → " + escHtml(t.to_project) + badge +
+        (t.remarks ? ' <span class="muted">' + escHtml(t.remarks) + "</span>" : "") +
+        ' <span class="muted">by ' + escHtml(t.moved_by_name || t.source) + "</span>";
+      var form = fixing ? fixForm(t) : "";
+      return inPanel
+        ? '<div class="dr-line" title="entered ' + esc(Dash.klDateTime(t.moved_at)) + '">' + line + " " + acts + "</div>" + form
+        : "<tr>" + UI.td("When", '<span title="entered ' + esc(Dash.klDateTime(t.moved_at)) + '">' + escHtml(UI.dstr(t.effective_date)) + "</span>") +
+          UI.td("Who", "<b>" + escHtml(t.subject_name) + '</b><span class="mp-sub">' + escHtml(UI.label(t.subject_type)) + "</span>") +
+          UI.td("Move", escHtml(t.from_project) + " → " + escHtml(t.to_project) + badge + (t.remarks ? ' <span class="muted">' + escHtml(t.remarks) + "</span>" : "")) +
+          UI.td("By", escHtml(t.moved_by_name || t.source)) +
+          UI.td("", acts) + "</tr>" + (form ? '<tr><td colspan="5">' + form + "</td></tr>" : "");
+    }
+    function fixForm(t) {
+      return '<div class="mp-inline-form"><div class="dr-form">' +
+        '<label>Happened On <input type="date" id="fx-date" value="' + esc(t.effective_date) + '"></label>' +
+        '<label>Remarks <input type="text" id="fx-remarks" value="' + esc(t.remarks || "") + '"></label>' +
+        '<div class="acts"><button type="button" class="btn btn-primary" data-act="history-fix-save" data-transfer="' + t.transfer_id + '">Save</button>' +
+        '<button type="button" class="btn" data-act="mode-clear">Cancel</button>' +
+        '<span class="muted">Wrong sites? Delete the row and add a past move instead.</span></div></div></div>';
+    }
+    function pastMoveForm() {
+      var workers = M.rows.slice().sort(function (a, b) { return String(a.full_name).localeCompare(String(b.full_name)); })
+        .map(function (r) { return '<option value="' + r.staff_id + '">' + escHtml(r.full_name) + (r.is_active ? "" : " (left)") + "</option>"; }).join("");
+      return '<div class="mp-inline-form"><div class="dr-form">' +
+        '<label>Worker <select id="pm-worker"><option value="">Choose…</option>' + workers + "</select></label>" +
+        '<label>Happened On <input type="date" id="pm-date"></label>' +
+        '<label>From <select id="pm-from">' + siteOptions("", true) + "</select></label>" +
+        '<label>To <select id="pm-to">' + siteOptions("", true) + "</select></label>" +
+        '<label class="wide">Remarks <input type="text" id="pm-remarks" placeholder="Optional"></label>' +
+        '<div class="acts"><button type="button" class="btn btn-primary" data-act="past-save">Add To History</button>' +
+        '<button type="button" class="btn" data-act="mode-clear">Cancel</button>' +
+        '<span class="muted">History only. The current site is not changed; use Move for that.</span></div></div></div>';
+    }
+    function historyTab() {
+      if (M.translogErr) return '<div class="banner banner-red">Could not read the history: ' + escHtml(M.translogErr) + "</div>";
+      var log = M.translog.slice(0, HISTORY_IN_TAB);
+      var q = M.q;
+      if (q) log = log.filter(function (t) { return ((t.subject_name || "") + " " + (t.from_project || "") + " " + (t.to_project || "")).toLowerCase().indexOf(q) !== -1; });
+      return '<div class="mp-tab-head"><span>The newest ' + HISTORY_IN_TAB + " moves of workers and machines. Dates are when it happened.</span>" +
+        '<span class="spacer"></span><button type="button" class="btn" data-act="past-form">Add Past Move</button></div>' +
+        (M.mode === "past" ? pastMoveForm() : "") +
+        '<div class="table-wrap table-stack"><table><thead><tr><th>When</th><th>Who</th><th>Move</th><th>By</th><th></th></tr></thead><tbody>' +
+        (log.map(function (t) { return historyLine(t, false); }).join("") || '<tr><td colspan="5" class="empty">No moves logged yet.</td></tr>') +
+        "</tbody></table></div>";
+    }
+    function inactiveTab(inactive) {
+      var list = inactive.slice().sort(function (a, b) { return a.updated_at < b.updated_at ? 1 : -1; });
+      if (M.q) list = list.filter(hit);
+      var rows = list.map(function (r) {
+        var c = M.confirm && M.confirm.kind === "reactivate" && M.confirm.id === r.staff_id;
+        return "<tr>" + UI.td("Worker", "<b>" + escHtml(r.full_name) + '</b><span class="mp-sub">' + escHtml([r.employee_code, r.company].filter(Boolean).join(" · ")) + "</span>") +
+          UI.td("Trade", escHtml(UI.label(r.role))) +
+          UI.td("Last Site", escHtml(r.project_code ? r.project_code + (r.project_name ? " — " + r.project_name : "") : "—")) +
+          UI.td("", c
+            ? '<span class="move-ctl"><select id="ra-site">' + siteOptions(r.current_project_id || "", true) + "</select>" +
+              '<button type="button" class="btn btn-primary" data-act="reactivate-go" data-staff="' + r.staff_id + '">Reactivate</button>' +
+              '<button type="button" class="btn" data-act="confirm-clear">Cancel</button></span>'
+            : '<button type="button" class="btn" data-act="reactivate-ask" data-staff="' + r.staff_id + '">Reactivate</button>') + "</tr>";
+      }).join("");
+      return '<div class="mp-tab-head"><span>Workers marked as left. Reactivate asks which site they return to.</span></div>' +
+        '<div class="table-wrap table-stack"><table><thead><tr><th>Worker</th><th>Trade</th><th>Last Site</th><th></th></tr></thead><tbody>' +
+        (rows || '<tr><td colspan="4" class="empty">Nobody has left.</td></tr>') + "</tbody></table></div>";
+    }
+    function qualityTab(act) {
+      function col(title, why, list) {
+        return '<div class="mp-dq-col"><h3>' + escHtml(title) + " · " + list.length + '</h3><p class="muted" style="margin:0 0 6px">' + escHtml(why) + "</p><ul>" +
+          (list.map(function (r) {
+            return "<li><span>" + escHtml(r.full_name) + (r.employee_code ? ' <span class="muted">' + escHtml(r.employee_code) + "</span>" : "") + "</span>" +
+              '<button type="button" class="btn" data-act="open-edit" data-staff="' + r.staff_id + '">Edit</button></li>';
+          }).join("") || '<li class="muted">None missing.</li>') + "</ul></div>";
       }
-      if (MP.cardOpen === sid) { rememberOpenGroups(); render(); }
+      return '<div class="mp-tab-head"><span>Facts missing from active workers’ records. Edit fills them in.</span></div><div class="mp-dq">' +
+        col("Date Joined", "Sets the annual-leave tier.", act.filter(function (r) { return !r.has_date_joined; })) +
+        col("Employee Code", "The payroll reference.", act.filter(function (r) { return !r.employee_code; })) +
+        col("Contact", "A phone number for the worker.", act.filter(function (r) { return !r.has_contact; })) + "</div>";
     }
 
-    function renderMoveLog() {
-      if (!MP.canMove) return;                      // office-only history
-      var el = document.getElementById("movelog");
-      // the panel is rebuilt after every save; keep it open if it was open
-      // (it used to snap shut, losing the office's place after each edit)
-      var prev = el.querySelector("details");
-      var wasOpen = !!(prev && prev.open);
-      try {
-        var log = (MP.translog || []).slice(0, 50); // panel shows the newest 50
-        var rows = log.map(function (t) {
-          return '<tr><td title="entered ' + esc(Dash.klDateTime(t.moved_at)) + '">' +
-                 mlDate(t.effective_date) + "</td>" +
-                 "<td>" + escHtml(t.subject_type) + "</td>" +
-                 "<td><strong>" + escHtml(t.subject_name) + "</strong></td>" +
-                 "<td>" + escHtml(t.from_project) + " &rarr; " + escHtml(t.to_project) +
-                 (t.source === "backfill" ? ' <span class="badge badge-gray">backfill</span>' : "") +
-               (t.source === "punch" ? ' <span class="badge badge-gray" title="Moved by a punch the worker made inside the fence of this site (DB 0105).">By Punch</span>' : "") +
-                 (t.remarks ? ' <span class="muted">(' + escHtml(t.remarks) + ")</span>" : "") + "</td>" +
-                 "<td>" + escHtml(t.moved_by_name || t.source) + "</td>" +
-                 '<td><span class="move-ctl">' +
-                 '<button type="button" data-action="th-edit" data-transfer="' + t.transfer_id +
-                 '" data-date="' + esc(t.effective_date) + '" data-remarks="' + esc(t.remarks || "") + '">edit</button>' +
-                 '<button type="button" class="danger" data-action="th-del" data-transfer="' +
-                 t.transfer_id + '">delete</button>' +
-                 "</span></td></tr>";
+    /* ------------------------------ the panel ------------------------------ */
+
+    function openWorker(id) {
+      M.sel = id; M.mode = null; M.confirm = null; M.panelErr = ""; M.panelOk = "";
+      renderGroups(); renderDrawer();
+      if (id && id !== "__new" && M.canEdit) {
+        if (!M.cache[id]) {
+          Dash.getStaffDetail(id).then(function (d) { M.cache[id] = d || {}; if (M.sel === id) renderDrawer(); })
+            .catch(function () { M.cache[id] = {}; if (M.sel === id) renderDrawer(); });
+        }
+        if (M.canDevView && M.dev[id] === undefined) {
+          Dash.getWorkerDevices(id).then(function (rows) { M.dev[id] = (rows && rows[0]) || null; if (M.sel === id) renderDrawer(); })
+            .catch(function () { M.dev[id] = null; if (M.sel === id) renderDrawer(); });
+        }
+      }
+    }
+    function closeWorker() { M.sel = null; M.mode = null; M.confirm = null; renderGroups(); renderDrawer(); }
+
+    function confirmBox(kind, id, text, yesLabel, danger) {
+      return '<div class="dr-confirm' + (danger ? " danger" : "") + '"><p>' + escHtml(text) + "</p>" +
+        '<div class="dr-acts"><button type="button" class="btn ' + (danger ? "btn-danger" : "btn-primary") + '" data-act="' + kind + '-go" data-id="' + esc(id) + '">' + escHtml(yesLabel) + "</button>" +
+        '<button type="button" class="btn" data-act="confirm-clear">Cancel</button></div></div>';
+    }
+
+    function newWorkerPanel() {
+      var dup = M.confirm && M.confirm.kind === "dup-add";
+      return '<div class="dr-top"><h2>New Worker</h2><button type="button" class="btn dr-close" data-act="close">Close</button></div>' +
+        '<p class="dr-who">A new staff record. The code, the site and the date joined can be added later.</p>' +
+        '<div class="dr-form">' +
+        '<label class="wide">Full Name <input type="text" id="nw-name" autocomplete="off"></label>' +
+        '<label>Employee Code <input type="text" id="nw-code" placeholder="Optional"></label>' +
+        '<label>Company <select id="nw-company">' + companyOptions("HF-BP") + "</select></label>" +
+        '<label>Trade <select id="nw-role">' + tradeOptions("general_worker") + "</select></label>" +
+        '<label>Site <select id="nw-site">' + siteOptions("", true) + "</select></label>" +
+        '<label>Date Joined <input type="date" id="nw-joined"></label>' +
+        '<label>Contact <input type="text" id="nw-contact" placeholder="Optional"></label>' +
+        '<label class="wide">Origin <input type="text" id="nw-origin" list="country-list" placeholder="Type to pick"></label>' +
+        '<datalist id="country-list">' + COUNTRIES.map(function (c) { return '<option value="' + c + '"></option>'; }).join("") + "</datalist>" +
+        '<div class="acts"><button type="button" class="btn btn-primary" data-act="new-save">Add Worker</button>' +
+        '<button type="button" class="btn" data-act="close">Cancel</button></div></div>' +
+        (dup ? confirmBox("new-dup", "", "A worker with this exact name already exists and is active. Add anyway?", "Add Anyway") : "") +
+        '<p class="dr-err">' + escHtml(M.panelErr) + "</p>";
+    }
+
+    function detailsSection(r, d) {
+      var chips = [];
+      if (d.date_joined) chips.push("Joined " + UI.dstr(d.date_joined));
+      if (d.contact_number) chips.push("Contact " + d.contact_number);
+      if (d.country_origin) chips.push("Origin " + d.country_origin);
+      if (d.whatsapp_name) chips.push("WhatsApp " + d.whatsapp_name);
+      chips.push(d.ot_eligible === false ? "No Overtime" : "Paid Overtime");
+      var h = '<div class="dr-sec"><h3>Details<span class="spacer"></span>' +
+        (M.mode === "edit" ? "" : '<button type="button" class="btn" data-act="mode-edit">Edit Details</button>') + "</h3>";
+      if (M.mode !== "edit") {
+        h += '<div class="dr-line">' + (chips.length ? escHtml(chips.join(" · ")) : '<span class="muted">Loading…</span>') + "</div>";
+      } else {
+        var dup = M.confirm && M.confirm.kind === "dup-edit";
+        h += '<div class="dr-form">' +
+          '<label class="wide">Full Name <input type="text" id="ed-name" value="' + esc(d.full_name || r.full_name) + '"></label>' +
+          '<label>Employee Code <input type="text" id="ed-code" value="' + esc(d.employee_code || r.employee_code || "") + '"></label>' +
+          '<label>Company <select id="ed-company">' + companyOptions(d.company_code || r.company) + "</select></label>" +
+          '<label>Trade <select id="ed-role">' + tradeOptions(d.role || r.role) + "</select></label>" +
+          '<label>Date Joined <input type="date" id="ed-joined" value="' + esc(d.date_joined || "") + '"></label>' +
+          '<label>Contact <input type="text" id="ed-contact" value="' + esc(d.contact_number || "") + '"></label>' +
+          '<label>Origin <input type="text" id="ed-origin" list="country-list" value="' + esc(d.country_origin || "") + '"></label>' +
+          '<datalist id="country-list">' + COUNTRIES.map(function (c) { return '<option value="' + c + '"></option>'; }).join("") + "</datalist>" +
+          '<label class="check wide"><input type="checkbox" id="ed-ot"' + (d.ot_eligible === false ? "" : " checked") + '> Paid Overtime</label>' +
+          (d.whatsapp_name ? '<div class="muted wide" style="grid-column:1/-1">WhatsApp name ' + escHtml(d.whatsapp_name) + " is the bot’s match key and is not edited here.</div>" : "") +
+          '<div class="acts"><button type="button" class="btn btn-primary" data-act="edit-save">Save Changes</button>' +
+          '<button type="button" class="btn" data-act="mode-clear">Cancel</button><span class="muted">Blank keeps the old value.</span></div></div>' +
+          (dup ? confirmBox("edit-dup", "", "Another active worker already has this exact name. Save anyway?", "Save Anyway") : "");
+      }
+      return h + "</div>";
+    }
+
+    function historySection(r) {
+      var hist = M.histByStaff[r.staff_id] || [];
+      var h = '<div class="dr-sec"><h3>Movement History<span class="spacer"></span><span class="muted">' + hist.length + "</span></h3>";
+      if (M.translogErr) h += '<div class="dr-line muted">Could not read the history.</div>';
+      else if (!hist.length) h += '<div class="dr-line muted">No moves recorded yet.</div>';
+      else {
+        h += hist.slice(0, HISTORY_IN_PANEL).map(function (t) { return historyLine(t, true); }).join("");
+        if (hist.length > HISTORY_IN_PANEL) h += '<div class="dr-line muted">+ ' + (hist.length - HISTORY_IN_PANEL) + " older, in Movement History below the roster.</div>";
+      }
+      return h + "</div>";
+    }
+
+    function phoneSection(r) {
+      if (!M.canDevView) return "";
+      var d = M.dev[r.staff_id], body;
+      var c = M.confirm && M.confirm.kind === "release" && M.confirm.id === r.staff_id;
+      if (d === undefined) body = '<div class="dr-line muted">Loading…</div>';
+      else if (d === null) body = '<div class="dr-line muted">Could not read the enrolment state.</div>';
+      else if (d.is_enrolled) {
+        body = '<div class="dr-line">Phone <b>' + escHtml(d.device_label || "Registered") + "</b>" +
+          (d.last_seen_at ? '<span class="muted">last used ' + escHtml(Dash.klDateTime(d.last_seen_at)) + "</span>" : "") + "</div>" +
+          (M.canDev ? (c ? confirmBox("release", r.staff_id, "Release " + r.full_name + "’s phone? They cannot punch until a new code is issued and used.", "Release Phone", true)
+                        : '<div class="dr-acts"><button type="button" class="btn btn-danger" data-act="release-ask">Release Phone</button>' +
+                          '<span class="muted">Releasing lets them enrol a replacement phone.</span></div>') : "");
+      } else if (M.shownCode[r.staff_id]) {
+        var sc = M.shownCode[r.staff_id];
+        body = '<div class="dr-line">Give this code to <b>' + escHtml(r.full_name) + "</b></div>" +
+          '<div class="dr-line"><span class="dr-code">' + escHtml(sc.display) + "</span></div>" +
+          '<div class="dr-line muted">Valid until ' + escHtml(sc.expires) + ". One use. Shown once; reissue if lost.</div>" +
+          (M.canDev ? '<div class="dr-acts"><button type="button" class="btn" data-act="dev-issue">Reissue</button>' +
+                      '<button type="button" class="btn btn-danger" data-act="dev-revoke">Cancel Code</button></div>' : "");
+      } else {
+        body = '<div class="dr-line">Not Enrolled' + (d.has_live_code
+          ? ' <span class="badge badge-gray">Code Issued</span><span class="muted">expires ' + escHtml(Dash.klDateTime(d.code_expires_at)) + "</span>" : "") + "</div>" +
+          (M.canDev ? '<div class="dr-acts"><button type="button" class="btn" data-act="dev-issue">' + (d.has_live_code ? "Reissue Code" : "Issue Enrolment Code") + "</button>" +
+            (d.has_live_code ? '<button type="button" class="btn btn-danger" data-act="dev-revoke">Cancel Code</button>' : "") + "</div>" : "");
+      }
+      return '<div class="dr-sec"><h3>Punch App Phone</h3>' + body + "</div>";
+    }
+
+    function planningSection(r) {
+      var plans = plansFor(r.staff_id);
+      var h = '<div class="dr-sec"><h3>Planned Moves<span class="spacer"></span>' +
+        (M.mode === "plan" ? "" : '<button type="button" class="btn" data-act="mode-plan">Plan A Move</button>') + "</h3>";
+      if (!plans.length && M.mode !== "plan") h += '<div class="dr-line muted">None planned.</div>';
+      plans.forEach(function (p) {
+        var days = UI.daysSince(p.planned_date), late = days !== null && days > 0;
+        var dest = p.to_project_code ? p.to_project_code + (p.to_project_name ? " — " + p.to_project_name : "") : "Not On A Site";
+        var c = M.confirm && M.confirm.kind === "plan" && M.confirm.id === p.plan_id ? M.confirm : null;
+        h += '<div class="dr-line"><b>' + escHtml(UI.dstr(p.planned_date)) + "</b>" + (late ? ' <span class="chip chip-warn">' + days + (days === 1 ? " day" : " days") + " ago</span>" : "") +
+          " → " + escHtml(dest) + (p.remarks ? ' <span class="muted">' + escHtml(p.remarks) + "</span>" : "") +
+          (c ? ' <span class="move-ctl"><span class="muted">' + (c.act === "execute" ? "Move now?" : "Cancel this plan?") + "</span>" +
+               '<button type="button" class="btn btn-primary" data-act="plan-go" data-plan="' + p.plan_id + '" data-what="' + c.act + '">Yes</button>' +
+               '<button type="button" class="btn" data-act="confirm-clear">No</button></span>'
+             : ' <span class="move-ctl"><button type="button" class="btn" data-act="plan-ask" data-plan="' + p.plan_id + '" data-what="execute">Execute Now</button>' +
+               '<button type="button" class="btn" data-act="plan-ask" data-plan="' + p.plan_id + '" data-what="cancel">Cancel</button></span>') + "</div>";
+      });
+      if (M.mode === "plan") {
+        h += '<div class="dr-form">' +
+          '<label>When <input type="date" id="pl-date" value="' + Dash.todayKL() + '"></label>' +
+          '<label>To <select id="pl-site"><option value="">Choose…</option>' + siteOptions("", false) + '<option value="unassign">— Mob Out / Not On A Site —</option></select></label>' +
+          '<label class="wide">Remarks <input type="text" id="pl-remarks" placeholder="Optional"></label>' +
+          '<div class="acts"><button type="button" class="btn btn-primary" data-act="plan-save">Save Plan</button>' +
+          '<button type="button" class="btn" data-act="mode-clear">Cancel</button><span class="muted">Nothing moves now. Execute it when it happens.</span></div></div>';
+      }
+      return h + "</div>";
+    }
+
+    function workerPanel(r) {
+      var s = statusOf(r);
+      var d = M.cache[r.staff_id] || {};
+      var leftAsk = M.confirm && M.confirm.kind === "left" && M.confirm.id === r.staff_id;
+      var h = '<div class="dr-top"><h2>' + escHtml(r.full_name) + '</h2><button type="button" class="btn dr-close" data-act="close">Close</button></div>' +
+        '<p class="dr-who">' + escHtml([r.employee_code, UI.label(r.role), r.company].filter(Boolean).join(" · ")) + "</p>" +
+        '<dl class="dr-facts"><dt>Assigned Site</dt><dd>' + (r.current_project_id
+          ? escHtml(r.project_code + (r.project_name ? " — " + r.project_name : "")) + ' <a href="' + esc(projectHref(r.current_project_id)) + '" class="muted">Open</a>'
+          : (groupOf(r) === "__office" ? "Office Staff" : "Not On A Site")) + "</dd>" +
+        "<dt>Last Reported</dt><dd>" + escHtml(reportWords(r)) + " " + statusChip(r) + "</dd></dl>" +
+        '<div class="dr-links"><a class="btn" href="' + esc(attendanceHref(r)) + '">Attendance</a></div>';
+
+      if (M.canEdit) {
+        h += '<div class="dr-sec"><h3>Move This Worker</h3><div class="dr-form">' +
+          '<label class="wide">To <select id="mv-site"><option value="">Choose…</option>' + siteOptions("", false) + '<option value="unassign">— Not On A Site —</option></select></label>' +
+          '<label>Effective <input type="date" id="mv-date" value="' + Dash.todayKL() + '"></label>' +
+          '<label>Remarks <input type="text" id="mv-remarks" placeholder="Optional"></label>' +
+          '<div class="acts"><button type="button" class="btn btn-primary" data-act="move">Move</button>' +
+          '<span class="muted">Backdate the effective date for a catch-up move.</span></div></div>' +
+          '<p class="dr-ok">' + escHtml(M.panelOk) + '</p><p class="dr-err">' + escHtml(M.panelErr) + "</p></div>";
+        h += detailsSection(r, d) + historySection(r) + phoneSection(r) + planningSection(r);
+        h += '<div class="dr-foot">' + (leftAsk
+          ? confirmBox("left", r.staff_id, "Mark " + r.full_name + " as left? Their phone is locked out of the punch app. Undo from Inactive Workers if this is a mistake.", "Mark As Left", true)
+          : '<button type="button" class="btn btn-danger" data-act="left-ask">Mark As Left</button>') + "</div>";
+      } else {
+        h += '<p class="dr-err">' + escHtml(M.panelErr) + "</p>";
+      }
+      return h;
+    }
+
+    function renderDrawer() {
+      var el = document.getElementById("mp-drawer");
+      if (!M.sel) { el.hidden = true; el.innerHTML = ""; return; }
+      if (M.sel === "__new") { el.innerHTML = newWorkerPanel(); el.hidden = false; return; }
+      var r = byId(M.sel);
+      if (!r) { closeWorker(); return; }
+      el.innerHTML = workerPanel(r);
+      el.hidden = false;
+    }
+
+    /* ----------------------------- rendering ------------------------------- */
+
+    function renderError() {
+      document.getElementById("error").innerHTML =
+        (M.err ? '<div class="banner banner-red">' + escHtml(M.err) + "</div>" : "") +
+        (M.ok ? UI.okBanner(M.ok) : "");
+    }
+    function renderFilterOptions() {
+      var act = active().filter(inCompany);
+      var trades = ROLES.filter(function (ro) { return act.some(function (r) { return r.role === ro; }); });
+      document.getElementById("f-trade").innerHTML = '<option value="all">Any Trade</option>' +
+        trades.map(function (ro) { return '<option value="' + ro + '"' + (M.trade === ro ? " selected" : "") + ">" + escHtml(UI.label(ro)) + "</option>"; }).join("");
+      var sites = {};
+      act.forEach(function (r) { if (r.current_project_id) sites[r.project_code] = r.project_name || ""; });
+      document.getElementById("f-site").innerHTML = '<option value="all">Any Site</option>' +
+        '<option value="__await"' + (M.site === "__await" ? " selected" : "") + ">Awaiting Deployment</option>" +
+        '<option value="__office"' + (M.site === "__office" ? " selected" : "") + ">Office Staff</option>" +
+        Object.keys(sites).sort().map(function (k) {
+          return '<option value="' + esc(k) + '"' + (M.site === k ? " selected" : "") + ">" + escHtml(k + " — " + sites[k]) + "</option>";
         }).join("");
-        el.innerHTML =
-          '<details class="zone"' + (wasOpen ? " open" : "") + '><summary><span class="zone-name">Recent moves</span>' +
-          '<span class="zone-count">' + log.length + " logged · dates = when it happened</span></summary>" +
-          '<div class="claim-actions" style="padding:6px 0 0">' +
-          '<button type="button" data-action="th-add">Add past move…</button></div>' +
-          '<div id="movelog-form"></div>' +
-          '<div class="table-wrap"><table>' +
-          "<thead><tr><th>When</th><th>Type</th><th>Who/what</th><th>Move</th><th>By</th><th></th></tr></thead>" +
-          "<tbody>" + (rows ||
-            '<tr><td colspan="6" class="muted-line">No moves logged yet — backfill old history with the button above.</td></tr>') +
-          "</tbody></table></div></details>";
-      } catch (e) { el.innerHTML = ""; }            // DB said no — panel stays absent
+      document.getElementById("f-status").value = M.status;
+      document.getElementById("mp-add").innerHTML = M.canEdit ? '<button type="button" class="btn" data-act="new">+ Add Worker</button>' : "";
+    }
+    function render() {
+      renderError(); renderTiles(); renderFilterOptions(); renderUpcoming(); renderGroups(); renderMore(); renderDrawer();
     }
 
-    // keep only the PLANNED staff plans (executed/cancelled = history)
-    function setPlans(all) {
-      MP.plans = (all || []).filter(function (p) {
-        return p.subject_type === "staff" && p.status === "planned";
+    /* ------------------------------- loading ------------------------------- */
+
+    async function loadTranslog() {
+      if (!M.canEdit) return;
+      try { M.translog = await Dash.getTransferLog(500); M.translogErr = ""; }
+      catch (e) { M.translog = []; M.translogErr = (e && e.message) || String(e); }
+      M.histByStaff = {};
+      M.translog.forEach(function (t) {
+        if (t.subject_type !== "staff" || !t.staff_id) return;
+        (M.histByStaff[t.staff_id] = M.histByStaff[t.staff_id] || []).push(t);
       });
     }
-
     async function refresh() {
-      var res = await Promise.all([Dash.getManpowerBySite(), Dash.getMovementPlans(),
-                                   loadTranslog()]);
-      MP.rows = res[0];
-      setPlans(res[1]);
+      var res = await Promise.all([Dash.getManpowerBySite(), Dash.getMovementPlans(), loadTranslog()]);
+      M.rows = res[0]; setPlans(res[1]);
       render();
-      renderMoveLog();
+    }
+    async function recache(id) {
+      delete M.cache[id];
+      if (M.sel !== id) return;
+      try { M.cache[id] = await Dash.getStaffDetail(id); } catch (e) { M.cache[id] = {}; }
+    }
+    async function redev(id) {
+      if (!M.canDevView) return;
+      try { var rows = await Dash.getWorkerDevices(id); M.dev[id] = (rows && rows[0]) || null; }
+      catch (e) { M.dev[id] = null; }
     }
 
-    function rememberOpenGroups() {
-      document.querySelectorAll("#groups details.zone[data-group]").forEach(function (d) {
-        MP.open[d.getAttribute("data-group")] = d.open;
-      });
-    }
-
-    async function actAddWorker() {
-      var payload = {
-        fullName: document.getElementById("aw-name").value,
-        role: document.getElementById("aw-role").value,
-        companyCode: document.getElementById("aw-company").value,
-        employeeCode: document.getElementById("aw-code").value || null,
-        projectId: document.getElementById("aw-site").value || null,
-        dateJoined: document.getElementById("aw-joined").value || null,
-        contactNumber: document.getElementById("aw-contact").value || null,
-        countryOrigin: document.getElementById("aw-origin").value || null
-      };
-      if (!String(payload.fullName || "").trim()) { MP.err = "full name is required"; render(); return; }
-      try {
-        var r = await Dash.addStaff(payload);
-        MP.err = ""; MP.showAdd = false;
-        MP.okMsg = r.full_name + " added (" + (r.to_project_code || "unassigned") + ")";
-      } catch (e) {
+    // one write at a time; the answer lands in the panel or the top banner
+    async function act(fn, where) {
+      if (M.busy) return;
+      M.busy = true; M.err = ""; M.ok = ""; M.panelErr = ""; M.panelOk = "";
+      try { await fn(); }
+      catch (e) {
         var msg = (e && e.message) || String(e);
-        if (msg === "duplicate_name" &&
-            window.confirm("A worker with this exact name already exists and is active.\nAdd anyway?")) {
-          payload.allowDuplicate = true;
-          try {
-            var r2 = await Dash.addStaff(payload);
-            MP.err = ""; MP.showAdd = false;
-            MP.okMsg = r2.full_name + " added (" + (r2.to_project_code || "unassigned") + ")";
-          } catch (e2) { MP.err = (e2 && e2.message) || String(e2); }
-        } else if (msg === "duplicate_employee_code") {
-          MP.err = "that employee code is already in use by an active worker";
-        } else if (msg !== "duplicate_name") {
-          MP.err = msg;
-        }
+        if (where === "panel") M.panelErr = msg; else M.err = "Could not save: " + msg;
       }
-      await refresh();
+      M.busy = false;
+    }
+    function val(id) { var el = document.getElementById(id); return el ? el.value : ""; }
+
+    /* ------------------------------- the clicks ---------------------------- */
+
+    async function onAction(btn, ev) {
+      var a = btn.getAttribute("data-act");
+      var sel = M.sel && M.sel !== "__new" ? byId(M.sel) : null;
+
+      if (a === "close") { closeWorker(); return; }
+      if (a === "open") { openWorker(btn.getAttribute("data-staff")); return; }
+      if (a === "open-edit") { openWorker(btn.getAttribute("data-staff")); M.mode = "edit"; renderDrawer(); return; }
+      if (a === "new") { openWorker("__new"); return; }
+      if (a === "mode-edit") { M.mode = "edit"; M.confirm = null; renderDrawer(); return; }
+      if (a === "mode-plan") { M.mode = "plan"; M.confirm = null; renderDrawer(); return; }
+      if (a === "mode-clear") { M.mode = null; M.confirm = null; renderDrawer(); renderMore(); return; }
+      if (a === "confirm-clear") { M.confirm = null; renderDrawer(); renderMore(); renderUpcoming(); return; }
+      if (a === "past-form") { M.mode = M.mode === "past" ? null : "past"; renderMore(); return; }
+
+      // ---- new worker ----
+      if (a === "new-save" || a === "new-dup-go") {
+        var payload = { fullName: val("nw-name"), role: val("nw-role"), companyCode: val("nw-company"),
+          employeeCode: val("nw-code") || null, projectId: val("nw-site") || null, dateJoined: val("nw-joined") || null,
+          contactNumber: val("nw-contact") || null, countryOrigin: val("nw-origin") || null, allowDuplicate: a === "new-dup-go" };
+        if (a === "new-dup-go" && M.confirm && M.confirm.payload) payload = M.confirm.payload, payload.allowDuplicate = true;
+        if (!String(payload.fullName || "").trim()) { M.panelErr = "The full name is required."; renderDrawer(); return; }
+        await act(async function () {
+          try {
+            var r = await Dash.addStaff(payload);
+            M.confirm = null; M.ok = r.full_name + " added" + (r.to_project_code ? " to " + r.to_project_code : "") + ".";
+            await refresh(); openWorker(r.staff_id || null); if (!r.staff_id) closeWorker();
+          } catch (e) {
+            var msg = (e && e.message) || String(e);
+            if (msg === "duplicate_name") { M.confirm = { kind: "dup-add", payload: payload }; renderDrawer(); return; }
+            if (msg === "duplicate_employee_code") throw new Error("That employee code is already in use by an active worker.");
+            throw e;
+          }
+        }, "panel");
+        renderDrawer(); return;
+      }
+
+      if (!sel) return;
+
+      // ---- move ----
+      if (a === "move") {
+        var to = val("mv-site");
+        if (!to) { M.panelErr = "Choose where to move " + sel.full_name + "."; renderDrawer(); return; }
+        await act(async function () {
+          var r = await Dash.moveStaff(sel.staff_id, to === "unassign" ? null : to, val("mv-remarks") || null, val("mv-date") || null);
+          var tgt = projectById(to);
+          M.ok = (r.full_name || sel.full_name) + " moved to " + (tgt ? tgt.project_code + " — " + tgt.project_name : "no site") + ".";
+          await refresh();
+        }, "panel");
+        renderDrawer(); return;
+      }
+
+      // ---- edit details ----
+      if (a === "edit-save" || a === "edit-dup-go") {
+        var p2 = a === "edit-dup-go" && M.confirm && M.confirm.payload ? M.confirm.payload : {
+          fullName: val("ed-name"), role: val("ed-role"), companyCode: val("ed-company"), employeeCode: val("ed-code") || null,
+          dateJoined: val("ed-joined") || null, contactNumber: val("ed-contact") || null, countryOrigin: val("ed-origin") || null,
+          otEligible: !!(document.getElementById("ed-ot") && document.getElementById("ed-ot").checked) };
+        if (a === "edit-dup-go") p2.allowDuplicate = true;
+        await act(async function () {
+          try {
+            var r = await Dash.updateStaff(sel.staff_id, p2);
+            M.confirm = null; M.mode = null; M.panelOk = (r.full_name || sel.full_name) + " updated.";
+            await recache(sel.staff_id); await refresh();
+          } catch (e) {
+            var msg = (e && e.message) || String(e);
+            if (msg === "duplicate_name") { M.confirm = { kind: "dup-edit", payload: p2 }; renderDrawer(); return; }
+            if (msg === "duplicate_employee_code") throw new Error("That employee code is already in use by another active worker.");
+            throw e;
+          }
+        }, "panel");
+        renderDrawer(); return;
+      }
+
+      // ---- left ----
+      if (a === "left-ask") { M.confirm = { kind: "left", id: sel.staff_id }; renderDrawer(); return; }
+      if (a === "left-go") {
+        await act(async function () {
+          await Dash.setStaffActive(sel.staff_id, false);
+          M.ok = sel.full_name + " marked as left."; M.confirm = null;
+          await refresh(); closeWorker();
+        }, "panel");
+        renderDrawer(); return;
+      }
+
+      // ---- phone ----
+      if (a === "dev-issue") {
+        await act(async function () {
+          var iss = await Dash.issueEnrolmentCode(sel.staff_id);
+          if (iss && iss.ok) M.shownCode[sel.staff_id] = { display: iss.enrolment_code_display, expires: iss.expires_at_local };
+          else throw new Error((iss && iss.message) || ("Could not issue a code" + (iss && iss.code ? " (" + iss.code + ")" : "") + "."));
+          await redev(sel.staff_id);
+        }, "panel");
+        renderDrawer(); return;
+      }
+      if (a === "dev-revoke") {
+        await act(async function () {
+          await Dash.revokeEnrolmentCode(sel.staff_id); delete M.shownCode[sel.staff_id];
+          M.panelOk = "Enrolment code cancelled."; await redev(sel.staff_id);
+        }, "panel");
+        renderDrawer(); return;
+      }
+      if (a === "release-ask") { M.confirm = { kind: "release", id: sel.staff_id }; renderDrawer(); return; }
+      if (a === "release-go") {
+        await act(async function () {
+          await Dash.releaseDevice(sel.staff_id); delete M.shownCode[sel.staff_id]; M.confirm = null;
+          M.panelOk = "Phone released. Issue a new code to enrol a replacement."; await redev(sel.staff_id);
+        }, "panel");
+        renderDrawer(); return;
+      }
+
+      // ---- plans ----
+      if (a === "plan-save") {
+        var pdate = val("pl-date"), psite = val("pl-site");
+        if (!pdate || !psite) { M.panelErr = "Choose the date and the destination."; renderDrawer(); return; }
+        await act(async function () {
+          await Dash.addMovementPlan({ staffId: sel.staff_id, plannedDate: pdate, toProjectId: psite === "unassign" ? null : psite, remarks: val("pl-remarks") || null });
+          var tgt = projectById(psite);
+          M.mode = null; M.panelOk = "Move planned for " + UI.dstr(pdate) + (tgt ? " to " + tgt.project_code : "") + ". Execute it when it happens.";
+          await refresh();
+        }, "panel");
+        renderDrawer(); return;
+      }
+
+      // ---- history, from the panel ----
+      if (a === "history-fix") { M.mode = "fix:" + btn.getAttribute("data-transfer"); M.confirm = null; renderDrawer(); renderMore(); return; }
+      if (a === "history-fix-save") {
+        var tid = btn.getAttribute("data-transfer");
+        await act(async function () {
+          await Dash.updateTransfer(tid, { effectiveDate: val("fx-date") || null, remarks: val("fx-remarks") || null });
+          M.mode = null; M.panelOk = "History row updated."; M.ok = M.sel ? "" : "History row updated.";
+          await refresh();
+        }, M.sel ? "panel" : "top");
+        renderDrawer(); return;
+      }
+      if (a === "history-ask") { M.confirm = { kind: "del-history", id: btn.getAttribute("data-transfer") }; renderDrawer(); renderMore(); return; }
+      if (a === "history-delete") {
+        var tid2 = btn.getAttribute("data-transfer");
+        await act(async function () {
+          await Dash.deleteTransfer(tid2); M.confirm = null;
+          M.panelOk = "History row deleted."; M.ok = M.sel ? "" : "History row deleted.";
+          await refresh();
+        }, M.sel ? "panel" : "top");
+        renderDrawer(); return;
+      }
     }
 
-    async function actEditSave(staffId) {
-      var payload = {
-        fullName: document.getElementById("ew-name").value,
-        role: document.getElementById("ew-role").value,
-        companyCode: document.getElementById("ew-company").value,
-        employeeCode: document.getElementById("ew-code").value || null,
-        dateJoined: document.getElementById("ew-joined").value || null,
-        contactNumber: document.getElementById("ew-contact").value || null,
-        countryOrigin: document.getElementById("ew-origin").value || null,
-        otEligible: document.getElementById("ew-ot").checked
-      };
-      try {
-        var r = await Dash.updateStaff(staffId, payload);
-        MP.err = ""; MP.editing = null;
-        MP.okMsg = r.full_name + " updated";
-      } catch (e) {
-        var msg = (e && e.message) || String(e);
-        if (msg === "duplicate_name" &&
-            window.confirm("Another active worker already has this exact name.\nSave anyway?")) {
-          payload.allowDuplicate = true;
-          try {
-            var r2 = await Dash.updateStaff(staffId, payload);
-            MP.err = ""; MP.editing = null;
-            MP.okMsg = r2.full_name + " updated";
-          } catch (e2) { MP.err = (e2 && e2.message) || String(e2); }
-        } else if (msg === "duplicate_employee_code") {
-          MP.err = "that employee code is already in use by another active worker";
-        } else if (msg !== "duplicate_name") {
-          MP.err = msg;
-        }
+    // the plan / history / reactivate / past-move buttons outside the panel
+    async function onTableAction(btn) {
+      var a = btn.getAttribute("data-act");
+      if (a === "plan-ask") { M.confirm = { kind: "plan", id: btn.getAttribute("data-plan"), act: btn.getAttribute("data-what") }; renderUpcoming(); renderDrawer(); return true; }
+      if (a === "plan-go") {
+        var pid = btn.getAttribute("data-plan"), what = btn.getAttribute("data-what");
+        await act(async function () {
+          if (what === "execute") { await Dash.executeMovementPlan(pid); M.ok = "Move executed. The roster is updated."; }
+          else { await Dash.cancelMovementPlan(pid); M.ok = "Plan cancelled."; }
+          M.confirm = null; await refresh();
+        }, "top");
+        renderError(); renderUpcoming(); renderDrawer(); return true;
       }
-      await recacheWorker(staffId);
-      await refresh();
+      if (a === "reactivate-ask") { M.confirm = { kind: "reactivate", id: btn.getAttribute("data-staff") }; renderMore(); return true; }
+      if (a === "reactivate-go") {
+        var sid = btn.getAttribute("data-staff"), r = byId(sid), site = val("ra-site");
+        await act(async function () {
+          await Dash.setStaffActive(sid, true);
+          if ((site || "") !== (r.current_project_id || "")) await Dash.moveStaff(sid, site || null, "Reactivated", null);
+          var tgt = projectById(site);
+          M.ok = r.full_name + " reactivated" + (tgt ? " on " + tgt.project_code : ", not on a site") + "."; M.confirm = null;
+          await refresh();
+        }, "top");
+        renderError(); renderMore(); return true;
+      }
+      if (a === "past-save") {
+        var w = val("pm-worker"), d = val("pm-date");
+        if (!w || !d) { M.err = "Choose the worker and the date."; renderError(); return true; }
+        await act(async function () {
+          await Dash.addPastMove({ staffId: w, fromProjectId: val("pm-from") || null, toProjectId: val("pm-to") || null, effectiveDate: d, remarks: val("pm-remarks") || null });
+          M.mode = null; M.ok = "Past move added to the history. The current site is untouched."; await refresh();
+        }, "top");
+        renderError(); renderMore(); return true;
+      }
+      return false;
     }
 
-    // The record card caches a worker's identity facts (contact, date joined,
-    // overtime flag). After an edit that copy is stale, so drop it — and, when
-    // the card is open, fetch the saved values so the card shows the change.
-    async function recacheWorker(staffId) {
-      delete MP.cardCache[staffId];
-      if (MP.cardOpen !== staffId) return;
-      try { MP.cardCache[staffId] = await Dash.getStaffDetail(staffId); }
-      catch (e) { MP.cardCache[staffId] = {}; }
-    }
+    /* -------------------------------- wiring ------------------------------- */
 
     window.onShellReady = async function () {
-      document.getElementById("groups").innerHTML = UI.empty("Loading the roster…");
       try {
-        var profile = await Dash.getMyProfile();
-        MP.canMove = Dash.can("manpower.edit");
-        MP.canDevicesView = Dash.can("devices.view");     // 0082: show the panel
-        MP.canDevices     = Dash.can("devices.manage");   // 0082: show its buttons
+        await Dash.getMyProfile();
+        M.canEdit = Dash.can("manpower.edit");
+        M.canDevView = Dash.can("devices.view");
+        M.canDev = Dash.can("devices.manage");
 
         var res = await Promise.all([
-          Dash.getManpowerBySite(),
-          Dash.getProjectDirectory(),
-          Dash.getProjectSupervisors(),   // site headers: SV name
-          Dash.getMachines(),             // site headers: plant + crew-vs-plant hint
-          Dash.getMovementPlans(),        // 0048: planned moves (never auto-applied)
-          loadTranslog()                  // 0051: history feed (panel + worker cards)
+          Dash.getManpowerBySite(), Dash.getProjectDirectory(), Dash.getProjectSupervisors(),
+          Dash.getMachines(), Dash.getMovementPlans(), loadTranslog()
         ]);
-        MP.rows = res[0]; MP.projects = res[1];
-        setPlans(res[4]);
-        MP.dirByPid = {};
-        MP.projects.forEach(function (p) { MP.dirByPid[p.project_id] = p; });
-        res[2].forEach(function (s) { MP.supervisorsByPid[s.project_id] = s.supervisors; });
+        M.rows = res[0]; M.projects = res[1];
+        M.projects.forEach(function (p) { M.dirByPid[p.project_id] = p; });
+        res[2].forEach(function (s) { M.supervisorsByPid[s.project_id] = s.supervisors; });
         res[3].forEach(function (m) {
           if (!m.current_site) return;
-          (MP.machinesBySite[m.current_site] = MP.machinesBySite[m.current_site] || [])
-            .push({ code: m.machine_code, type: m.machine_type });
+          (M.machinesBySite[m.current_site] = M.machinesBySite[m.current_site] || []).push({ code: m.machine_code, type: m.machine_type });
         });
+        setPlans(res[4]);
         render();
-        renderMoveLog();
 
-        document.getElementById("mp-search").addEventListener("input", applyFilter);
+        // a worker named in the URL opens in the panel (?open=<staff_id>)
+        if (params.get("open") && byId(params.get("open"))) openWorker(params.get("open"));
 
-        // history-maintenance buttons inside the Recent moves panel (0050) —
-        // delegated on the static #movelog container, survives re-renders
-        document.getElementById("movelog").addEventListener("click", async function (ev) {
-          var btn = ev.target.closest('button[data-action^="th-"]');
-          if (!btn) return;
-          var act = btn.getAttribute("data-action");
-          var hostEl = document.getElementById("movelog-form");
-
-          if (act === "th-add") {
-            if (hostEl) hostEl.innerHTML = hostEl.innerHTML ? "" : mlAddForm();
-            return;
-          }
-          if (act === "th-edit") {
-            if (hostEl) hostEl.innerHTML = mlEditForm(btn.getAttribute("data-transfer"),
-              btn.getAttribute("data-date"), btn.getAttribute("data-remarks"));
-            return;
-          }
-          if (act === "th-form-cancel") { if (hostEl) hostEl.innerHTML = ""; return; }
-
-          if (act === "th-edit-save") {
-            rememberOpenGroups();
-            try {
-              await Dash.updateTransfer(btn.getAttribute("data-transfer"), {
-                effectiveDate: document.getElementById("mle-date").value || null,
-                remarks: document.getElementById("mle-remarks").value || null
-              });
-              MP.err = ""; MP.okMsg = "History row updated";
-            } catch (e) { MP.err = (e && e.message) || String(e); MP.okMsg = ""; }
-            await loadTranslog(); render(); renderMoveLog();
-            return;
-          }
-          if (act === "th-del") {
-            if (!window.confirm("Delete this history row? This cannot be undone.")) return;
-            rememberOpenGroups();
-            try {
-              await Dash.deleteTransfer(btn.getAttribute("data-transfer"));
-              MP.err = ""; MP.okMsg = "History row deleted";
-            } catch (e) { MP.err = (e && e.message) || String(e); MP.okMsg = ""; }
-            await loadTranslog(); render(); renderMoveLog();
-            return;
-          }
-          if (act === "th-add-save") {
-            var w = document.getElementById("mla-worker").value;
-            var d = document.getElementById("mla-date").value;
-            if (!w || !d) return;                   // worker + date are required
-            rememberOpenGroups();
-            try {
-              await Dash.addPastMove({
-                staffId: w,
-                fromProjectId: document.getElementById("mla-from").value || null,
-                toProjectId: document.getElementById("mla-to").value || null,
-                effectiveDate: d,
-                remarks: document.getElementById("mla-remarks").value || null
-              });
-              MP.err = ""; MP.okMsg = "Past move added to history (current site untouched)";
-            } catch (e) { MP.err = (e && e.message) || String(e); MP.okMsg = ""; }
-            await loadTranslog(); render(); renderMoveLog();
-            return;
-          }
+        // search + the bar
+        document.getElementById("mp-q").addEventListener("input", function (ev) {
+          M.q = (ev.target.value || "").trim().toLowerCase(); renderGroups(); renderMore();
         });
-
-        document.getElementById("housekeeping").addEventListener("click", function (ev) {
-          var b = ev.target.closest("button[data-hk-btn]");
-          if (!b) return;
-          var k = b.getAttribute("data-hk-btn");
-          MP.hkFilter = MP.hkFilter === k ? null : k;   // toggle
-          renderHousekeeping();
-          applyFilter();
-        });
-
-        // group-mode + company chips + drift chip: set state, restyle, re-render
-        document.querySelector(".mp-controls").addEventListener("click", function (ev) {
+        document.getElementById("mp-bar").addEventListener("click", function (ev) {
           var b = ev.target.closest("button");
           if (!b) return;
-          if (b.getAttribute("data-chip") === "drift") {
-            MP.driftOnly = !MP.driftOnly;
-            renderExtraFilters();
-            applyFilter();
-            return;
+          if (b.getAttribute("data-co")) {
+            M.company = b.getAttribute("data-co");
+            b.parentElement.querySelectorAll("button").forEach(function (x) { x.classList.remove("active"); });
+            b.classList.add("active"); render(); return;
           }
-          var wrap = b.parentElement;
-          if (b.getAttribute("data-mode")) {
-            MP.groupMode = b.getAttribute("data-mode");
-            MP.open = {};                     // grouping changed — fresh open states
-          } else if (b.getAttribute("data-co")) {
-            MP.companyFilter = b.getAttribute("data-co");
-          } else return;
-          wrap.querySelectorAll("button").forEach(function (x) { x.classList.remove("active"); });
-          b.classList.add("active");
-          render();
+          if (b.getAttribute("data-view")) {
+            M.view = b.getAttribute("data-view");
+            b.parentElement.querySelectorAll("button").forEach(function (x) { x.classList.remove("active"); });
+            b.classList.add("active"); renderGroups(); return;
+          }
+          if (b.id === "mp-filters-btn") {
+            var pop = document.getElementById("mp-filters");
+            pop.hidden = !pop.hidden; b.setAttribute("aria-expanded", String(!pop.hidden)); return;
+          }
+          if (b.id === "mp-filters-close") { document.getElementById("mp-filters").hidden = true; return; }
+          if (b.id === "mp-filters-clear") {
+            M.trade = "all"; M.site = "all"; M.status = "all"; renderFilterOptions(); renderTiles(); renderGroups(); return;
+          }
+          if (b.getAttribute("data-act")) onAction(b, ev);
+        });
+        document.getElementById("mp-filters").addEventListener("change", function (ev) {
+          if (ev.target.id === "f-trade") M.trade = ev.target.value;
+          else if (ev.target.id === "f-site") M.site = ev.target.value;
+          else if (ev.target.id === "f-status") M.status = ev.target.value;
+          renderTiles(); renderGroups();
+        });
+        document.addEventListener("click", function (ev) {
+          var wrap = document.querySelector(".mp-filter-wrap");
+          if (wrap && !wrap.contains(ev.target)) {
+            document.getElementById("mp-filters").hidden = true;
+            document.getElementById("mp-filters-btn").setAttribute("aria-expanded", "false");
+          }
+        });
+        // the tiles: Mismatches and Awaiting Deployment are filters
+        document.getElementById("mp-tiles").addEventListener("click", function (ev) {
+          var b = ev.target.closest("[data-tile]");
+          if (!b) return;
+          if (b.getAttribute("data-tile") === "mismatch") M.status = M.status === "mismatch" ? "all" : "mismatch";
+          else { M.site = M.site === "__await" ? "all" : "__await"; }
+          renderFilterOptions(); renderTiles(); renderGroups();
         });
 
-        // role / site filter selects
-        document.querySelector(".mp-controls").addEventListener("change", function (ev) {
-          if (ev.target.id === "mp-role")      { MP.roleFilter = ev.target.value; applyFilter(); }
-          else if (ev.target.id === "mp-site") { MP.siteFilter = ev.target.value; applyFilter(); }
+        // the groups: open/close memory, row click, the buttons
+        var groups = document.getElementById("mp-groups");
+        groups.addEventListener("toggle", function (ev) {
+          var det = ev.target;
+          if (!det.matches || !det.matches("details[data-group]") || filtering()) return;
+          var k = det.getAttribute("data-group");
+          if (det.open) M.open[k] = true; else delete M.open[k];
+          saveOpen();
+        }, true);
+        groups.addEventListener("click", function (ev) {
+          var btn = ev.target.closest("button[data-act]");
+          if (btn) { ev.preventDefault(); onAction(btn, ev); return; }
+          if (ev.target.closest("a, summary, select, input")) return;
+          var tr = ev.target.closest("tr[data-staff]");
+          if (tr) openWorker(tr.getAttribute("data-staff"));
         });
-
-        document.getElementById("groups").addEventListener("click", async function (ev) {
-          var btn = ev.target.closest("button[data-action]");
-          if (!btn) {
-            // no button hit -> maybe a worker-row click: toggle the record
-            // card (office only; controls inside the row stay theirs)
-            if (!MP.canMove) return;
-            if (ev.target.closest("button, select, input, a")) return;
-            var trEl = ev.target.closest("tr[data-staffrow]");
-            if (!trEl) return;
-            var sid = trEl.getAttribute("data-staffrow");
-            rememberOpenGroups();
-            if (MP.cardOpen === sid) { MP.cardOpen = null; render(); return; }
-            MP.cardOpen = sid;
-            if (!MP.cardCache[sid]) {
-              try { MP.cardCache[sid] = await Dash.getStaffDetail(sid); }
-              catch (e) { MP.cardCache[sid] = {}; }   // gated read said no — open facts only
-            }
-            render();
-            await loadDevices(sid);                   // 0082: fills in the phone panel
-            return;
-          }
+        document.getElementById("mp-upcoming").addEventListener("click", function (ev) {
+          var btn = ev.target.closest("button[data-act]");
+          if (btn) { ev.preventDefault(); if (btn.getAttribute("data-act") === "confirm-clear") { M.confirm = null; renderUpcoming(); } else onTableAction(btn); }
+        });
+        document.getElementById("mp-more").addEventListener("click", async function (ev) {
+          var tab = ev.target.closest("button[data-tab]");
+          if (tab) { M.tab = tab.getAttribute("data-tab"); M.mode = null; M.confirm = null; renderMore(); return; }
+          var btn = ev.target.closest("button[data-act]");
+          if (!btn) return;
           ev.preventDefault();
-          var act = btn.getAttribute("data-action");
-          var staffId = btn.getAttribute("data-staff");
-          var name = btn.getAttribute("data-name");
-
-          // the row's Manage button — same card the row click opens, but
-          // reachable from the keyboard
-          if (act === "card") {
-            rememberOpenGroups();
-            if (MP.cardOpen === staffId) { MP.cardOpen = null; render(); return; }
-            MP.cardOpen = staffId;
-            if (!MP.cardCache[staffId]) {
-              try { MP.cardCache[staffId] = await Dash.getStaffDetail(staffId); }
-              catch (e) { MP.cardCache[staffId] = {}; }
-            }
-            render();
-            await loadDevices(staffId);              // same as the row click — the phone panel stayed on "Loading…"
-            return;
-          }
-
-          if (act === "add-form")   { MP.showAdd = true; MP.editing = null; MP.okMsg = ""; rememberOpenGroups(); render(); return; }
-          if (act === "add-cancel") { MP.showAdd = false; rememberOpenGroups(); render(); return; }
-          if (act === "add-save")   { rememberOpenGroups(); await actAddWorker(); return; }
-
-          if (act === "edit") {
-            rememberOpenGroups();
-            try {
-              var d = await Dash.getStaffDetail(staffId);
-              MP.editing = { staffId: staffId, d: d };
-              MP.showAdd = false; MP.okMsg = ""; MP.err = "";
-              render();
-              window.scrollTo({ top: 0, behavior: "smooth" });   // the form opens at the top
-            } catch (e) { MP.err = (e && e.message) || String(e); render(); }
-            return;
-          }
-          // ---- 0082 punch-app phone: issue / cancel a code, release a phone ----
-          // The database re-checks devices.manage on every one of these; hiding
-          // the buttons only stops the interface lying to a viewer.
-          if (act === "dev-issue") {
-            rememberOpenGroups();
-            MP.err = ""; MP.okMsg = "";
-            try {
-              var iss = await Dash.issueEnrolmentCode(staffId);
-              if (iss && iss.ok) {
-                MP.shownCode[staffId] = {
-                  display: iss.enrolment_code_display,
-                  expires: iss.expires_at_local
-                };
-              } else {
-                MP.err = (iss && iss.message) ||
-                         ("could not issue a code" + (iss && iss.code ? " (" + iss.code + ")" : ""));
-              }
-            } catch (e) { MP.err = (e && e.message) || String(e); }
-            await loadDevices(staffId);
-            render();
-            return;
-          }
-          if (act === "dev-revoke") {
-            rememberOpenGroups();
-            MP.err = ""; MP.okMsg = "";
-            try {
-              await Dash.revokeEnrolmentCode(staffId);
-              delete MP.shownCode[staffId];
-              MP.okMsg = "Cancelled the enrolment code for " + (name || "this worker") + ".";
-            } catch (e) { MP.err = (e && e.message) || String(e); }
-            await loadDevices(staffId);
-            render();
-            return;
-          }
-          if (act === "dev-release") {
-            if (!confirm("Release " + (name || "this worker") +
-                         "'s phone? They will not be able to punch until a new code is issued and used.")) return;
-            rememberOpenGroups();
-            MP.err = ""; MP.okMsg = "";
-            try {
-              await Dash.releaseDevice(staffId);
-              delete MP.shownCode[staffId];
-              MP.okMsg = "Released " + (name || "this worker") + "'s phone. Issue a new code to enrol a replacement.";
-            } catch (e) { MP.err = (e && e.message) || String(e); }
-            await loadDevices(staffId);
-            render();
-            return;
-          }
-
-          if (act === "edit-cancel") { MP.editing = null; rememberOpenGroups(); render(); return; }
-          if (act === "edit-save")   { rememberOpenGroups(); await actEditSave(staffId); return; }
-
-          // 0048 movement planning: plan (top form) / execute / cancel.
-          // The database re-checks the caller on every call.
-          if (act === "plan") {
-            rememberOpenGroups();
-            MP.planning = { staffId: staffId, name: name || "" };
-            MP.showAdd = false; MP.editing = null; MP.okMsg = ""; MP.err = "";
-            render();
-            window.scrollTo({ top: 0, behavior: "smooth" });   // the form opens at the top
-            return;
-          }
-          if (act === "plan-form-cancel") { MP.planning = null; rememberOpenGroups(); render(); return; }
-          if (act === "plan-save") {
-            var pdate = document.getElementById("pw-date").value;
-            var psite = document.getElementById("pw-site").value;
-            if (!pdate || !psite) return;           // destination must be chosen
-            rememberOpenGroups();
-            try {
-              await Dash.addMovementPlan({
-                staffId: MP.planning.staffId,
-                plannedDate: pdate,
-                toProjectId: psite === "unassign" ? null : psite,
-                remarks: document.getElementById("pw-remarks").value || null
-              });
-              var ptgt = MP.projects.find(function (p) { return p.project_id === psite; });
-              MP.err = "";
-              MP.okMsg = "Move planned: " + MP.planning.name + " → " +
-                (ptgt ? ptgt.project_code : "unassigned") + " on " + pdate +
-                " — execute it in Upcoming moves when it happens";
-              MP.planning = null;
-            } catch (e) { MP.err = (e && e.message) || String(e); MP.okMsg = ""; }
-            await refresh();
-            return;
-          }
-          if (act === "plan-execute") {
-            if (!window.confirm("Execute now — " + (btn.getAttribute("data-label") || "this move") +
-                                "? The worker moves immediately (this applies the real move).")) return;
-            rememberOpenGroups();
-            try {
-              await Dash.executeMovementPlan(btn.getAttribute("data-plan"));
-              MP.err = ""; MP.okMsg = "Move executed — roster updated";
-            } catch (e) { MP.err = (e && e.message) || String(e); MP.okMsg = ""; }
-            await refresh();
-            return;
-          }
-          if (act === "plan-cancel") {
-            if (!window.confirm("Cancel the planned move " +
-                                (btn.getAttribute("data-label") || "") + "?")) return;
-            rememberOpenGroups();
-            try {
-              await Dash.cancelMovementPlan(btn.getAttribute("data-plan"));
-              MP.err = ""; MP.okMsg = "Plan cancelled";
-            } catch (e) { MP.err = (e && e.message) || String(e); MP.okMsg = ""; }
-            await refresh();
-            return;
-          }
-
-          // worker-card history maintenance (0051) — fixes the RECORD only;
-          // the roster never changes from here (house rule)
-          if (act === "wh-edit") {
-            var whHost = document.getElementById("wcf-" + btn.getAttribute("data-staffcard"));
-            if (whHost) whHost.innerHTML = whEditForm(btn.getAttribute("data-staffcard"),
-              btn.getAttribute("data-transfer"), btn.getAttribute("data-date"),
-              btn.getAttribute("data-remarks"));
-            return;
-          }
-          if (act === "wh-form-cancel") {
-            var whHost2 = document.getElementById("wcf-" + btn.getAttribute("data-staffcard"));
-            if (whHost2) whHost2.innerHTML = "";
-            return;
-          }
-          if (act === "wh-edit-save") {
-            var whSid = btn.getAttribute("data-staffcard");
-            rememberOpenGroups();
-            try {
-              await Dash.updateTransfer(btn.getAttribute("data-transfer"), {
-                effectiveDate: document.getElementById("wh-date-" + whSid).value || null,
-                remarks: document.getElementById("wh-remarks-" + whSid).value || null
-              });
-              MP.err = ""; MP.okMsg = "History row updated";
-            } catch (e) { MP.err = (e && e.message) || String(e); MP.okMsg = ""; }
-            await refresh();
-            return;
-          }
-          if (act === "wh-del") {
-            if (!window.confirm("Delete this history row? This cannot be undone.")) return;
-            rememberOpenGroups();
-            try {
-              await Dash.deleteTransfer(btn.getAttribute("data-transfer"));
-              MP.err = ""; MP.okMsg = "History row deleted";
-            } catch (e) { MP.err = (e && e.message) || String(e); MP.okMsg = ""; }
-            await refresh();
-            return;
-          }
-
-          if (act === "move") {
-            var sel = document.querySelector('select[data-staff="' + staffId + '"]');
-            if (!sel || !sel.value) return;
-            var remEl = document.querySelector('input[data-staff-remarks="' + staffId + '"]');
-            var dateEl = document.querySelector('input[data-staff-date="' + staffId + '"]');
-            rememberOpenGroups();
-            try {
-              var r = await Dash.moveStaff(staffId, sel.value === "unassign" ? null : sel.value,
-                remEl && remEl.value ? remEl.value : null,
-                dateEl && dateEl.value ? dateEl.value : null);
-              var tgt = MP.projects.find(function (p) { return p.project_id === sel.value; });
-              MP.err = "";
-              MP.okMsg = (r.full_name || "Worker") + " moved to " +
-                (tgt ? tgt.project_code + " — " + tgt.project_name : "unassigned");
-            } catch (e) { MP.err = (e && e.message) || String(e); MP.okMsg = ""; }
-            await refresh();
-            return;
-          }
-
-          if (act === "mark-left") {
-            if (!window.confirm("Mark " + name + " as left?\nTheir punch-app phone will be locked out. " +
-                                "Undo from the Recently left group if this is a mistake.")) return;
-            rememberOpenGroups();
-            try {
-              await Dash.setStaffActive(staffId, false);
-              MP.err = ""; MP.okMsg = name + " marked as left";
-            } catch (e) { MP.err = (e && e.message) || String(e); MP.okMsg = ""; }
-            await refresh();
-            return;
-          }
-
-          if (act === "reactivate") {
-            if (!window.confirm("Reactivate " + name + "?")) return;
-            rememberOpenGroups();
-            try {
-              await Dash.setStaffActive(staffId, true);
-              MP.err = ""; MP.okMsg = name + " reactivated (back on their previous site — move if needed)";
-            } catch (e) { MP.err = (e && e.message) || String(e); MP.okMsg = ""; }
-            await refresh();
-            return;
-          }
+          if (await onTableAction(btn)) return;
+          await onAction(btn, ev);
+          renderMore();
         });
+        document.getElementById("mp-drawer").addEventListener("click", function (ev) {
+          var btn = ev.target.closest("button[data-act]");
+          if (!btn) return;
+          ev.preventDefault();
+          if (btn.getAttribute("data-act").indexOf("plan-") === 0) onTableAction(btn); else onAction(btn, ev);
+        });
+        document.addEventListener("keydown", function (ev) { if (ev.key === "Escape" && M.sel) closeWorker(); });
       } catch (e) {
         document.getElementById("error").innerHTML =
           '<div class="banner banner-red">Could not load: ' + escHtml((e && e.message) || e) + "</div>";
+        document.getElementById("mp-groups").innerHTML = "";
       }
     };
   </script>
