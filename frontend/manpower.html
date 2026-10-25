@@ -157,7 +157,9 @@
            - no planning on this page: the owner retired Plan A Move and
              Upcoming Moves on 25 Oct 2026 (nobody used them); the plan
              functions and view stay in the database untouched
-           - office tabs at the bottom: Movement History, Inactive Workers,
+           - office tabs at the bottom: Insight (machines without an operator,
+             sites without a supervisor of record; the site lines carry no such
+             warnings since 25 Oct), Movement History, Inactive Workers,
              Data Quality
            - Unassigned is split: Office Staff (admin, management, coordinator,
              store keeper) and Awaiting Deployment (everyone else off site)
@@ -254,7 +256,7 @@
     var params = new URLSearchParams(location.search);
 
     var M = {
-      rows: [], projects: [], dirByPid: {}, supervisorsByPid: {}, machinesBySite: {},
+      rows: [], projects: [], dirByPid: {}, dirByCode: {}, supervisorsByPid: {}, machinesBySite: {},
       translog: [], histByStaff: {}, translogErr: "",
       canEdit: false, canDevView: false, canDev: false,
       showTest: params.get("test") === "1",
@@ -264,7 +266,7 @@
       mode: null,                // panel sub-state: "edit" | "move" | "fix:<id>" | "past" | null
       confirm: null,             // { kind, id, label } for the inline confirms
       cache: {}, dev: {}, shownCode: {},
-      tab: "history", ok: "", err: "", panelErr: "", panelOk: "",
+      tab: "insight", ok: "", err: "", panelErr: "", panelOk: "",
       msgAt: "top",              // where the panel shows its answer: "top" | "phone" | "history" | "foot"
       busy: false
     };
@@ -398,19 +400,11 @@
         return '<span class="chip">' + counts[k] + " " + escHtml(UI.label(k)) + "</span>";
       }).join("");
     }
+    // the site line carries no machine warnings (the owner's ruling, 25 Oct:
+    // too much at once); machine and supervisor gaps live in the Insight tab
     function warningsFor(key, list) {
       var out = [];
       if (key.indexOf("__") === 0) return out;
-      var mach = M.machinesBySite[key] || [];
-      var missing = {};
-      mach.forEach(function (m) {
-        var trade = MACHINE_TRADE[m.type];
-        if (trade && !list.some(function (r) { return r.role === trade; })) missing[trade] = m.code;
-      });
-      Object.keys(missing).forEach(function (t) {
-        out.push('<span class="chip chip-warn" title="' + esc(missing[t] + " is on this site and nobody here is a " + UI.label(t).toLowerCase() +
-          ". Move one here, or move the machine, if it is working.") + '">Needs ' + escHtml(UI.label(t)) + "</span>");
-      });
       var mism = list.filter(function (r) { return statusOf(r).k === "mismatch"; }).length;
       if (mism) out.push('<span class="chip chip-warn" title="Workers whose last report puts them somewhere else. Open the block and check their Status.">' +
         mism + (mism === 1 ? " Mismatch" : " Mismatches") + "</span>");
@@ -534,7 +528,9 @@
       var act = active();
       var inactive = M.rows.filter(function (r) { return !r.is_active; });
       var gaps = act.filter(function (r) { return !r.has_date_joined || !r.employee_code || !r.has_contact; }).length;
+      var insights = machineGaps(act).length + supervisorGaps(act).length;
       var tabs = [
+        ["insight", "Insight" + (insights ? " · " + insights : "")],
         ["history", "Movement History"],
         ["inactive", "Inactive Workers" + (inactive.length ? " · " + inactive.length : "")],
         ["quality", "Data Quality" + (gaps ? " · " + gaps : "")]
@@ -543,9 +539,56 @@
         return '<button type="button" class="btn' + (M.tab === t[0] ? " btn-primary" : "") + '" data-tab="' + t[0] + '">' + escHtml(t[1]) + "</button>";
       }).join("");
       var body = document.getElementById("mp-tab-body");
-      if (M.tab === "history") body.innerHTML = historyTab();
+      if (M.tab === "insight") body.innerHTML = insightTab(act);
+      else if (M.tab === "history") body.innerHTML = historyTab();
       else if (M.tab === "inactive") body.innerHTML = inactiveTab(inactive);
       else body.innerHTML = qualityTab(act);
+    }
+
+    /* ----------------------------- the Insight tab ------------------------- */
+    // derived observations, kept off the roster lines; whole roster, both
+    // companies, whatever the company switch says
+    function machineGaps(act) {
+      var bySite = {};
+      act.forEach(function (r) { if (r.project_code) (bySite[r.project_code] = bySite[r.project_code] || []).push(r); });
+      var gaps = [];
+      Object.keys(M.machinesBySite).sort().forEach(function (code) {
+        if (isTest(code) && !M.showTest) return;
+        var crew = bySite[code] || [];
+        M.machinesBySite[code].forEach(function (m) {
+          var trade = MACHINE_TRADE[m.type];
+          if (trade && !crew.some(function (r) { return r.role === trade; })) gaps.push({ site: code, machine: m.code, trade: trade });
+        });
+      });
+      return gaps;
+    }
+    function supervisorGaps(act) {
+      var counts = {}, out = [];
+      act.forEach(function (r) { if (r.current_project_id) counts[r.current_project_id] = (counts[r.current_project_id] || 0) + 1; });
+      Object.keys(counts).forEach(function (pid) {
+        if (M.supervisorsByPid[pid]) return;
+        var p = M.dirByPid[pid];
+        out.push({ code: p ? p.project_code : "?", n: counts[pid] });
+      });
+      return out.sort(function (a, b) { return String(a.code).localeCompare(String(b.code)); });
+    }
+    function siteWords(code) {
+      var p = M.dirByCode[code];
+      return escHtml(code + (p && p.project_name ? " — " + p.project_name : "")) +
+        (p && p.status === "completed" ? ' <span class="muted">(completed)</span>' : "");
+    }
+    function insightTab(act) {
+      var gaps = machineGaps(act), sv = supervisorGaps(act);
+      function col(title, why, items) {
+        return '<div class="mp-dq-col"><h3>' + escHtml(title) + " · " + items.length + '</h3><p class="muted" style="margin:0 0 6px">' + escHtml(why) + "</p><ul>" +
+          (items.join("") || '<li class="muted">None.</li>') + "</ul></div>";
+      }
+      return '<div class="mp-tab-head"><span>Things worth a look. None of them is a rule.</span></div><div class="mp-dq">' +
+        col("Machines Without An Operator", "A machine on a site with nobody of its trade on that site. A parked machine needs none.",
+          gaps.map(function (g) { return "<li><span>" + siteWords(g.site) + ' <span class="muted">' + escHtml(g.machine) + "</span></span><span>No " + escHtml(UI.label(g.trade)) + "</span></li>"; })) +
+        col("Sites Without A Supervisor Of Record", "Sites with workers and no supervisor on the project record.",
+          sv.map(function (s) { return "<li><span>" + siteWords(s.code) + "</span><span>" + s.n + (s.n === 1 ? " Worker" : " Workers") + "</span></li>"; })) +
+        "</div>";
     }
 
     function historyLine(t, inPanel) {
@@ -1063,7 +1106,7 @@
           Dash.getMachines(), loadTranslog()
         ]);
         M.rows = res[0]; M.projects = res[1];
-        M.projects.forEach(function (p) { M.dirByPid[p.project_id] = p; });
+        M.projects.forEach(function (p) { M.dirByPid[p.project_id] = p; M.dirByCode[p.project_code] = p; });
         res[2].forEach(function (s) { M.supervisorsByPid[s.project_id] = s.supervisors; });
         res[3].forEach(function (m) {
           if (!m.current_site) return;
