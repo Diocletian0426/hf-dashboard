@@ -80,10 +80,12 @@
     .dr-top { display: flex; align-items: flex-start; gap: 8px; }
     .dr-top h2 { margin: 0; font-size: var(--fs-xl); line-height: 1.2; flex: 1; }
     .dr-top .dr-close { flex: none; }
-    .dr-who { color: var(--ink-2); font-size: var(--fs-sm); margin: 2px 0 10px; }
-    .dr-facts { display: grid; grid-template-columns: 110px 1fr; gap: 4px 10px; font-size: var(--fs-sm); margin: 0 0 12px; }
-    .dr-facts dt { color: var(--ink-3); } .dr-facts dd { margin: 0; color: var(--ink); }
-    .dr-links { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
+    .dr-who { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--ink-2); font-size: var(--fs-sm); margin: 2px 0 12px; }
+    .dr-who .spacer { flex: 1; }
+    /* label : value rows, used for the facts and for the phone state */
+    .dr-facts { display: grid; grid-template-columns: 96px 1fr; gap: 5px 10px; font-size: var(--fs-sm); margin: 0 0 10px; }
+    .dr-facts dt { color: var(--ink-3); } .dr-facts dd { margin: 0; color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
+    .dr-links { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 4px; }
     .dr-links .btn { text-decoration: none; }
     .dr-sec { margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px solid var(--rule); }
     .dr-sec > h3 { margin: 0 0 8px; font-size: 11px; font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase; color: var(--ink-2);
@@ -113,13 +115,15 @@
     .dr-confirm p { margin: 0 0 8px; font-size: var(--fs-sm); color: var(--ink); }
     .dr-confirm.danger { border-color: #fecaca; }
     .dr-code { font-family: ui-monospace, Consolas, monospace; font-size: 22px; letter-spacing: 3px; }
-    .dr-foot { margin-top: var(--sp-5); padding-top: var(--sp-3); border-top: 1px solid var(--rule); }
+    /* the bottom row: "Move…" at the left, Mark As Left at the right; a form or a question takes the full width */
+    .dr-foot { margin-top: var(--sp-5); padding-top: var(--sp-3); border-top: 1px solid var(--rule);
+               display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; }
+    .dr-foot > .wide { flex-basis: 100%; }
     .mp-inline-form { margin: 8px 0 12px; padding: 10px 12px; background: var(--surface-solid); border: 1px solid var(--line-strong); border-radius: var(--r-md); }
 
     @media (max-width: 760px) {
       .mp-drawer { width: 100vw; border-radius: 0; padding: var(--sp-3) var(--sp-4) var(--sp-6); }
       .dr-form { grid-template-columns: 1fr; }
-      .dr-facts { grid-template-columns: 1fr; gap: 2px; }
       .mp-bar .tool-search { flex-basis: 100%; }
     }
   </style>
@@ -145,15 +149,21 @@
              and scope sit inside the expanded block
            - rows: worker, trade, status (Match / Mismatch / No Recent Report);
              the real last report lives in the worker panel
-           - the worker panel (right) opens with Move first; Details, History,
-             Phone and Planning below it; Mark As Left at the bottom
+           - the worker panel (right; Round 2 shape, 25 Oct): the facts as
+             label : value rows, then Punch App Phone as rows, then a terse
+             Movement History (date and route only; the full wording stays in
+             the tab), then a bottom row with "Move…" (unfolds the move form)
+             at the left and Mark As Left at the right
+           - no planning on this page: the owner retired Plan A Move and
+             Upcoming Moves on 25 Oct 2026 (nobody used them); the plan
+             functions and view stay in the database untouched
            - office tabs at the bottom: Movement History, Inactive Workers,
              Data Quality
            - Unassigned is split: Office Staff (admin, management, coordinator,
              store keeper) and Awaiting Deployment (everyone else off site)
            - the test site is hidden unless the URL has ?test=1
          Reads: v_manpower_by_site, v_project_directory, v_project_supervisors,
-         v_machine_fleet, v_movement_plans (anyone with manpower.view);
+         v_machine_fleet (anyone with manpower.view);
          get_transfer_log, get_staff_detail (manpower.edit); get_worker_devices
          (devices.view). Writes re-check the caller in the database every time;
          the buttons only stop the page lying to a viewer. -->
@@ -201,7 +211,6 @@
       <span id="mp-add"></span>
     </div>
 
-    <div id="mp-upcoming"></div>
     <div id="mp-groups"><div class="empty">Loading the roster…</div></div>
 
     <section id="mp-more" hidden>
@@ -246,16 +255,18 @@
 
     var M = {
       rows: [], projects: [], dirByPid: {}, supervisorsByPid: {}, machinesBySite: {},
-      plans: [], translog: [], histByStaff: {}, translogErr: "",
+      translog: [], histByStaff: {}, translogErr: "",
       canEdit: false, canDevView: false, canDev: false,
       showTest: params.get("test") === "1",
       q: "", company: "all", view: "site", trade: "all", site: "all", status: "all",
       open: loadOpen(),
       sel: null,                 // staff_id in the panel, or "__new"
-      mode: null,                // panel sub-state: "edit" | "plan" | "fix:<id>" | null
+      mode: null,                // panel sub-state: "edit" | "move" | "fix:<id>" | "past" | null
       confirm: null,             // { kind, id, label } for the inline confirms
       cache: {}, dev: {}, shownCode: {},
-      tab: "history", ok: "", err: "", panelErr: "", panelOk: "", busy: false
+      tab: "history", ok: "", err: "", panelErr: "", panelOk: "",
+      msgAt: "top",              // where the panel shows its answer: "top" | "phone" | "history" | "foot"
+      busy: false
     };
 
     /* ----------------------------- small helpers --------------------------- */
@@ -346,10 +357,6 @@
       return "attendance.html?find=" + encodeURIComponent(r.employee_code || r.full_name || "");
     }
     function projectHref(pid) { return "project.html?project=" + encodeURIComponent(pid); }
-    function plansFor(id) { return M.plans.filter(function (p) { return p.staff_id === id; }); }
-    function setPlans(all) {
-      M.plans = (all || []).filter(function (p) { return p.subject_type === "staff" && p.status === "planned"; });
-    }
 
     /* -------------------------------- tiles -------------------------------- */
 
@@ -518,37 +525,6 @@
       el.className = nf ? "on" : "";
     }
 
-    function renderUpcoming() {
-      var el = document.getElementById("mp-upcoming");
-      if (!M.plans.length) { el.innerHTML = ""; return; }
-      var overdue = 0;
-      var rows = M.plans.map(function (p) {
-        var days = UI.daysSince(p.planned_date), late = days !== null && days > 0;
-        if (late) overdue++;
-        var dest = p.to_project_code ? p.to_project_code + (p.to_project_name ? " — " + p.to_project_name : "") : "Not On A Site";
-        var c = M.confirm && M.confirm.kind === "plan" && M.confirm.id === p.plan_id ? M.confirm : null;
-        return '<tr data-plan="' + p.plan_id + '">' +
-          UI.td("Who", "<b>" + escHtml(p.full_name) + "</b>") +
-          UI.td("To", escHtml(dest) + (p.remarks ? ' <span class="muted">' + escHtml(p.remarks) + "</span>" : "")) +
-          UI.td("Planned", escHtml(UI.dstr(p.planned_date)) + (late ? ' <span class="chip chip-warn">' + days + (days === 1 ? " day" : " days") + " ago</span>" : "")) +
-          UI.td("By", escHtml(p.created_by_name || "")) +
-          (M.canEdit ? UI.td("", c
-            ? '<span class="move-ctl"><span class="muted">' + (c.act === "execute" ? "Move now?" : "Cancel this plan?") + "</span>" +
-              '<button type="button" class="btn btn-primary" data-act="plan-go" data-plan="' + p.plan_id + '" data-what="' + c.act + '">Yes</button>' +
-              '<button type="button" class="btn" data-act="confirm-clear">No</button></span>'
-            : '<span class="move-ctl"><button type="button" class="btn" data-act="plan-ask" data-plan="' + p.plan_id + '" data-what="execute">Execute Now</button>' +
-              '<button type="button" class="btn" data-act="plan-ask" data-plan="' + p.plan_id + '" data-what="cancel">Cancel</button></span>') : "") +
-          "</tr>";
-      }).join("");
-      el.innerHTML = '<details class="zone mp-site" data-group="__plans" open>' +
-        '<summary><span class="mp-sum"><span class="mp-site-name">Upcoming Moves</span>' +
-        '<span class="chip">' + M.plans.length + (M.plans.length === 1 ? " Planned" : " Planned") + "</span>" +
-        (overdue ? '<span class="chip chip-warn">' + overdue + " Overdue</span>" : "") +
-        '<span class="muted">Plans never move anyone. Execute does.</span></span></summary>' +
-        '<div class="mp-body"><div class="table-wrap table-stack"><table><thead><tr><th>Who</th><th>To</th><th>Planned</th><th>By</th>' +
-        (M.canEdit ? "<th></th>" : "") + "</tr></thead><tbody>" + rows + "</tbody></table></div></div></details>";
-    }
-
     /* ------------------------------ the tabs ------------------------------- */
 
     function renderMore() {
@@ -589,8 +565,10 @@
         (t.remarks ? ' <span class="muted">' + escHtml(t.remarks) + "</span>" : "") +
         ' <span class="muted">by ' + escHtml(t.moved_by_name || t.source) + "</span>";
       var form = fixing ? fixForm(t) : "";
+      // the panel keeps it terse (the owner's ruling, 25 Oct): the date and the
+      // route only; the badge, remarks, who and when-entered stay in the tab
       return inPanel
-        ? '<div class="dr-line" title="entered ' + esc(Dash.klDateTime(t.moved_at)) + '">' + line + " " + acts + "</div>" + form
+        ? '<div class="dr-line"><b>' + escHtml(UI.dstr(t.effective_date)) + "</b> " + escHtml(t.from_project) + " → " + escHtml(t.to_project) + " " + acts + "</div>" + form
         : "<tr>" + UI.td("When", '<span title="entered ' + esc(Dash.klDateTime(t.moved_at)) + '">' + escHtml(UI.dstr(t.effective_date)) + "</span>") +
           UI.td("Who", "<b>" + escHtml(t.subject_name) + '</b><span class="mp-sub">' + escHtml(UI.label(t.subject_type)) + "</span>") +
           UI.td("Move", escHtml(t.from_project) + " → " + escHtml(t.to_project) + badge + (t.remarks ? ' <span class="muted">' + escHtml(t.remarks) + "</span>" : "")) +
@@ -665,7 +643,7 @@
     /* ------------------------------ the panel ------------------------------ */
 
     function openWorker(id) {
-      M.sel = id; M.mode = null; M.confirm = null; M.panelErr = ""; M.panelOk = "";
+      M.sel = id; M.mode = null; M.confirm = null; M.panelErr = ""; M.panelOk = ""; M.msgAt = "top";
       renderGroups(); renderDrawer();
       if (id && id !== "__new" && M.canEdit) {
         if (!M.cache[id]) {
@@ -706,17 +684,32 @@
         '<p class="dr-err">' + escHtml(M.panelErr) + "</p>";
     }
 
-    function detailsSection(r, d) {
-      var chips = [];
-      if (d.date_joined) chips.push("Joined " + UI.dstr(d.date_joined));
-      if (d.contact_number) chips.push("Contact " + d.contact_number);
-      if (d.country_origin) chips.push("Origin " + d.country_origin);
-      if (d.whatsapp_name) chips.push("WhatsApp " + d.whatsapp_name);
-      chips.push(d.ot_eligible === false ? "No Overtime" : "Paid Overtime");
-      var h = '<div class="dr-sec"><h3>Details<span class="spacer"></span>' +
-        (M.mode === "edit" ? "" : '<button type="button" class="btn" data-act="mode-edit">Edit Details</button>') + "</h3>";
-      if (M.mode !== "edit") {
-        h += '<div class="dr-line">' + (chips.length ? escHtml(chips.join(" · ")) : '<span class="muted">Loading…</span>') + "</div>";
+    function msgBlock() {
+      return '<p class="dr-ok">' + escHtml(M.panelOk) + '</p><p class="dr-err">' + escHtml(M.panelErr) + "</p>";
+    }
+    function factRow(label, value) { return "<dt>" + escHtml(label) + "</dt><dd>" + value + "</dd>"; }
+
+    // the facts at the top of the panel as label : value rows (the owner's
+    // ruling, 25 Oct), or the edit form in their place
+    function factsBlock(r) {
+      var loaded = M.cache[r.staff_id] !== undefined;
+      var d = M.cache[r.staff_id] || {};
+      var h = "";
+      if (!(M.canEdit && M.mode === "edit")) {
+        var rows = "";
+        if (M.canEdit) {
+          if (d.date_joined) rows += factRow("Joined", escHtml(UI.dstr(d.date_joined)));
+          if (d.contact_number) rows += factRow("Contact", escHtml(d.contact_number));
+          if (d.country_origin) rows += factRow("Origin", escHtml(d.country_origin));
+          rows += factRow("Overtime", (loaded ? d.ot_eligible : r.ot_eligible) === false ? "No" : "Yes");
+          if (d.whatsapp_name) rows += factRow("WhatsApp", escHtml(d.whatsapp_name));
+        }
+        rows += factRow("Last Report", escHtml(reportWords(r)));
+        h += '<dl class="dr-facts">' + rows + "</dl>" +
+          (M.canEdit && !loaded ? '<div class="dr-line muted">Loading…</div>' : "") +
+          '<div class="dr-links">' +
+          (M.canEdit ? '<button type="button" class="btn" data-act="mode-edit">Edit Details</button>' : "") +
+          '<a class="btn" href="' + esc(attendanceHref(r)) + '">Attendance</a></div>';
       } else {
         var dup = M.confirm && M.confirm.kind === "dup-edit";
         h += '<div class="dr-form">' +
@@ -734,7 +727,7 @@
           '<button type="button" class="btn" data-act="mode-clear">Cancel</button><span class="muted">Blank keeps the old value.</span></div></div>' +
           (dup ? confirmBox("edit-dup", "", "Another active worker already has this exact name. Save anyway?", "Save Anyway") : "");
       }
-      return h + "</div>";
+      return h + (M.msgAt === "top" ? msgBlock() : "");
     }
 
     function historySection(r) {
@@ -746,92 +739,67 @@
         h += hist.slice(0, HISTORY_IN_PANEL).map(function (t) { return historyLine(t, true); }).join("");
         if (hist.length > HISTORY_IN_PANEL) h += '<div class="dr-line muted">+ ' + (hist.length - HISTORY_IN_PANEL) + " older, in Movement History below the roster.</div>";
       }
-      return h + "</div>";
+      return h + (M.msgAt === "history" ? msgBlock() : "") + "</div>";
     }
 
+    // the phone state as rows (Phone / Code / Valid Until / Last Used), buttons under them
     function phoneSection(r) {
       if (!M.canDevView) return "";
-      var d = M.dev[r.staff_id], body;
+      var d = M.dev[r.staff_id], rows = "", acts = "";
       var c = M.confirm && M.confirm.kind === "release" && M.confirm.id === r.staff_id;
-      if (d === undefined) body = '<div class="dr-line muted">Loading…</div>';
-      else if (d === null) body = '<div class="dr-line muted">Could not read the enrolment state.</div>';
+      if (d === undefined) rows = factRow("Phone", '<span class="muted">Loading…</span>');
+      else if (d === null) rows = factRow("Phone", '<span class="muted">Could not read the enrolment state.</span>');
       else if (d.is_enrolled) {
-        body = '<div class="dr-line">Phone <b>' + escHtml(d.device_label || "Registered") + "</b>" +
-          (d.last_seen_at ? '<span class="muted">last used ' + escHtml(Dash.klDateTime(d.last_seen_at)) + "</span>" : "") + "</div>" +
-          (M.canDev ? (c ? confirmBox("release", r.staff_id, "Release " + r.full_name + "’s phone? They cannot punch until a new code is issued and used.", "Release Phone", true)
-                        : '<div class="dr-acts"><button type="button" class="btn btn-danger" data-act="release-ask">Release Phone</button>' +
-                          '<span class="muted">Releasing lets them enrol a replacement phone.</span></div>') : "");
+        rows = factRow("Phone", escHtml(d.device_label || "Registered")) +
+          (d.last_seen_at ? factRow("Last Used", escHtml(Dash.klDateTime(d.last_seen_at))) : "");
+        if (M.canDev) acts = c
+          ? confirmBox("release", r.staff_id, "Release " + r.full_name + "’s phone? They cannot punch until a new code is issued and used.", "Release Phone", true)
+          : '<div class="dr-acts"><button type="button" class="btn btn-danger" data-act="release-ask">Release Phone</button></div>';
       } else if (M.shownCode[r.staff_id]) {
         var sc = M.shownCode[r.staff_id];
-        body = '<div class="dr-line">Give this code to <b>' + escHtml(r.full_name) + "</b></div>" +
-          '<div class="dr-line"><span class="dr-code">' + escHtml(sc.display) + "</span></div>" +
-          '<div class="dr-line muted">Valid until ' + escHtml(sc.expires) + ". One use. Shown once; reissue if lost.</div>" +
-          (M.canDev ? '<div class="dr-acts"><button type="button" class="btn" data-act="dev-issue">Reissue</button>' +
-                      '<button type="button" class="btn btn-danger" data-act="dev-revoke">Cancel Code</button></div>' : "");
+        rows = factRow("Phone", "Not Enrolled") +
+          factRow("Code", '<span class="dr-code">' + escHtml(sc.display) + "</span>") +
+          factRow("Valid Until", escHtml(sc.expires) + '<span class="muted">, one use, shown once</span>');
+        if (M.canDev) acts = '<div class="dr-acts"><button type="button" class="btn" data-act="dev-issue">Reissue Code</button>' +
+          '<button type="button" class="btn btn-danger" data-act="dev-revoke">Cancel Code</button></div>';
       } else {
-        body = '<div class="dr-line">Not Enrolled' + (d.has_live_code
-          ? ' <span class="badge badge-gray">Code Issued</span><span class="muted">expires ' + escHtml(Dash.klDateTime(d.code_expires_at)) + "</span>" : "") + "</div>" +
-          (M.canDev ? '<div class="dr-acts"><button type="button" class="btn" data-act="dev-issue">' + (d.has_live_code ? "Reissue Code" : "Issue Enrolment Code") + "</button>" +
-            (d.has_live_code ? '<button type="button" class="btn btn-danger" data-act="dev-revoke">Cancel Code</button>' : "") + "</div>" : "");
+        rows = factRow("Phone", "Not Enrolled") +
+          (d.has_live_code ? factRow("Code", "Issued, expires " + escHtml(Dash.klDateTime(d.code_expires_at))) : "");
+        if (M.canDev) acts = '<div class="dr-acts"><button type="button" class="btn" data-act="dev-issue">' + (d.has_live_code ? "Reissue Code" : "Issue Enrolment Code") + "</button>" +
+          (d.has_live_code ? '<button type="button" class="btn btn-danger" data-act="dev-revoke">Cancel Code</button>' : "") + "</div>";
       }
-      return '<div class="dr-sec"><h3>Punch App Phone</h3>' + body + "</div>";
+      return '<div class="dr-sec"><h3>Punch App Phone</h3><dl class="dr-facts">' + rows + "</dl>" + acts +
+        (M.msgAt === "phone" ? msgBlock() : "") + "</div>";
     }
 
-    function planningSection(r) {
-      var plans = plansFor(r.staff_id);
-      var h = '<div class="dr-sec"><h3>Planned Moves<span class="spacer"></span>' +
-        (M.mode === "plan" ? "" : '<button type="button" class="btn" data-act="mode-plan">Plan A Move</button>') + "</h3>";
-      if (!plans.length && M.mode !== "plan") h += '<div class="dr-line muted">None planned.</div>';
-      plans.forEach(function (p) {
-        var days = UI.daysSince(p.planned_date), late = days !== null && days > 0;
-        var dest = p.to_project_code ? p.to_project_code + (p.to_project_name ? " — " + p.to_project_name : "") : "Not On A Site";
-        var c = M.confirm && M.confirm.kind === "plan" && M.confirm.id === p.plan_id ? M.confirm : null;
-        h += '<div class="dr-line"><b>' + escHtml(UI.dstr(p.planned_date)) + "</b>" + (late ? ' <span class="chip chip-warn">' + days + (days === 1 ? " day" : " days") + " ago</span>" : "") +
-          " → " + escHtml(dest) + (p.remarks ? ' <span class="muted">' + escHtml(p.remarks) + "</span>" : "") +
-          (c ? ' <span class="move-ctl"><span class="muted">' + (c.act === "execute" ? "Move now?" : "Cancel this plan?") + "</span>" +
-               '<button type="button" class="btn btn-primary" data-act="plan-go" data-plan="' + p.plan_id + '" data-what="' + c.act + '">Yes</button>' +
-               '<button type="button" class="btn" data-act="confirm-clear">No</button></span>'
-             : ' <span class="move-ctl"><button type="button" class="btn" data-act="plan-ask" data-plan="' + p.plan_id + '" data-what="execute">Execute Now</button>' +
-               '<button type="button" class="btn" data-act="plan-ask" data-plan="' + p.plan_id + '" data-what="cancel">Cancel</button></span>') + "</div>";
-      });
-      if (M.mode === "plan") {
-        h += '<div class="dr-form">' +
-          '<label>When <input type="date" id="pl-date" value="' + Dash.todayKL() + '"></label>' +
-          '<label>To <select id="pl-site"><option value="">Choose…</option>' + siteOptions("", false) + '<option value="unassign">— Mob Out / Not On A Site —</option></select></label>' +
-          '<label class="wide">Remarks <input type="text" id="pl-remarks" placeholder="Optional"></label>' +
-          '<div class="acts"><button type="button" class="btn btn-primary" data-act="plan-save">Save Plan</button>' +
-          '<button type="button" class="btn" data-act="mode-clear">Cancel</button><span class="muted">Nothing moves now. Execute it when it happens.</span></div></div>';
-      }
-      return h + "</div>";
-    }
-
-    function workerPanel(r) {
-      var s = statusOf(r);
-      var d = M.cache[r.staff_id] || {};
+    // the bottom row: "Move…" unfolds the move form in place; Mark As Left asks in place
+    function footRow(r) {
       var leftAsk = M.confirm && M.confirm.kind === "left" && M.confirm.id === r.staff_id;
-      var h = '<div class="dr-top"><h2>' + escHtml(r.full_name) + '</h2><button type="button" class="btn dr-close" data-act="close">Close</button></div>' +
-        '<p class="dr-who">' + escHtml([r.employee_code, UI.label(r.role), r.company].filter(Boolean).join(" · ")) + "</p>" +
-        '<dl class="dr-facts"><dt>Assigned Site</dt><dd>' + (r.current_project_id
-          ? escHtml(r.project_code + (r.project_name ? " — " + r.project_name : "")) + ' <a href="' + esc(projectHref(r.current_project_id)) + '" class="muted">Open</a>'
-          : (groupOf(r) === "__office" ? "Office Staff" : "Not On A Site")) + "</dd>" +
-        "<dt>Last Reported</dt><dd>" + escHtml(reportWords(r)) + " " + statusChip(r) + "</dd></dl>" +
-        '<div class="dr-links"><a class="btn" href="' + esc(attendanceHref(r)) + '">Attendance</a></div>';
-
-      if (M.canEdit) {
-        h += '<div class="dr-sec"><h3>Move This Worker</h3><div class="dr-form">' +
-          '<label class="wide">To <select id="mv-site"><option value="">Choose…</option>' + siteOptions("", false) + '<option value="unassign">— Not On A Site —</option></select></label>' +
+      var h = '<div class="dr-foot">';
+      if (M.mode === "move") {
+        h += '<div class="wide"><div class="dr-form">' +
+          '<label class="wide">Move To <select id="mv-site"><option value="">Choose…</option>' + siteOptions("", false) + '<option value="unassign">— Not On A Site —</option></select></label>' +
           '<label>Effective <input type="date" id="mv-date" value="' + Dash.todayKL() + '"></label>' +
           '<label>Remarks <input type="text" id="mv-remarks" placeholder="Optional"></label>' +
           '<div class="acts"><button type="button" class="btn btn-primary" data-act="move">Move</button>' +
-          '<span class="muted">Backdate the effective date for a catch-up move.</span></div></div>' +
-          '<p class="dr-ok">' + escHtml(M.panelOk) + '</p><p class="dr-err">' + escHtml(M.panelErr) + "</p></div>";
-        h += detailsSection(r, d) + historySection(r) + phoneSection(r) + planningSection(r);
-        h += '<div class="dr-foot">' + (leftAsk
-          ? confirmBox("left", r.staff_id, "Mark " + r.full_name + " as left? Their phone is locked out of the punch app. Undo from Inactive Workers if this is a mistake.", "Mark As Left", true)
-          : '<button type="button" class="btn btn-danger" data-act="left-ask">Mark As Left</button>') + "</div>";
+          '<button type="button" class="btn" data-act="mode-clear">Cancel</button>' +
+          '<span class="muted">Backdate the effective date for a catch-up move.</span></div></div></div>';
       } else {
-        h += '<p class="dr-err">' + escHtml(M.panelErr) + "</p>";
+        h += '<button type="button" class="btn" data-act="mode-move">Move…</button>';
+        h += leftAsk
+          ? '<div class="wide">' + confirmBox("left", r.staff_id, "Mark " + r.full_name + " as left? Their phone is locked out of the punch app. Undo from Inactive Workers if this is a mistake.", "Mark As Left", true) + "</div>"
+          : '<button type="button" class="btn btn-danger" data-act="left-ask">Mark As Left</button>';
       }
+      if (M.msgAt === "foot") h += '<div class="wide">' + msgBlock() + "</div>";
+      return h + "</div>";
+    }
+
+    // name and status, the facts, then for the office: phone, history, the bottom row
+    function workerPanel(r) {
+      var h = '<div class="dr-top"><h2>' + escHtml(r.full_name) + '</h2><button type="button" class="btn dr-close" data-act="close">Close</button></div>' +
+        '<p class="dr-who"><span>' + escHtml([r.employee_code, UI.label(r.role), r.company].filter(Boolean).join(" · ")) + "</span>" +
+        '<span class="spacer"></span>' + statusChip(r) + "</p>" + factsBlock(r);
+      if (M.canEdit) h += phoneSection(r) + historySection(r) + footRow(r);
       return h;
     }
 
@@ -869,7 +837,7 @@
       document.getElementById("mp-add").innerHTML = M.canEdit ? '<button type="button" class="btn" data-act="new">+ Add Worker</button>' : "";
     }
     function render() {
-      renderError(); renderTiles(); renderFilterOptions(); renderUpcoming(); renderGroups(); renderMore(); renderDrawer();
+      renderError(); renderTiles(); renderFilterOptions(); renderGroups(); renderMore(); renderDrawer();
     }
 
     /* ------------------------------- loading ------------------------------- */
@@ -885,8 +853,8 @@
       });
     }
     async function refresh() {
-      var res = await Promise.all([Dash.getManpowerBySite(), Dash.getMovementPlans(), loadTranslog()]);
-      M.rows = res[0]; setPlans(res[1]);
+      var res = await Promise.all([Dash.getManpowerBySite(), loadTranslog()]);
+      M.rows = res[0];
       render();
     }
     async function recache(id) {
@@ -923,10 +891,10 @@
       if (a === "open") { openWorker(btn.getAttribute("data-staff")); return; }
       if (a === "open-edit") { openWorker(btn.getAttribute("data-staff")); M.mode = "edit"; renderDrawer(); return; }
       if (a === "new") { openWorker("__new"); return; }
-      if (a === "mode-edit") { M.mode = "edit"; M.confirm = null; renderDrawer(); return; }
-      if (a === "mode-plan") { M.mode = "plan"; M.confirm = null; renderDrawer(); return; }
+      if (a === "mode-edit") { M.mode = "edit"; M.confirm = null; M.panelOk = ""; M.panelErr = ""; renderDrawer(); return; }
+      if (a === "mode-move") { M.mode = "move"; M.confirm = null; M.panelOk = ""; M.panelErr = ""; renderDrawer(); return; }
       if (a === "mode-clear") { M.mode = null; M.confirm = null; renderDrawer(); renderMore(); return; }
-      if (a === "confirm-clear") { M.confirm = null; renderDrawer(); renderMore(); renderUpcoming(); return; }
+      if (a === "confirm-clear") { M.confirm = null; renderDrawer(); renderMore(); return; }
       if (a === "past-form") { M.mode = M.mode === "past" ? null : "past"; renderMore(); return; }
 
       // ---- new worker ----
@@ -956,11 +924,13 @@
       // ---- move ----
       if (a === "move") {
         var to = val("mv-site");
+        M.msgAt = "foot";
         if (!to) { M.panelErr = "Choose where to move " + sel.full_name + "."; renderDrawer(); return; }
         await act(async function () {
           var r = await Dash.moveStaff(sel.staff_id, to === "unassign" ? null : to, val("mv-remarks") || null, val("mv-date") || null);
           var tgt = projectById(to);
           M.ok = (r.full_name || sel.full_name) + " moved to " + (tgt ? tgt.project_code + " — " + tgt.project_name : "no site") + ".";
+          M.panelOk = M.ok; M.mode = null;
           await refresh();
         }, "panel");
         renderDrawer(); return;
@@ -973,6 +943,7 @@
           dateJoined: val("ed-joined") || null, contactNumber: val("ed-contact") || null, countryOrigin: val("ed-origin") || null,
           otEligible: !!(document.getElementById("ed-ot") && document.getElementById("ed-ot").checked) };
         if (a === "edit-dup-go") p2.allowDuplicate = true;
+        M.msgAt = "top";
         await act(async function () {
           try {
             var r = await Dash.updateStaff(sel.staff_id, p2);
@@ -989,8 +960,9 @@
       }
 
       // ---- left ----
-      if (a === "left-ask") { M.confirm = { kind: "left", id: sel.staff_id }; renderDrawer(); return; }
+      if (a === "left-ask") { M.confirm = { kind: "left", id: sel.staff_id }; M.msgAt = "foot"; renderDrawer(); return; }
       if (a === "left-go") {
+        M.msgAt = "foot";
         await act(async function () {
           await Dash.setStaffActive(sel.staff_id, false);
           M.ok = sel.full_name + " marked as left."; M.confirm = null;
@@ -1000,6 +972,7 @@
       }
 
       // ---- phone ----
+      if (a === "dev-issue" || a === "dev-revoke" || a === "release-ask" || a === "release-go") M.msgAt = "phone";
       if (a === "dev-issue") {
         await act(async function () {
           var iss = await Dash.issueEnrolmentCode(sel.staff_id);
@@ -1025,20 +998,8 @@
         renderDrawer(); return;
       }
 
-      // ---- plans ----
-      if (a === "plan-save") {
-        var pdate = val("pl-date"), psite = val("pl-site");
-        if (!pdate || !psite) { M.panelErr = "Choose the date and the destination."; renderDrawer(); return; }
-        await act(async function () {
-          await Dash.addMovementPlan({ staffId: sel.staff_id, plannedDate: pdate, toProjectId: psite === "unassign" ? null : psite, remarks: val("pl-remarks") || null });
-          var tgt = projectById(psite);
-          M.mode = null; M.panelOk = "Move planned for " + UI.dstr(pdate) + (tgt ? " to " + tgt.project_code : "") + ". Execute it when it happens.";
-          await refresh();
-        }, "panel");
-        renderDrawer(); return;
-      }
-
       // ---- history, from the panel ----
+      if (a.indexOf("history-") === 0) M.msgAt = "history";
       if (a === "history-fix") { M.mode = "fix:" + btn.getAttribute("data-transfer"); M.confirm = null; renderDrawer(); renderMore(); return; }
       if (a === "history-fix-save") {
         var tid = btn.getAttribute("data-transfer");
@@ -1061,19 +1022,9 @@
       }
     }
 
-    // the plan / history / reactivate / past-move buttons outside the panel
+    // the reactivate / past-move buttons in the tabs
     async function onTableAction(btn) {
       var a = btn.getAttribute("data-act");
-      if (a === "plan-ask") { M.confirm = { kind: "plan", id: btn.getAttribute("data-plan"), act: btn.getAttribute("data-what") }; renderUpcoming(); renderDrawer(); return true; }
-      if (a === "plan-go") {
-        var pid = btn.getAttribute("data-plan"), what = btn.getAttribute("data-what");
-        await act(async function () {
-          if (what === "execute") { await Dash.executeMovementPlan(pid); M.ok = "Move executed. The roster is updated."; }
-          else { await Dash.cancelMovementPlan(pid); M.ok = "Plan cancelled."; }
-          M.confirm = null; await refresh();
-        }, "top");
-        renderError(); renderUpcoming(); renderDrawer(); return true;
-      }
       if (a === "reactivate-ask") { M.confirm = { kind: "reactivate", id: btn.getAttribute("data-staff") }; renderMore(); return true; }
       if (a === "reactivate-go") {
         var sid = btn.getAttribute("data-staff"), r = byId(sid), site = val("ra-site");
@@ -1109,7 +1060,7 @@
 
         var res = await Promise.all([
           Dash.getManpowerBySite(), Dash.getProjectDirectory(), Dash.getProjectSupervisors(),
-          Dash.getMachines(), Dash.getMovementPlans(), loadTranslog()
+          Dash.getMachines(), loadTranslog()
         ]);
         M.rows = res[0]; M.projects = res[1];
         M.projects.forEach(function (p) { M.dirByPid[p.project_id] = p; });
@@ -1118,7 +1069,6 @@
           if (!m.current_site) return;
           (M.machinesBySite[m.current_site] = M.machinesBySite[m.current_site] || []).push({ code: m.machine_code, type: m.machine_type });
         });
-        setPlans(res[4]);
         render();
 
         // a worker named in the URL opens in the panel (?open=<staff_id>)
@@ -1189,10 +1139,6 @@
           var tr = ev.target.closest("tr[data-staff]");
           if (tr) openWorker(tr.getAttribute("data-staff"));
         });
-        document.getElementById("mp-upcoming").addEventListener("click", function (ev) {
-          var btn = ev.target.closest("button[data-act]");
-          if (btn) { ev.preventDefault(); if (btn.getAttribute("data-act") === "confirm-clear") { M.confirm = null; renderUpcoming(); } else onTableAction(btn); }
-        });
         document.getElementById("mp-more").addEventListener("click", async function (ev) {
           var tab = ev.target.closest("button[data-tab]");
           if (tab) { M.tab = tab.getAttribute("data-tab"); M.mode = null; M.confirm = null; renderMore(); return; }
@@ -1207,7 +1153,7 @@
           var btn = ev.target.closest("button[data-act]");
           if (!btn) return;
           ev.preventDefault();
-          if (btn.getAttribute("data-act").indexOf("plan-") === 0) onTableAction(btn); else onAction(btn, ev);
+          onAction(btn, ev);
         });
         document.addEventListener("keydown", function (ev) { if (ev.key === "Escape" && M.sel) closeWorker(); });
       } catch (e) {

@@ -8,13 +8,13 @@
 // shell make, so the page can be reviewed (and screenshotted by the Playwright
 // harness) with no login at all: three invented sites, the Avengers test crew
 // spread over them with one of every status, two office staff, one worker
-// awaiting deployment, two who left, a planned move and an overdue one, a
-// machine with nobody to run it, and a movement history of By Punch and office
-// moves.
+// awaiting deployment, two who left, a machine with nobody to run it, and a
+// movement history of By Punch and office moves. (No plans: the page stopped
+// showing planning on 25 Oct 2026.)
 //
-// IT WRITES NOTHING. Move, Add Worker, Edit, Plan, Execute, Mark As Left,
-// Reactivate, the history fixes and the phone buttons change the in-memory
-// lists for this page load only — no database call is made while this is on.
+// IT WRITES NOTHING. Move, Add Worker, Edit, Mark As Left, Reactivate, the
+// history fixes and the phone buttons change the in-memory lists for this
+// page load only — no database call is made while this is on.
 //
 // MUST load AFTER dashboard-client.js and BEFORE shell.js — the shell asks
 // for the login the moment it runs.
@@ -98,13 +98,6 @@
   ];
   function row(id) { return ROWS.filter(function (r) { return r.staff_id === id; })[0]; }
 
-  var PLANS = [
-    { plan_id: "demo-plan-1", subject_type: "staff", staff_id: "demo-thor",  full_name: "Thor (demo)",        staff_role: "general_worker", planned_date: day(-2),
-      to_project_id: "demo-site-3", to_project_code: "HF-SP-901", to_project_name: "Satar Empire (DEMO)", remarks: "After the pour", status: "planned", created_by_name: "Maria Hill (demo)", created_at: ts(day(1)) },
-    { plan_id: "demo-plan-2", subject_type: "staff", staff_id: "demo-widow", full_name: "Black Widow (demo)", staff_role: "general_worker", planned_date: day(3),
-      to_project_id: "demo-site-2", to_project_code: "HF-KDH-002A", to_project_name: "MCS SIK BRIDGE 2 (DEMO)", remarks: null, status: "planned", created_by_name: "Nick Fury (demo)", created_at: ts(day(4)) }
-  ];
-
   function tl(o) {
     var f = o.from ? site(o.from) : null, t = o.to ? site(o.to) : null, r = o.staff ? row(o.staff) : null;
     return { transfer_id: newId("demo-tl"), moved_at: ts(day(o.days), o.at || "08:05"), effective_date: day(o.days),
@@ -160,7 +153,6 @@
   Dash.getProjectSupervisors = async function () { return copy(SUPERVISORS); };
   Dash.getMachines           = async function () { return copy(MACHINES); };
   Dash.getManpowerBySite     = async function () { await wait(120); return copy(ROWS).map(function (r) { delete r._detail; return r; }); };
-  Dash.getMovementPlans      = async function () { return copy(PLANS); };
   Dash.getTransferLog        = async function (limit) {
     await wait(120);
     return copy(TRANSLOG).sort(function (a, b) { return a.effective_date < b.effective_date ? 1 : a.effective_date > b.effective_date ? -1 : 0; }).slice(0, limit || 100);
@@ -230,34 +222,6 @@
     var r = row(id); if (!r) throw new Error("staff_not_found");
     r.is_active = !!active; r.updated_at = new Date().toISOString();
     return { ok: true, full_name: r.full_name, is_active: r.is_active };
-  };
-  Dash.addMovementPlan = async function (o) {
-    await wait(300);
-    var r = row(o.staffId); if (!r) throw new Error("staff_not_found");
-    if (!r.is_active) throw new Error("staff_inactive");
-    if (!o.plannedDate) throw new Error("date_required");
-    var t = o.toProjectId ? site(o.toProjectId) : null;
-    PLANS.push({ plan_id: newId("demo-plan"), subject_type: "staff", staff_id: r.staff_id, full_name: r.full_name, staff_role: r.role,
-      planned_date: o.plannedDate, to_project_id: t ? t.project_id : null, to_project_code: t ? t.project_code : null,
-      to_project_name: t ? t.project_name : null, remarks: o.remarks || null, status: "planned", created_by_name: "Nick Fury (demo)", created_at: new Date().toISOString() });
-    return { ok: true };
-  };
-  Dash.executeMovementPlan = async function (pid) {
-    await wait(300);
-    var p = PLANS.filter(function (x) { return x.plan_id === pid; })[0];
-    if (!p) throw new Error("plan_not_found");
-    if (p.status !== "planned") throw new Error("plan_not_executable");
-    moveRow(row(p.staff_id), p.to_project_id, p.remarks ? "Planned: " + p.remarks : "Planned move", today);
-    p.status = "executed"; p.executed_at = new Date().toISOString();
-    return { ok: true };
-  };
-  Dash.cancelMovementPlan = async function (pid) {
-    await wait(300);
-    var p = PLANS.filter(function (x) { return x.plan_id === pid; })[0];
-    if (!p) throw new Error("plan_not_found");
-    if (p.status !== "planned") throw new Error("plan_not_cancellable");
-    p.status = "cancelled";
-    return { ok: true };
   };
   Dash.addPastMove = async function (o) {
     await wait(300);
