@@ -551,7 +551,8 @@
     async function loadDirectory() {
       try {
         ((await Dash.getProjectDirectory()) || []).forEach(function (p) {
-          DIR[p.project_id] = { code: p.project_code || "", name: p.project_name || "", status: p.status || "" };
+          DIR[p.project_id] = { code: p.project_code || "", name: p.project_name || "", status: p.status || "",
+                                lat: p.site_latitude, lng: p.site_longitude };   // the centre, once the view carries it
           if (isTestCode(p.project_code)) TEST_PROJECTS[p.project_id] = true;
         });
       } catch (e) { /* no directory: names stay names, the picker stays empty */ }
@@ -1030,7 +1031,7 @@
              ((p.punched_by && (v === "office_closed" || v === "auto_closed")) ? ""
                : '<span class="badge badge-' + vCls + '" title="' + esc(CHECK_HOVER[v] || "") + '">' + esc(checkWords(v)) + "</span> ") +
              provenance(p) +
-             (tail ? '<span class="pl-where">' + esc(tail) + "</span>" : "") + "</li>";
+             (tail ? '<span class="pl-where">' + esc(tail) + "</span>" : "") + mapLink(p) + "</li>";
     }
 
     // Only the end the office ruled on gets a line; the tap is in the punch list.
@@ -1157,6 +1158,19 @@
       no_geofence: "The site had no circle set at the time.", no_site: "No site's circle around this point.",
       office_closed: "Entered by the office.", auto_closed: "Closed by the system, not tapped."
     };
+    // THE MAP (owner, 27 Oct 2026): where the phone was when it punched and, once the
+    // directory carries the site's centre, the way from there to the site.
+    function mapLink(p) {
+      if (!p) return "";
+      var lat = p.gps_lat !== undefined ? p.gps_lat : p.gps_latitude, lng = p.gps_lng !== undefined ? p.gps_lng : p.gps_longitude;
+      if (lat === null || lat === undefined || lng === null || lng === undefined) return "";
+      var site = DIR[p.project_id] || {}, toSite = site.lat !== undefined && site.lat !== null && site.lng !== undefined && site.lng !== null;
+      var href = toSite
+        ? "https://www.google.com/maps/dir/?api=1&origin=" + lat + "," + lng + "&destination=" + site.lat + "," + site.lng
+        : "https://www.google.com/maps?q=" + lat + "," + lng;
+      return ' <a class="map-link" href="' + href + '" target="_blank" rel="noopener" title="' +
+             (toSite ? "From the punch to the site, on Google Maps" : "Where the phone was, on Google Maps") + '">Map \u2197</a>';
+    }
     // one end of the day as it was TAPPED: the time, and the check in a small word
     function origCell(ts, punch) {
       if (!ts) return '<span class="orig-time">—</span>';
@@ -1164,8 +1178,14 @@
       var words = !punch ? "" : (punch.punched_by === "system" || v === "auto_closed") ? "Auto Closed"
                 : (punch.punched_by === "office" || v === "office_closed") ? "Office" : checkWords(v);
       var d = punch ? plainDistance(punch.distance_m) : "";
+      var extra = [];
+      if (punch && punch.synced_late) extra.push("Synced Late");
+      if (punch && punch.wrong_site) extra.push("Wrong Site" + (punch.detected_project_code ? " · " + punch.detected_project_code : ""));
+      var note = (punch && punch.punched_by !== "system" && v !== "auto_closed") ? capFirst(punch.entry_note) : "";
       return '<span class="orig-time">' + esc(Dash.klTime(ts)) + "</span>" +
-             (words ? '<span class="orig-check" title="' + esc(CHECK_HOVER[v] || "") + '">' + esc(words) + (d ? " · " + esc(d) : "") + "</span>" : "");
+             (words ? '<span class="orig-check" title="' + esc(CHECK_HOVER[v] || "") + '">' +
+                      esc([words + (d ? " · " + d : "")].concat(extra).join(" · ")) + mapLink(punch) + "</span>" : "") +
+             (note ? '<span class="orig-check">Note: ' + esc(note) + "</span>" : "");
     }
     function corrRender() {
       var el = document.getElementById("corr-panel");
@@ -1188,12 +1208,16 @@
       var outChanged = editable && !!f.tOut && (f.tOut !== CorrectForm.klHHMM(tapOut) || !!f.next !== (CorrectForm.klDate(tapOut) > s.workDate));
       var dis = CORR.busy ? " disabled" : "";
       var bad = function (k) { return CORR.invalid === k ? ' aria-invalid="true"' : ""; };
-      var corrIn = editable
-        ? '<input type="time" data-cf="tIn" step="60" value="' + esc(f.tIn) + '"' + bad("tIn") + dis + ">"
-        : '<span class="orig-time">' + (effIn(r) ? esc(Dash.klTime(effIn(r))) : "—") + "</span>";
-      var corrOut = editable
-        ? '<input type="time" data-cf="tOut" step="60" value="' + esc(f.tOut) + '"' + bad("tOut") + dis + ">"
-        : '<span class="orig-time">' + (effOut(r) ? esc(Dash.klTime(effOut(r))) : "—") + "</span>";
+      // the Corrected column reads like the Original: the time in the same type and
+      // a small line under it saying what it is; the time is still a time box
+      var st0 = CorrectForm.standing(s);
+      function corrCell(k, val, changed, ruled, eff) {
+        if (!editable) return '<span class="orig-time">' + (eff ? esc(Dash.klTime(eff)) : "—") + "</span>";
+        return '<input type="time" class="corr-time" data-cf="' + k + '" step="60" value="' + esc(val) + '"' + bad(k) + dis + ">" +
+               '<span class="orig-check corr-state" data-state="' + k + '">' + (changed ? "Changed" : ruled ? "Set By Office" : "As Tapped") + "</span>";
+      }
+      var corrIn = corrCell("tIn", f.tIn, inChanged, !!st0.ruledIn, effIn(r));
+      var corrOut = corrCell("tOut", f.tOut, outChanged, !!st0.ruledOut, effOut(r));
       var times = '<p class="detail-head">Punch Times</p>' +
         '<div class="corr-grid">' +
           '<span></span><span class="gh">Original</span><span class="gh">Corrected</span>' +
@@ -1231,10 +1255,7 @@
             '<button type="button" class="btn" data-corr="remove-yes"' + dis + ">Remove</button>" +
             '<button type="button" class="btn btn-primary" data-corr="remove-no">Keep</button></div>' : "");
 
-      var details = CORR.punches === null ? '<p class="detail-note">Loading punches…</p>'
-        : (CORR.punches.length
-            ? '<p class="detail-head">Punch Details</p><ul class="punch-lines">' + CORR.punches.map(punchLine).join("") + "</ul>"
-            : '<p class="detail-note">No Punches Found</p>');
+      var details = CORR.punches === null ? '<p class="detail-note">Loading punches…</p>' : "";
 
       var why = "";
       if (!editable && Dash.can("attendance.edit")) {
@@ -1293,6 +1314,9 @@
       var outChanged = !!f.tOut && (f.tOut !== CorrectForm.klHHMM(r.last_out_at) || !!f.next !== (CorrectForm.klDate(r.last_out_at) > s.workDate));
       ["in", "in-new"].forEach(function (k) { var c = el.querySelector('[data-cell="' + k + '"]'); if (c) c.classList.toggle("changed", inChanged); });
       ["out", "out-new"].forEach(function (k) { var c = el.querySelector('[data-cell="' + k + '"]'); if (c) c.classList.toggle("changed", outChanged); });
+      var st0 = CorrectForm.standing(s);
+      var si = el.querySelector('[data-state="tIn"]');  if (si) si.textContent = inChanged ? "Changed" : st0.ruledIn ? "Set By Office" : "As Tapped";
+      var so = el.querySelector('[data-state="tOut"]'); if (so) so.textContent = outChanged ? "Changed" : st0.ruledOut ? "Set By Office" : "As Tapped";
       var save = el.querySelector("[data-cf-save]"); if (save) save.disabled = CORR.busy || !corrDirty();
       Array.prototype.forEach.call(el.querySelectorAll("[data-cf-reason]"), function (b) {
         b.setAttribute("aria-pressed", String(f.why || "").indexOf(b.getAttribute("data-cf-reason")) === 0 ? "true" : "false");

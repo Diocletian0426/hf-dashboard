@@ -3765,7 +3765,19 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
 .corr-grid .changed { background: #eff6ff; }
 .corr-grid .changed .orig-time { text-decoration: line-through; color: var(--ink-2); font-weight: 500; }
 .corr-grid .changed input { border-color: var(--brand); }
-.corr-grid input[type="time"] { width: 100%; box-sizing: border-box; }
+/* the Corrected time reads like the Original (same type), still a time box */
+.corr-panel .corr-grid .corr-time { font-family: var(--font); font-size: 15.5px; font-weight: 600; color: var(--ink); background: transparent;
+  border: 0; border-bottom: 1px dotted var(--line-strong); border-radius: 0; padding: 1px 0; width: auto; max-width: 140px; box-sizing: border-box; }
+.corr-panel .corr-grid .corr-time:focus { outline: none; border-bottom: 2px solid var(--brand); }
+.corr-panel .corr-grid .corr-time::-webkit-calendar-picker-indicator { opacity: 0.45; width: 14px; height: 14px; margin-left: 4px; cursor: pointer; }
+.corr-panel .corr-grid .corr-time[aria-invalid="true"] { border-bottom-color: var(--danger); }
+.corr-grid .changed .corr-time { border-bottom-color: var(--brand); }
+.corr-panel .cf-why { display: block; margin-top: 8px; }
+.corr-panel .cf-why input { font-family: var(--font); font-size: 15px; padding: 9px 12px; border: 1px solid var(--line-strong); border-radius: 10px;
+  background: #fff; color: var(--ink); width: 100%; box-sizing: border-box; }
+.corr-panel .cf-why input[aria-invalid="true"] { border-color: var(--danger); }
+.map-link { font-size: 12.5px; color: var(--brand-ink); text-decoration: none; margin-left: 6px; white-space: nowrap; }
+.map-link:hover { text-decoration: underline; }
 .corr-next { grid-column: 2 / -1; display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink); }
 .corr-hours { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .corr-hours > div { padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
