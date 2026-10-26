@@ -53,7 +53,7 @@ Note the repo itself is public (free-plan requirement for Pages).
 | `issues.html` | Site issue work queue |
 | `machines.html` | Machine fleet + servicing + moves |
 | `manpower.html` | Site manpower roster + moves |
-| `attendance.html` | Punch attendance — **owned by the attendance collaborator, do not edit** (see `docs/ATTENDANCE-HANDOFF.md`) |
+| `attendance.html` | Punch attendance — Round 1 of the overhaul (Oct 2026, built by the owner side, reviewed by the attendance collaborator; see `docs/ATTENDANCE-HANDOFF.md`): Day and Month, one review line above the table (unpriced / in progress / unconfirmed counts, the Exceptions queue), a Show picker, the day row as Code · Worker · Site (code) · Shift · Working Hours · Over Time · Pay · Location, the month row as the payroll sheet (sites in the drawer), every date a door to the day, the Correct Hours form in the drawer, Group PDF, Print, Download Excel with the unresolved days named; test rows hidden unless `?test=1` |
 | `requests.html` | Attendance Requests — office approves/rejects the punch app's Missed Shift + Change Times asks (`?demo=1` = invented data, no login, writes nothing) |
 | `exceptions.html` | Punch Exceptions (DB 0124) — every unresolved shift since the rule's start date: Punch Out Missing, Overlong, Early Start, Open 16 h+. A row opens into a panel: the punches, Compare With Crew, the worker's request (Approve / Reject), Accept As Punched / Credit / Keep with a reason, and Rule The Times in place (`correct-form.js`, shared with Attendance next). The Before Payroll Closes list below (`?demo=1` = invented data, no login, writes nothing). Needs attendance.edit |
 | `tests.html` | Cross-project test chasing queue (deliberately thin — locked decision) |

@@ -3648,3 +3648,47 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
 .dl-anyway { margin-right: auto; display: inline-flex; align-items: center; gap: 6px;
              font-size: 13.5px; color: var(--danger-ink); cursor: pointer; }
 .dl-anyway input { width: 16px; height: 16px; margin: 0; }
+
+/* ---- attendance Round 1 (owner's go, 26 Oct 2026): Pay / Location / Facts ----
+   The Attention column became two: PAY (Priced, In Progress, Unpriced · why —
+   only Unpriced is amber) and LOCATION (quiet grey words). Facts about the day
+   sit under the pay word in small type. The shift is one cell; sites are codes;
+   the review line above the table replaces the amber banner. */
+.att-readable .pay { display: inline-block; white-space: nowrap; }
+.att-readable .pay-ok { color: var(--ink); }
+.att-readable .pay-progress { color: var(--ink-2); font-weight: 600; }
+.att-readable .pay-no { background: var(--amber-soft); color: #92400e; border-radius: 999px; padding: 3px 11px; font-size: 13px; font-weight: 600; }
+.att-readable .facts { display: block; font-size: 12.5px; color: var(--ink-2); margin-top: 3px; white-space: normal; line-height: 1.35; }
+.att-readable .loc { font-size: 14px; white-space: nowrap; }
+.att-readable .loc-ok { color: var(--ink-2); }
+.att-readable .loc-bad { color: var(--ink); }
+.att-readable .att-table .pay-cell, .att-readable .att-table .loc-cell { white-space: normal; }
+/* fit at 1440 px: every attendance cell may wrap; the short units stay whole */
+.att-readable .att-table th, .att-readable .att-table td { white-space: normal; padding-left: 9px; padding-right: 9px; }
+.att-readable .att-table .emp-code, .att-readable .shift-cell .t, .att-readable .pay, .att-readable .loc,
+.att-readable .att-table .site-cell .sc, .att-readable .att-table td.num { white-space: nowrap; }
+.att-readable .att-table:not(.month-days) > tbody > tr > td:nth-child(2) { max-width: 240px; }
+.att-readable .att-table .site-cell { white-space: normal; }
+.att-readable .shift-cell { white-space: normal; }
+.att-readable .facts-why { color: #92400e; }
+.att-readable .next-day { font-size: 11px; color: var(--ink-2); margin-left: 1px; }
+.att-readable .t-office-tag.t-inline { display: inline-block; margin: 0 0 0 4px; vertical-align: 1px; font-size: 10.5px; padding: 0 6px; }
+.att-readable .att-table:not(.month-days) > tbody > tr > td:nth-child(3) { min-width: 0; }
+.att-readable .att-table:not(.month-days) > tbody > tr > td:last-child { max-width: none; }
+.att-readable .legend-list .pay, .att-readable .legend-list .loc, .att-readable .legend-list .facts { flex: 0 0 auto; display: inline-block; margin: 0; }
+.att-readable .day-link { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--line-strong); }
+.att-readable .day-link:hover { color: var(--brand-ink); }
+.att-review { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 8px; margin: 0 0 var(--sp-3); padding: 0 4px; font-size: 14.5px; color: var(--ink-2); }
+.att-review .rv-label { color: var(--ink); font-weight: 600; }
+.att-review .rv-word { color: var(--ink); text-decoration: none; border-bottom: 1px dotted var(--line-strong); }
+.att-review .rv-word:hover { color: var(--brand-ink); }
+.att-review .rv-word.is-zero { color: var(--ink-3); border-bottom-color: transparent; }
+.att-review .rv-why { color: var(--ink-2); }
+.att-review .rv-queue { margin-left: auto; color: var(--brand-ink); font-weight: 600; text-decoration: none; }
+.att-readable .unpriced-note { color: var(--ink); }
+.dl-progress { color: var(--ink-2); }
+@media print {
+  .att-review { display: none !important; }
+  body.att-readable .pay-no { background: #fff !important; border: 1px solid #000; border-radius: 999px; padding: 1px 6px; font-size: 10.5px; }
+  body.att-readable .facts, body.att-readable .loc { color: #333 !important; }
+}
