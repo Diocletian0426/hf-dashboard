@@ -67,6 +67,8 @@
                                                      shift AND kind — missed / long_open / overlong /
                                                      early_start; both dates null = every unresolved
                                                      shift since the rule's start date; null before 0124
+   await Dash.priceShift(staffId, date, inISO, outISO) -> the figure a ruling WOULD give (DB 0127),
+                                                     one row { working_minutes, ot_minutes, … }, or null before 0127
    await Dash.getUnpricedDays(from, to)           -> the payroll-close list: worker days with no figure
                                                      or a request waiting; null before 0124
    await Dash.acceptShiftAsPunched(staffId, date, shiftNo, 'long'|'early'|'early_keep', note)
@@ -1065,6 +1067,22 @@
     }
   }
 
+  // The figure a ruling WOULD give, before it is saved (DB 0127 price_shift,
+  // attendance.edit): the same hours rule the day view uses, on the pair of
+  // times the office is about to rule. One row, or null when the database
+  // predates 0127 — the Correct Hours panel then shows no preview.
+  async function priceShift(staffId, workDate, inISO, outISO) {
+    try {
+      var rows = await q(sb.rpc("price_shift", {
+        p_staff_id: staffId, p_work_date: workDate, p_in_at: inISO, p_out_at: outISO
+      }));
+      return Array.isArray(rows) ? (rows[0] || null) : (rows || null);
+    } catch (e) {
+      if (isMissingFunction(e)) return null;
+      throw e;
+    }
+  }
+
   // kind 'long'  = accept a shift over 16 h as punched (it prices as tapped);
   // kind 'early' = credit a site worker's start before 06:00 from the punch-in;
   // kind 'early_keep' = looked at, kept counted from 08:00 (settled, no pay change).
@@ -1901,6 +1919,7 @@
     revokeAttendanceRequest: revokeAttendanceRequest,
     getPunchExceptions: getPunchExceptions,
     getUnpricedDays: getUnpricedDays,
+    priceShift: priceShift,
     acceptShiftAsPunched: acceptShiftAsPunched,
     clearShiftAcceptance: clearShiftAcceptance,
     getTests: getTests,

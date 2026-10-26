@@ -188,6 +188,11 @@
        darkened page — a lot of drama for three small questions, and it hid the very
        table the office was looking at. It now drops from the Download Excel button,
        the page stays lit behind it, and a press anywhere else puts it away. -->
+  <!-- THE CORRECTOR (Release 2, owner's go 27 Oct 2026): a panel on the right, the
+       page stays lit behind it. One form for Day and Month (correct-form.js, shared
+       with Exceptions). Nothing here edits a punch: the ruling is laid on top. -->
+  <aside class="corr-panel" id="corr-panel" hidden tabindex="-1" role="dialog" aria-labelledby="corr-title"></aside>
+
   <div class="dl-back" id="dl-back" hidden>
     <div class="dl-card" id="dl-card" role="dialog" aria-modal="false" aria-labelledby="dl-title">
       <div class="dl-head">
@@ -230,6 +235,7 @@
        Delete this line + attendance-demo.js before the pilot starts. -->
   <script src="attendance-demo.js"></script>
   <script src="xlsx-lite.js"></script>
+  <script src="correct-form.js"></script>
   <script src="shell.js"></script>
 
   <script>
@@ -962,6 +968,338 @@
       renderGeofenceBanner();
     });
 
+    /* =====================================================================
+       THE DRAWER'S LINES, shared with the Correct Hours panel (Release 2)
+       ===================================================================== */
+    // WHO MADE THIS PUNCH (0092), and what else the office should know
+    // about it. A time the worker tapped and a time somebody typed in for
+    // him must never look alike — when hours are disputed, this line is
+    // the difference between his own record and an entry made on his behalf.
+    function provenance(p) {
+      var out = [];
+      if (p.punched_by === "office") {
+        out.push('<span class="badge badge-amended" title="' +
+          esc("Entered by the office" + (p.entered_by_name ? " (" + p.entered_by_name + ")" : "") +
+              ", not tapped by the worker.") + '">Office' +
+          (p.entered_by_name ? " · " + esc(p.entered_by_name) : "") + "</span>");
+      } else if (p.punched_by === "system") {
+        out.push('<span class="badge badge-gray" title="No punch-out by the next morning, so the ' +
+          'system closed the shift. Not tapped by the worker.">Auto Closed</span>');
+      } else if (p.punched_by === "worker") {
+        out.push('<span class="badge badge-verified" title="Tapped by the worker on their own ' +
+          'phone.">Worker</span>');
+      }
+      if (p.synced_late) {
+        out.push('<span class="badge badge-gray" title="The phone was offline when this was ' +
+          'tapped and sent it later. The time shown is when it was really tapped.">Synced Late</span>');
+      }
+      if (p.wrong_site) {
+        var at = p.detected_project_code || p.detected_project_name;
+        out.push('<span class="badge badge-anomaly" title="Tapped nearer a different site than ' +
+          'the one this worker is assigned to.">Wrong Site' + (at ? " · " + esc(at) : "") + "</span>");
+      }
+      return out.join(" ");
+    }
+
+    function punchLine(p) {
+      var v = p.verification_status || "";
+      var vCls = v === "verified" ? "verified" : "anomaly";
+      var lat = p.gps_lat !== undefined ? p.gps_lat : p.gps_latitude;
+      var lng = p.gps_lng !== undefined ? p.gps_lng : p.gps_longitude;
+      // The coordinates are not something the office reads; they stay on
+      // the line as a tooltip for whoever is chasing a location dispute.
+      var hasLoc = lat !== null && lat !== undefined && lng !== null && lng !== undefined;
+      var coords = hasLoc ? Number(lat).toFixed(5) + ", " + Number(lng).toFixed(5) : "";
+      var d = plainDistance(p.distance_m);
+      var where = d ? d + " From Site" : "";
+      if (coords) coords = "GPS " + coords;
+      var note = (p.punched_by === "system" || v === "auto_closed") ? "" : capFirst(p.entry_note);
+      var tail = [where, note ? "Note: " + note : ""].filter(Boolean).join(" · ");
+      return "<li" + (coords ? ' title="' + esc(coords) + '"' : "") + ">" +
+             '<span class="pl-type">' + esc((p.punch_type || "").toUpperCase()) + "</span>" +
+             '<span class="pl-time">' + Dash.klTime(p.punched_at) + "</span>" +
+             ((p.punched_by && (v === "office_closed" || v === "auto_closed")) ? ""
+               : '<span class="badge badge-' + vCls + '">' + esc(checkWords(v)) + "</span> ") +
+             provenance(p) +
+             (tail ? '<span class="pl-where">' + esc(tail) + "</span>" : "") + "</li>";
+    }
+
+    // Only the end the office ruled on gets a line; the tap is in the punch list.
+    function provLine(label, ruled) {
+      if (!ruled) return "";
+      return '<li><span class="pl-type">' + label + "</span>" +
+        '<span class="pl-time">' + esc(Dash.klTime(ruled)) + "</span>" +
+        '<span class="badge badge-amended">Set By Office</span></li>';
+    }
+
+    function correctionBlock(s) {
+      if (!s.has_correction) return "";
+      var by = s.corrected_by_name ? " · " + s.corrected_by_name : "";
+      var at = s.corrected_at ? " · " + Dash.klDateTime(s.corrected_at) : "";
+      return '<div class="amend-note">' +
+        '<p class="detail-note"><strong>Hours Corrected By The Office</strong>' + esc(by + at) + "</p>" +
+        '<ul class="punch-lines">' +
+          provLine("IN",  s.corrected_in_at) +
+          provLine("OUT", s.corrected_out_at) +
+        "</ul>" +
+        '<p class="detail-note">Reason: <em>' + esc(capFirst(s.correction_reason) || "—") + "</em></p>" +
+      "</div>";
+    }
+
+    // an unpriced day says why, first, with the door to settle it
+    function unpricedNote(s) {
+      var p = payOf(s);
+      if (p.key !== "unpriced") return "";
+      var how = p.why === "Overlong" ? "accept it as punched or rule the times on the Exceptions page"
+              : p.why === "No Punch Out" ? "rule the finish time on the Exceptions page, or here"
+              : "no punch-out yet";
+      return '<p class="detail-note unpriced-note"><strong>' + esc(p.word) + "</strong> — " + esc(how) +
+             (Dash.can("attendance.edit") && p.why !== "Still Open" ? ' · <a class="fix-link" href="exceptions.html">Exceptions \u2197</a>' : "") + "</p>";
+    }
+    // two shifts in one day cannot be ruled from this form (several_shifts): say so
+    function twoShiftNote(s) {
+      return (Number(s.shift_count) > 1 && Dash.can("attendance.edit"))
+        ? '<p class="detail-note"><strong>' + Number(s.shift_count) + " shifts this day</strong> — rule them one by one on the " +
+          '<a class="fix-link" href="exceptions.html">Exceptions page \u2197</a>.</p>' : "";
+    }
+    // the door to the panel: for a login that may rule, a finished day, one shift
+    function corrButton(s, i) {
+      if (!Dash.can("attendance.edit") || Number(s.shift_count) > 1) return "";
+      if (String(s.work_date).slice(0, 10) >= Dash.todayKL()) return "";   // the database rules finished days only
+      return '<div class="amend-wrap"><button type="button" class="amend-open" data-corr-open="' + i + '">' +
+             (s.has_correction ? "Change Correction" : "Correct Hours") + "</button></div>";
+    }
+
+    // one day row of the day table (the detail row under it is added by the caller)
+    function dayRowHtml(s, i) {
+      var h = hoursOf(s), p = payOf(s), l = locOf(s);
+      return '<tr class="shift-row" data-i="' + i + '" data-company="' + esc(COMPANY[s.staff_id] || "") +
+             '" data-pay="' + p.key + '" data-loc="' + l.key + '" data-find="' + esc(findKey(s)) + '">' +
+        codeCell(s.staff_id) +
+        '<td><button type="button" class="worker-btn" data-i="' + i + '" aria-expanded="false" aria-controls="d' + i + '">' +
+          '<span class="who-line"><strong title="' + esc(s.full_name) + '">' + esc(s.full_name) + "</strong>" + codeTag(s.staff_id) +
+          "</span></button></td>" +
+        siteCell(s) +
+        // the times the day is PAID from, the office's where it ruled (0092)
+        "<td>" + shiftCell(s) + "</td>" +
+        // the database's figures, or a dash where it declined to price the day
+        '<td class="num">' + (h ? hm(h.normal) : "—") + "</td>" +
+        '<td class="num">' + (h ? hm(h.ot) : "—") + "</td>" +
+        payCell(s) +
+        locCell(s) +
+      "</tr>";
+    }
+
+    /* =====================================================================
+       CORRECT HOURS — THE PANEL (Release 2, owner's go 27 Oct 2026)
+       ---------------------------------------------------------------------
+       One panel on the right, the page lit behind it, reached from a day
+       row's drawer and from a day line in the month drawer: the same form
+       (correct-form.js, shared with Exceptions), the same checks, the same
+       write (set_day_correction). The worker's taps are never edited: the
+       ruling is laid on top and both stay visible. Before saving, the figure
+       the ruling would give is asked of the database (price_shift, 0127) —
+       the page keeps no copy of the hours rule. After a save the view that
+       opened the panel re-reads that one day and patches its own rows in;
+       nothing reloads.
+       ===================================================================== */
+    var CORR = { open: false };
+    var PUNCH_DAY = {};                   // work_date -> promise of that day's punches
+    function punchesOn(date) {
+      if (!PUNCH_DAY[date]) {
+        PUNCH_DAY[date] = Dash.getRecentPunches(date, null, 1000)
+          .then(function (p) { return dropTest(p || []); })
+          .catch(function () { return []; });
+      }
+      return PUNCH_DAY[date];
+    }
+    function corrSpec(r) {
+      return { id: "att", workDate: String(r.work_date).slice(0, 10), inAt: r.first_in_at, outAt: r.last_out_at,
+               officialInAt: r.corrected_in_at || r.first_in_at, officialOutAt: r.corrected_out_at || r.last_out_at,
+               adjusted: !!r.has_correction };
+    }
+    async function corrOpen(r, view) {
+      if (!r) return;
+      var spec = corrSpec(r);
+      CORR = { open: true, view: view, row: r, spec: spec, form: CorrectForm.start(spec), punches: null,
+               busy: false, err: "", invalid: "", preview: null, previewKey: "", note: "", askClose: false, askRemove: false };
+      corrRender();
+      var el = document.getElementById("corr-panel");
+      el.hidden = false; el.scrollTop = 0; el.focus();
+      var list = await punchesOn(spec.workDate);
+      if (!CORR.open || CORR.row !== r) return;
+      CORR.punches = list.filter(function (x) { return x.staff_id === r.staff_id; })
+                         .sort(function (a, b) { return a.punched_at < b.punched_at ? -1 : 1; });
+      corrRender();
+      corrPreview();
+    }
+    function corrDirty() {
+      if (!CORR.open || !CORR.form) return false;
+      var s = CorrectForm.start(CORR.spec), f = CORR.form;
+      return f.tIn !== s.tIn || f.tOut !== s.tOut || !!f.next !== !!s.next || !!f.why;
+    }
+    function corrClose(force) {
+      if (!CORR.open) return;
+      if (!force && corrDirty() && !CORR.note) { CORR.askClose = true; corrRender(); return; }
+      CORR = { open: false };
+      document.getElementById("corr-panel").hidden = true;
+    }
+    function corrRender() {
+      var el = document.getElementById("corr-panel");
+      if (!CORR.open) return;
+      var r = CORR.row, s = CORR.spec, h = hoursOf(r), p = payOf(r), canEdit = Dash.can("attendance.edit");
+      var code = CODES[r.staff_id] || "", co = companyName(COMPANY[r.staff_id]);
+      var head = '<div class="corr-head"><div>' +
+        '<div class="corr-eyebrow">Correct Hours</div>' +
+        '<h2 id="corr-title">' + esc(r.full_name) + "</h2>" +
+        '<div class="corr-sub">' + esc([code, co, friendlyDate(s.workDate), siteText(r)].filter(Boolean).join(" · ")) + "</div></div>" +
+        '<button type="button" class="dl-x" data-corr="close" aria-label="Close" title="Close">&times;</button></div>';
+      var now = '<p class="corr-now"><span class="pay ' + p.cls + '">' + (p.key === "unpriced" ? "Unpriced" : esc(p.word)) + "</span>" +
+        (p.key === "unpriced" && p.why && p.why !== "Unpriced" ? '<span class="facts-why">' + esc(p.why) + "</span>" : "") +
+        (h ? '<span class="corr-fig">' + hm(h.normal) + " + " + hm(h.ot) + " OT</span>" : "") + "</p>";
+      var note = CORR.note ? '<div class="banner banner-green corr-note">' + esc(CORR.note) + "</div>" : "";
+      var taps = CORR.punches === null ? '<p class="detail-note">Loading punches…</p>'
+        : (CORR.punches.length
+            ? '<p class="detail-head">Original Punches</p><ul class="punch-lines">' + CORR.punches.map(punchLine).join("") + "</ul>"
+            : '<p class="detail-note">No Punches Found</p>');
+      var body = "";
+      if (!canEdit) body = "";
+      else if (Number(r.shift_count) > 1) body = twoShiftNote(r);
+      else if (s.workDate >= Dash.todayKL()) body = '<p class="detail-note">A day can be corrected once it is over.</p>';
+      else if (CORR.askClose) {
+        body = '<div class="corr-ask"><span class="q">Close without saving?</span>' +
+          '<button type="button" class="btn" data-corr="close-discard">Discard</button>' +
+          '<button type="button" class="btn btn-primary" data-corr="close-keep">Keep Editing</button></div>';
+      } else {
+        body = '<p class="detail-head">The Ruling</p>' +
+          CorrectForm.html(s, CORR.form, { busy: CORR.busy, err: CORR.err, invalid: CORR.invalid, saveLabel: "Save Correction" }) +
+          '<p class="corr-preview" id="corr-preview"></p>' +
+          (r.has_correction
+            ? (CORR.askRemove
+                ? '<div class="corr-ask"><span class="q">Remove this correction? The worker\u2019s own punch times stand again.</span>' +
+                  '<button type="button" class="btn" data-corr="remove-yes"' + (CORR.busy ? " disabled" : "") + ">Remove</button>" +
+                  '<button type="button" class="btn btn-primary" data-corr="remove-no">Keep</button></div>'
+                : '<div class="corr-remove"><button type="button" class="btn" data-corr="remove-ask"' + (CORR.busy ? " disabled" : "") + ">Remove Correction</button></div>")
+            : "");
+      }
+      el.innerHTML = head + now + note + correctionBlock(r) + taps + body;
+      corrPaintPreview();
+    }
+    function corrPaintPreview() {
+      var el = document.getElementById("corr-preview");
+      if (!el) return;
+      var p = CORR.preview;
+      el.innerHTML = p === "pending" ? "Pricing…"
+        : (p && typeof p === "object")
+          ? (p.working_minutes === null || p.working_minutes === undefined
+              ? "After saving: <b>Unpriced</b> — check the times"
+              : "After saving: <b>" + hm(Number(p.working_minutes) / 60) + " + " + hm(Number(p.ot_minutes || 0) / 60) + " OT</b>")
+          : "";
+    }
+    // the figure the ruling WOULD give — asked of the database, never worked out here
+    async function corrPreview() {
+      if (!CORR.open || !Dash.can("attendance.edit") || !CORR.form) return;
+      // read the pair with a stand-in reason: a missing reason stops a save, not the figure
+      var got = CorrectForm.read(CORR.spec, Object.assign({}, CORR.form, { why: CORR.form.why || "preview" }));
+      var st = CorrectForm.standing(CORR.spec);
+      if (got.error) { CORR.preview = null; CORR.previewKey = ""; corrPaintPreview(); return; }
+      var tin = got.inISO || st.inAt, tout = got.outISO || st.outAt;
+      // the pair as it stands is the figure already shown: nothing to preview
+      if (!tin || !tout || (tin === st.inAt && tout === st.outAt)) { CORR.preview = null; CORR.previewKey = ""; corrPaintPreview(); return; }
+      var key = tin + "|" + tout;
+      if (key === CORR.previewKey) return;
+      CORR.previewKey = key; CORR.preview = "pending"; corrPaintPreview();
+      try {
+        var priced = await Dash.priceShift(CORR.row.staff_id, CORR.spec.workDate, tin, tout);
+        if (!CORR.open || CORR.previewKey !== key) return;
+        CORR.preview = priced === null ? "none" : priced;      // null = the database predates 0127: no preview
+      } catch (e) { CORR.preview = "none"; }
+      corrPaintPreview();
+    }
+    // after a write: re-read the one day, let the view patch its rows in
+    async function corrRefresh() {
+      var r = CORR.row, date = CORR.spec.workDate;
+      var rows = dropTest(await Dash.getShifts(date, null));
+      var fresh = rows.filter(function (x) { return x.staff_id === r.staff_id; })[0] || null;
+      PUNCH_DAY[date] = null;
+      if (fresh) {
+        CORR.row = fresh; CORR.spec = corrSpec(fresh); CORR.form = CorrectForm.start(CORR.spec);
+        CORR.preview = null; CORR.previewKey = ""; CORR.askRemove = false;
+      }
+      if (typeof window.__attRefresh === "function") await window.__attRefresh(date, r.staff_id, fresh);
+    }
+    async function corrSave() {
+      var got = CorrectForm.read(CORR.spec, CORR.form);
+      if (got.error) {
+        CORR.err = got.error; CORR.invalid = got.field; corrRender();
+        var f = document.querySelector('#corr-panel [data-cf="' + got.field + '"]'); if (f) f.focus();
+        return;
+      }
+      CORR.busy = true; CORR.err = ""; CORR.invalid = ""; CORR.note = ""; corrRender();
+      try {
+        var res = await Dash.setDayCorrection(CORR.row.staff_id, CORR.spec.workDate, got.inISO, got.outISO, got.why);
+        if (res && res.ok) {
+          CORR.note = "Saved — " + CORR.row.full_name + "\u2019s hours for " + friendlyDate(CORR.spec.workDate) + " are now " +
+                      String(res.in_at_local || "").slice(11) + " to " + String(res.out_at_local || "").slice(11) +
+                      ". The worker will see the reason in their app.";
+          await corrRefresh();
+        } else {
+          CORR.err = "Could not save the correction: " + ((res && res.message) || (res && res.code) || "unknown error");
+        }
+      } catch (e) { CORR.err = "Could not save the correction: " + (e.message || e); }
+      CORR.busy = false; corrRender();
+    }
+    async function corrRemove() {
+      CORR.busy = true; CORR.err = ""; CORR.note = ""; corrRender();
+      try {
+        var res = await Dash.clearDayCorrection(CORR.row.staff_id, CORR.spec.workDate);
+        if (res && res.ok) {
+          CORR.note = "Correction removed — " + CORR.row.full_name + "\u2019s own punch times for " + friendlyDate(CORR.spec.workDate) + " stand again.";
+          await corrRefresh();
+        } else {
+          CORR.err = "Could not remove the correction: " + ((res && res.message) || (res && res.code) || "unknown error");
+        }
+      } catch (e) { CORR.err = "Could not remove the correction: " + (e.message || e); }
+      CORR.busy = false; CORR.askRemove = false; corrRender();
+    }
+    (function wireCorr() {
+      var el = document.getElementById("corr-panel"), timer = null;
+      function onTyped(ev) {                           // input while typing, change on a time picker
+        var k = ev.target.getAttribute && ev.target.getAttribute("data-cf");
+        if (!k || !CORR.open) return;
+        if (k === "next") CORR.form.next = ev.target.checked; else CORR.form[k] = ev.target.value;
+        if (ev.target.getAttribute("aria-invalid")) ev.target.removeAttribute("aria-invalid");
+        clearTimeout(timer); timer = setTimeout(corrPreview, 350);
+      }
+      el.addEventListener("input", onTyped);
+      el.addEventListener("change", onTyped);
+      el.addEventListener("click", async function (ev) {
+        var t = ev.target.closest ? ev.target.closest("[data-cf-reason],[data-cf-save],[data-cf-cancel],[data-corr]") : null;
+        if (!t || !CORR.open) return;
+        if (t.hasAttribute("data-cf-reason")) {
+          CORR.form.why = t.getAttribute("data-cf-reason"); CORR.err = ""; CORR.invalid = ""; corrRender();
+          var w = el.querySelector('[data-cf="why"]'); if (w) w.focus();
+          corrPreview(); return;
+        }
+        if (t.hasAttribute("data-cf-cancel")) { corrClose(false); return; }
+        if (t.hasAttribute("data-cf-save")) { await corrSave(); return; }
+        var a = t.getAttribute("data-corr");
+        if (a === "close") corrClose(false);
+        else if (a === "close-discard") corrClose(true);
+        else if (a === "close-keep") { CORR.askClose = false; corrRender(); }
+        else if (a === "remove-ask") { CORR.askRemove = true; corrRender(); }
+        else if (a === "remove-no") { CORR.askRemove = false; corrRender(); }
+        else if (a === "remove-yes") await corrRemove();
+      });
+      document.addEventListener("keydown", function (ev) { if (ev.key === "Escape" && CORR.open) corrClose(false); });
+      // a click anywhere else closes it (capture phase: the panel re-renders on its own clicks)
+      document.addEventListener("click", function (ev) {
+        if (!CORR.open || el.contains(ev.target)) return;
+        if (ev.target.closest && (ev.target.closest("[data-corr-open]") || ev.target.closest("[data-corr-month]"))) return;
+        corrClose(false);
+      }, true);
+    })();
+
     window.onShellReady = async function () {
       var params  = new URLSearchParams(location.search);
       var date    = params.get("date") || Dash.todayKL();
@@ -1144,24 +1482,7 @@
           tbody.innerHTML = '<tr><td colspan="8" class="empty">No punches on ' + esc(friendlyDate(date)) + ".</td></tr>";
         } else {
           tbody.innerHTML = shifts.map(function (s, i) {
-            var h = hoursOf(s), p = payOf(s), l = locOf(s);
-            return '<tr class="shift-row" data-i="' + i + '" data-company="' + esc(COMPANY[s.staff_id] || "") +
-                   '" data-pay="' + p.key + '" data-loc="' + l.key + '" data-find="' + esc(findKey(s)) + '">' +
-              codeCell(s.staff_id) +
-              '<td><button type="button" class="worker-btn" data-i="' + i + '" ' +
-                   'aria-expanded="false" aria-controls="d' + i + '">' +
-                 '<span class="who-line"><strong title="' + esc(s.full_name) + '">' + esc(s.full_name) + "</strong>" + codeTag(s.staff_id) +
-                 "</span></button></td>" +
-              siteCell(s) +
-              // the times the day is PAID from, the office's where it ruled (0092)
-              "<td>" + shiftCell(s) + "</td>" +
-              // the database's figures, or a dash where it declined to price the day
-              '<td class="num">' + (h ? hm(h.normal) : "—") + "</td>" +
-              '<td class="num">' + (h ? hm(h.ot) : "—") + "</td>" +
-              payCell(s) +
-              locCell(s) +
-            "</tr>" +
-            '<tr class="detail-row" id="d' + i + '" hidden><td colspan="8"></td></tr>';
+            return dayRowHtml(s, i) + '<tr class="detail-row" id="d' + i + '" hidden><td colspan="8"></td></tr>';
           }).join("");
           if (findEl.value || companyEl.value || showEl.value) applyFind("rows", 8);
         }
@@ -1188,187 +1509,8 @@
           });
         }
 
-        // WHO MADE THIS PUNCH (0092), and what else the office should know
-        // about it. A time the worker tapped and a time somebody typed in for
-        // him must never look alike — when hours are disputed, this line is
-        // the difference between his own record and an entry made on his behalf.
-        function provenance(p) {
-          var out = [];
-          if (p.punched_by === "office") {
-            out.push('<span class="badge badge-amended" title="' +
-              esc("Entered by the office" + (p.entered_by_name ? " (" + p.entered_by_name + ")" : "") +
-                  ", not tapped by the worker.") + '">Office' +
-              (p.entered_by_name ? " · " + esc(p.entered_by_name) : "") + "</span>");
-          } else if (p.punched_by === "system") {
-            out.push('<span class="badge badge-gray" title="No punch-out by the next morning, so the ' +
-              'system closed the shift. Not tapped by the worker.">Auto Closed</span>');
-          } else if (p.punched_by === "worker") {
-            out.push('<span class="badge badge-verified" title="Tapped by the worker on their own ' +
-              'phone.">Worker</span>');
-          }
-          if (p.synced_late) {
-            out.push('<span class="badge badge-gray" title="The phone was offline when this was ' +
-              'tapped and sent it later. The time shown is when it was really tapped.">Synced Late</span>');
-          }
-          if (p.wrong_site) {
-            var at = p.detected_project_code || p.detected_project_name;
-            out.push('<span class="badge badge-anomaly" title="Tapped nearer a different site than ' +
-              'the one this worker is assigned to.">Wrong Site' + (at ? " · " + esc(at) : "") + "</span>");
-          }
-          return out.join(" ");
-        }
-
-        function punchLine(p) {
-          var v = p.verification_status || "";
-          var vCls = v === "verified" ? "verified" : "anomaly";
-          var lat = p.gps_lat !== undefined ? p.gps_lat : p.gps_latitude;
-          var lng = p.gps_lng !== undefined ? p.gps_lng : p.gps_longitude;
-          // The coordinates are not something the office reads; they stay on
-          // the line as a tooltip for whoever is chasing a location dispute.
-          var hasLoc = lat !== null && lat !== undefined && lng !== null && lng !== undefined;
-          var coords = hasLoc ? Number(lat).toFixed(5) + ", " + Number(lng).toFixed(5) : "";
-          // Only a distance is worth words here: whether a location was caught
-          // at all is what the Location badge beside it already says. A worker
-          // with no site of their own gets no distance: "From Nearest Site" was
-          // built (hf-database PR #12) and put ON HOLD by the owner — the nearest
-          // site is not always the one he was at. See HF Roadmap for its trigger.
-          var d = plainDistance(p.distance_m);
-          var where = d ? d + " From Site" : "";
-          if (coords) coords = "GPS " + coords;
-          // The system's own note on a shift it closed only spells out what
-          // "Auto Closed" means, and the badge's hover says that. A note a
-          // PERSON typed is the one thing on this line found nowhere else.
-          var note = (p.punched_by === "system" || v === "auto_closed") ? "" : capFirst(p.entry_note);
-          var tail = [where, note ? "Note: " + note : ""].filter(Boolean).join(" · ");
-          return "<li" + (coords ? ' title="' + esc(coords) + '"' : "") + ">" +
-                 '<span class="pl-type">' + esc((p.punch_type || "").toUpperCase()) + "</span>" +
-                 '<span class="pl-time">' + Dash.klTime(p.punched_at) + "</span>" +
-                 // A shift the office or the system closed has no location to check —
-                 // its "status" IS who closed it, and the who-made-it badge says that.
-                 // Printing both gave "Auto Closed  Auto Closed" on one line.
-                 ((p.punched_by && (v === "office_closed" || v === "auto_closed")) ? ""
-                   : '<span class="badge badge-' + vCls + '">' + esc(checkWords(v)) + "</span> ") +
-                 provenance(p) +
-                 (tail ? '<span class="pl-where">' + esc(tail) + "</span>" : "") + "</li>";
-        }
-
-        /* ---- Correct Hours (DB 0090–0092) ----------------------------------
-           The office's ruling on a day's true hours. It NEVER edits or deletes
-           a worker's punch — "else they would say we are taking advantage" —
-           it lays a decision on top, keeps the reason beside it, and shows the
-           two together from then on. So this block always reads "he tapped X,
-           we set Y, because Z", never just Y. */
-
-        // Only the end the office ruled on gets a line. What the worker tapped
-        // is not repeated here — it is in the punch list directly underneath,
-        // under its own "Original Punches" heading — and an end the office left
-        // alone has nothing to say.
-        function provLine(label, ruled) {
-          if (!ruled) return "";
-          return '<li><span class="pl-type">' + label + "</span>" +
-            '<span class="pl-time">' + esc(Dash.klTime(ruled)) + "</span>" +
-            '<span class="badge badge-amended">Set By Office</span></li>';
-        }
-
-        function correctionBlock(s) {
-          if (!s.has_correction) return "";
-          var by = s.corrected_by_name ? " · " + s.corrected_by_name : "";
-          var at = s.corrected_at ? " · " + Dash.klDateTime(s.corrected_at) : "";
-          return '<div class="amend-note">' +
-            '<p class="detail-note"><strong>Hours Corrected By The Office</strong>' + esc(by + at) + "</p>" +
-            '<ul class="punch-lines">' +
-              provLine("IN",  s.corrected_in_at) +
-              provLine("OUT", s.corrected_out_at) +
-            "</ul>" +
-            '<p class="detail-note">Reason: <em>' + esc(capFirst(s.correction_reason) || "—") + "</em></p>" +
-          "</div>";
-        }
-
-        // The reasons the office actually gives, one press each. They FILL the box —
-        // the office can still change the words, and the worker reads whatever is
-        // left in it. Typing the same sentence forty times a month is how reasons
-        // turn into "ok" and "fix".
-        var REASONS = ["Forgot To Punch Out", "Forgot To Punch In", "Phone Problem", "Punched At The Wrong Time"];
-
-        // "HH:MM" (Malaysia wall time) for a time input, from a timestamp
-        function klHHMM(ts) { var v = klInputValue(ts); return v ? v.slice(11, 16) : ""; }
-        // was this punch-out on the day AFTER the work-day? (a shift that ran past midnight)
-        function outIsNextDay(ts) { var v = klInputValue(ts); return !!v && v.slice(0, 10) > date; }
-
-        function amendForm(s, i) {
-          // Reading the day is one permission, ruling on it is another. A day
-          // holding two shifts is ruled shift by shift on the Exceptions page.
-          if (!Dash.can("attendance.edit") || Number(s.shift_count) > 1) return "";
-          // WHICH DAYS MAY BE CORRECTED IS THE DATABASE'S RULE, NOT THIS PAGE'S.
-          // set_day_correction refuses a day that is not over yet and answers
-          // with the reason in words the office can read, so the button stays
-          // live and that answer is what gets shown. The client used to repeat
-          // the rule and grey the button out; it hid the whole feature on the
-          // date this page opens on, and it meant one rule living in two places
-          // — the same trap 0091 pulled the hours calculation out of.
-          //
-          // THE FORM ASKS FOR TWO TIMES, NOT TWO DATE-AND-TIMES. The date is
-          // almost never what is wrong, and one box holding "17/08/2026 03:16 PM"
-          // made the hour hard to hit and the date easy to bump — which the
-          // database then refuses ("not on that work-day"). The work-day is
-          // written out as text; the one real exception, a shift that ran past
-          // midnight, is a tick-box.
-          var inAt = s.corrected_in_at || s.first_in_at, outAt = s.corrected_out_at || s.last_out_at;
-          return '<div class="amend-wrap">' +
-            '<button type="button" class="amend-open" data-amend="' + i + '">' +
-              (s.has_correction ? "Change Correction" : "Correct Hours") + "</button>" +
-            '<div class="claim-form amend-form" id="amend' + i + '" hidden>' +
-              '<div class="amend-title">Correcting <strong>' + esc(s.full_name) + "</strong> — " +
-                esc(friendlyDate(date)) + "</div>" +
-              '<div class="amend-times">' +
-                '<label>Punch In <input type="time" id="amend-in' + i + '" value="' + esc(klHHMM(inAt)) + '"></label>' +
-                '<label>Punch Out <input type="time" id="amend-out' + i + '" value="' + esc(klHHMM(outAt)) + '"></label>' +
-                '<label class="amend-next"><input type="checkbox" id="amend-next' + i + '"' +
-                  (outIsNextDay(outAt) ? " checked" : "") + "> Punch Out Was The Next Day</label>" +
-              "</div>" +
-              '<div class="amend-reason">' +
-                '<label for="amend-why' + i + '">Reason</label>' +
-                '<div class="reason-chips">' + REASONS.map(function (r) {
-                  return '<button type="button" class="reason-chip" data-reason="' + esc(r) + '" data-for="' + i + '">' +
-                         esc(r) + "</button>";
-                }).join("") + "</div>" +
-                '<input type="text" id="amend-why' + i + '" placeholder="Press a reason above, or type your own" value="' +
-                  esc(s.correction_reason || "") + '">' +
-              "</div>" +
-              '<div id="amend-msg' + i + '" class="amend-msg"></div>' +
-              '<div class="amend-actions">' +
-                '<button type="button" class="btn-primary" data-amend-save="' + i + '">Save Correction</button>' +
-                '<button type="button" data-amend-cancel="' + i + '">Cancel</button>' +
-                (s.has_correction
-                  ? '<button type="button" class="amend-remove" data-amend-clear="' + i + '">Remove Correction</button>'
-                  : "") +
-              "</div>" +
-              '<span class="muted-line">The worker will see this reason. Malaysia time.</span>' +
-            "</div>" +
-          "</div>";
-        }
-
-        // THE DRAWER SAYS ONLY WHAT THE ROW CANNOT. It used to open with a
-        // sentence restating the row's own hours and a count of the punches
-        // listed right under it — the owner: "doing the job double… more words
-        // do not mean better". The row has the figures and the badges; this has
-        // the office's ruling, the punches themselves, and the form.
-        // an unpriced day says why, first, with the door to settle it
-        function unpricedNote(s) {
-          var p = payOf(s);
-          if (p.key !== "unpriced") return "";
-          var how = p.why === "Overlong" ? "accept it as punched or rule the times on the Exceptions page"
-                  : p.why === "No Punch Out" ? "rule the finish time on the Exceptions page, or below"
-                  : "no punch-out yet";
-          return '<p class="detail-note unpriced-note"><strong>' + esc(p.word) + "</strong> — " + esc(how) +
-                 (Dash.can("attendance.edit") && p.why !== "Still Open" ? ' · <a class="fix-link" href="exceptions.html">Exceptions \u2197</a>' : "") + "</p>";
-        }
-        // two shifts in one day cannot be ruled from this form (several_shifts): say so
-        function twoShiftNote(s) {
-          return (Number(s.shift_count) > 1 && Dash.can("attendance.edit"))
-            ? '<p class="detail-note"><strong>' + Number(s.shift_count) + " shifts this day</strong> — rule them one by one on the " +
-              '<a class="fix-link" href="exceptions.html">Exceptions page \u2197</a>.</p>' : "";
-        }
+        // THE DRAWER SAYS ONLY WHAT THE ROW CANNOT: an unpriced day's reason,
+        // the office's ruling, the punches themselves, and the door to the panel.
         function detailHtml(s, punches, i) {
           return '<div class="detail-box">' +
             unpricedNote(s) + twoShiftNote(s) +
@@ -1377,7 +1519,7 @@
               ? (s.has_correction ? '<p class="detail-head">Original Punches</p>' : "") +
                 '<ul class="punch-lines">' + punches.map(punchLine).join("") + "</ul>"
               : '<p class="detail-note">No Punches Found</p>') +
-            amendForm(s, i) +
+            corrButton(s, i) +
           "</div>";
         }
 
@@ -1420,167 +1562,49 @@
           if (!open) await loadDrawer(i);
         });
 
-        /* ---- Correct Hours: open, save, remove -------------------------------
-           Its own delegated listener rather than more branches inside the
-           drawer's: opening a name and ruling on a day are different jobs, and
-           a throw in one should not take the other down with it.
-
-           Both writes reload the page on success. The ruling changes the hours
-           column, the badges and the day's totals at once, and re-deriving all
-           of that by hand is exactly how a screen ends up disagreeing with the
-           database it just wrote to. What the reload used to LOSE was the
-           answer to "did that work?": the row closed and nothing said so. So a
-           note is left for the reloaded page (sessionStorage — this tab only,
-           gone once shown), which re-opens the row and says what was saved. */
-        function leaveNote(note) {
-          try { sessionStorage.setItem("att.saved", JSON.stringify(note)); } catch (e) { /* private mode */ }
-        }
-        function closeForm(i) {
-          var form = document.getElementById("amend" + i), opener = tbody.querySelector('[data-amend="' + i + '"]');
-          if (form) form.hidden = true;
-          if (opener) opener.hidden = false;
-          var m = document.getElementById("amend-msg" + i); if (m) m.innerHTML = "";
-        }
-        function openForm(i) {
-          var form = document.getElementById("amend" + i), opener = tbody.querySelector('[data-amend="' + i + '"]');
-          if (!form) return;
-          form.hidden = false;
-          // the form has its own Save and Cancel; the button that opened it steps aside
-          if (opener) opener.hidden = true;
-          document.getElementById("amend-in" + i).focus();
-        }
-        function formError(i, text, focusId) {
-          // one problem at a time: the outline left by an earlier message goes first
-          Array.prototype.forEach.call(document.querySelectorAll("#amend" + i + " .field-error"), function (x) { x.classList.remove("field-error"); });
-          document.getElementById("amend-msg" + i).innerHTML = '<div class="banner banner-red">' + esc(text) + "</div>";
-          var el = focusId && document.getElementById(focusId);
-          if (el) { el.classList.add("field-error"); el.focus(); }
-        }
-
-        tbody.addEventListener("input", function (ev) {           // the red outline leaves once they start fixing it
-          if (ev.target.classList && ev.target.classList.contains("field-error")) ev.target.classList.remove("field-error");
+        /* ---- Correct Hours: the panel (Release 2) ----------------------------
+           The button in a drawer opens the panel on the right. When the panel
+           saves or removes a ruling it re-reads that day and hands the fresh
+           row here; this view swaps its own row and drawer in place. */
+        tbody.addEventListener("click", function (ev) {
+          var b = ev.target.closest ? ev.target.closest("[data-corr-open]") : null;
+          if (!b) return;
+          corrOpen(shifts[Number(b.getAttribute("data-corr-open"))], "day");
         });
-
-        tbody.addEventListener("click", async function (ev) {
-          if (!ev.target.closest) return;
-
-          var toggle = ev.target.closest("[data-amend]");
-          if (toggle) { openForm(toggle.getAttribute("data-amend")); return; }
-
-          var cancel = ev.target.closest("[data-amend-cancel]");
-          if (cancel) { closeForm(cancel.getAttribute("data-amend-cancel")); return; }
-
-          var chip = ev.target.closest(".reason-chip");
-          if (chip) {
-            var box = document.getElementById("amend-why" + chip.getAttribute("data-for"));
-            box.value = chip.getAttribute("data-reason");
-            box.classList.remove("field-error");
-            box.focus();                                          // they can add "— supervisor confirmed 6 pm"
-            return;
-          }
-
-          var save = ev.target.closest("[data-amend-save]");
-          if (save) {
-            var i   = save.getAttribute("data-amend-save");
-            var s   = shifts[Number(i)];
-            var why = document.getElementById("amend-why" + i).value.trim();
-            var tIn  = document.getElementById("amend-in" + i).value;      // "HH:MM" or ""
-            var tOut = document.getElementById("amend-out" + i).value;
-            var next = document.getElementById("amend-next" + i).checked;
-            document.getElementById("amend-msg" + i).innerHTML = "";
-
-            // Send ONLY the end that was changed. The form used to send both
-            // times every time, so correcting a punch-out also recorded the
-            // punch-in as "set by the office" — and the drawer then told the
-            // worker the office had changed a time it never touched. An end left
-            // alone goes as null ("keep the worker's own tap"), or as the ruling
-            // already standing on it, since a save replaces the whole correction.
-            var hadIn = s.corrected_in_at || s.first_in_at, hadOut = s.corrected_out_at || s.last_out_at;
-            var inISO  = (tIn && tIn !== klHHMM(hadIn))
-              ? date + "T" + tIn + ":00+08:00" : (s.corrected_in_at || null);
-            var outISO = (tOut && (tOut !== klHHMM(hadOut) || next !== outIsNextDay(hadOut)))
-              ? (next ? shiftDay(date, 1) : date) + "T" + tOut + ":00+08:00" : (s.corrected_out_at || null);
-
-            if (!inISO && !outISO) {
-              formError(i, "Nothing has been changed yet — change the time that is wrong, then save.", "amend-in" + i);
-              return;
-            }
-            // a plain slip worth catching here, in words that say what to do about it
-            if (tIn && tOut && !next && tOut <= tIn) {
-              formError(i, "Punch Out is not after Punch In. If the worker finished after midnight, " +
-                           "tick “Punch Out Was The Next Day”.", "amend-out" + i);
-              return;
-            }
-            // Checked here as well as in the database because this one is not
-            // an error, it is the point: the worker is owed the reason.
-            if (!why) { formError(i, "Give a reason — the worker reads it in their app.", "amend-why" + i); return; }
-
-            save.disabled = true; save.textContent = "Saving…";
-            try {
-              var res = await Dash.setDayCorrection(s.staff_id, date, inISO, outISO, why);
-              if (res && res.ok) {
-                leaveNote({ date: date, staffId: s.staff_id, text: "Saved — " + s.full_name + "’s hours for " +
-                  friendlyDate(date) + " are now " + String(res.in_at_local || "").slice(11) + " to " +
-                  String(res.out_at_local || "").slice(11) + ". The worker will see the reason in their app." });
-                location.reload(); return;
-              }
-              // the database's messages are written for the office to read
-              formError(i, "Could not save the correction: " + ((res && res.message) || (res && res.code) || "unknown error"));
-            } catch (e) {
-              formError(i, "Could not save the correction: " + (e.message || e));
-            }
-            save.disabled = false; save.textContent = "Save Correction";
-            return;
-          }
-
-          var drop = ev.target.closest("[data-amend-clear]");
-          if (drop) {
-            var ci = drop.getAttribute("data-amend-clear"), cs = shifts[Number(ci)];
-            if (!confirm("Remove this correction? " + cs.full_name + "’s own punch times will stand again.")) return;
-            drop.disabled = true;
-            try {
-              var r = await Dash.clearDayCorrection(cs.staff_id, date);
-              if (r && r.ok) {
-                leaveNote({ date: date, staffId: cs.staff_id, text: "Correction removed — " + cs.full_name +
-                  "’s own punch times for " + friendlyDate(date) + " stand again." });
-                location.reload(); return;
-              }
-              formError(ci, "Could not remove the correction: " + ((r && r.message) || (r && r.code) || "unknown error"));
-            } catch (e2) {
-              formError(ci, "Could not remove the correction: " + (e2.message || e2));
-            }
-            drop.disabled = false;
-          }
-        });
+        window.__attRefresh = async function (day, staffId, fresh) {
+          if (day !== date) return;
+          var idx = -1;
+          shifts.forEach(function (x, k) { if (x.staff_id === staffId) idx = k; });
+          if (idx < 0) return;
+          if (fresh) shifts[idx] = fresh;
+          var tr = tbody.querySelector('tr.shift-row[data-i="' + idx + '"]');
+          var wasOpen = !!(tr && tr.classList.contains("open"));
+          if (tr) tr.outerHTML = dayRowHtml(shifts[idx], idx);
+          var d = document.getElementById("d" + idx);
+          if (d) { delete d.dataset.loaded; d.querySelector("td").innerHTML = ""; }
+          punchCache = null;
+          if (wasOpen) { setOpen(idx, true); await loadDrawer(idx); }
+          setReview(friendlyDate(date), shifts);
+          applyFind("rows", 8);
+        };
 
         /* ---- arriving with something to show ----------------------------------
-           Either a note left by a save just before the reload, or ?open=<worker>
-           from the month view's "Correct This Day". Both open that worker's row;
-           the second also opens the form, since correcting is why they came. */
-        var note = null;
-        try { note = JSON.parse(sessionStorage.getItem("att.saved") || "null"); sessionStorage.removeItem("att.saved"); }
-        catch (e) { note = null; }
-        if (note && note.date !== date) note = null;
-        var wantOpen = note ? note.staffId : params.get("open");
+           ?open=<worker> from the month view, Exceptions or Requests: open that
+           worker's row and, for a login that may rule a finished day, the panel. */
+        var wantOpen = params.get("open");
         if (wantOpen) {
           var idx = -1;
           shifts.forEach(function (x, k) { if (x.staff_id === wantOpen) idx = k; });
           if (idx >= 0) {
             var tr = tbody.querySelector('tr.shift-row[data-i="' + idx + '"]');
-            if (tr && tr.hidden) { findEl.value = ""; applyFind("rows", 8); }   // never open a row the Find box is hiding
+            if (tr && tr.hidden) { findEl.value = ""; showEl.value = ""; applyFind("rows", 8); }   // never open a row the filters hide
             setOpen(idx, true);
             await loadDrawer(idx);
-            var box = document.querySelector("#d" + idx + " .detail-box");
-            if (note && box) box.insertAdjacentHTML("afterbegin", '<div class="banner banner-green saved-note">' + esc(note.text) + "</div>");
-            if (!note && Dash.can("attendance.edit")) openForm(idx);
+            if (Dash.can("attendance.edit") && Number(shifts[idx].shift_count) <= 1 && date < Dash.todayKL()) corrOpen(shifts[idx], "day");
             if (tr && tr.scrollIntoView) tr.scrollIntoView({ block: "center" });
-          } else if (note) {
-            document.getElementById("error").innerHTML = '<div class="banner banner-green">' + esc(note.text) + "</div>";
           }
-          if (params.has("open")) {                     // used once — stepping to another day must not re-open it
-            params.delete("open");
-            history.replaceState(null, "", location.pathname + (params.toString() ? "?" + params : ""));
-          }
+          params.delete("open");                       // used once — stepping to another day must not re-open it
+          history.replaceState(null, "", location.pathname + (params.toString() ? "?" + params : ""));
         }
 
         // raw punches
@@ -2031,7 +2055,7 @@
         // will not correct a day that is not over.
         var dayLink = "attendance.html?date=" + encodeURIComponent(day) + (w.staff_id ? "&open=" + encodeURIComponent(w.staff_id) : "");
         var fixLink = (canFix && day < todayIso && (p.key === "unpriced" || (r.early_start && !r.early_accepted)))
-          ? '<a class="fix-link" href="' + dayLink + '">Correct This Day</a>' : "";
+          ? '<a class="fix-link" href="' + dayLink + '" data-corr-month="' + esc(w.staff_id) + "|" + esc(day) + '">Correct This Day</a>' : "";
         // the worker's REST DAY stands out (DB 0103); before 0104 a Sunday is the best guess
         var isRest = r.day_kind ? r.day_kind === "rest" : isSunday(r.work_date);
         return "<tr" + (isRest ? ' class="is-rest"' : "") + ">" +
@@ -2051,31 +2075,33 @@
         lines + "</tbody></table></div>";
     }
 
-    async function renderMonth(month, site) {
+    // THE MONTH IS STATE (Release 2): the rows read once, the workers built from
+    // them, painted by paintMonth; a save in the panel swaps that day's rows and
+    // repaints with the same drawers open. Nothing reloads.
+    var MONTH = { month: "", site: "", rows: [], workers: [], wired: false };
+
+    function monthOpen(i, on) {
       var tbody = document.getElementById("month-rows");
-      var note = document.getElementById("month-note");
-      tbody.innerHTML = '<tr><td colspan="7" class="empty">Reading the month…</td></tr>';
-
-      var rows = await fetchMonth(month, site, function (done, total) {
-        tbody.innerHTML = '<tr><td colspan="7" class="empty">Reading the month… ' +
-                          done + " of " + total + " days</td></tr>";
-      });
-      var workers = byWorker(rows);
-      wireDownloadDialog(month, site, workers);      // opens pre-filled with this month; reuses what was just read
-      setReview(friendlyMonth(month), rows);
-      if (Dash.can("attendance.edit")) {              // requests still waiting, from the payroll-close list
-        unpricedFor(month).then(function (u) {
-          REVIEW.pending = u.filter(function (x) { return x.why === "pending_request"; }).length;
-          renderOpenShifts();
-        });
+      var btn = tbody.querySelector('.worker-btn[data-i="' + i + '"]'), row = document.getElementById("m" + i);
+      if (!btn || !row) return;
+      btn.setAttribute("aria-expanded", on ? "true" : "false");
+      btn.parentNode.parentNode.classList.toggle("open", on);
+      row.hidden = !on;
+      if (on && !row.dataset.loaded) {
+        row.querySelector("td").innerHTML = monthDetail(MONTH.workers[i]);
+        row.dataset.loaded = "1";
       }
+    }
 
+    function paintMonth(openIds) {
+      var tbody = document.getElementById("month-rows"), note = document.getElementById("month-note");
+      var workers = MONTH.workers;
       if (!workers.length) {
-        tbody.innerHTML = '<tr><td colspan="7" class="empty">No punches in ' + esc(friendlyMonth(month)) + ".</td></tr>";
+        tbody.innerHTML = '<tr><td colspan="7" class="empty">No punches in ' + esc(friendlyMonth(MONTH.month)) + ".</td></tr>";
         note.hidden = true;
+        updateMonthTotals();
         return;
       }
-
       tbody.innerHTML = workers.map(function (w, i) {
         // PAY for the month: Ready, or how many days have no figure and why;
         // the running and early-start days as facts underneath
@@ -2123,21 +2149,60 @@
 
       if (document.getElementById("f-find").value || document.getElementById("f-company").value || document.getElementById("f-show").value) applyFind("month-rows", 7);
       updateMonthTotals();
-
-      tbody.addEventListener("click", function (ev) {
-        var btn = rowButton(ev);
-        if (!btn) return;
-        var i = btn.getAttribute("data-i");
-        var row = document.getElementById("m" + i);
-        var open = btn.getAttribute("aria-expanded") === "true";
-        btn.setAttribute("aria-expanded", open ? "false" : "true");
-        btn.parentNode.parentNode.classList.toggle("open", !open);
-        row.hidden = open;
-        if (!open && !row.dataset.loaded) {
-          row.querySelector("td").innerHTML = monthDetail(workers[Number(i)]);
-          row.dataset.loaded = "1";
-        }
+      (openIds || []).forEach(function (id) {            // the drawers that were open stay open
+        var i = -1;
+        workers.forEach(function (w, k) { if (w.staff_id === id) i = k; });
+        if (i >= 0) monthOpen(i, true);
       });
+    }
+
+    async function renderMonth(month, site) {
+      var tbody = document.getElementById("month-rows");
+      tbody.innerHTML = '<tr><td colspan="7" class="empty">Reading the month…</td></tr>';
+
+      var rows = await fetchMonth(month, site, function (done, total) {
+        tbody.innerHTML = '<tr><td colspan="7" class="empty">Reading the month… ' +
+                          done + " of " + total + " days</td></tr>";
+      });
+      MONTH.month = month; MONTH.site = site || ""; MONTH.rows = rows; MONTH.workers = byWorker(rows);
+      wireDownloadDialog(month, site, MONTH.workers);      // opens pre-filled with this month; reuses what was just read
+      setReview(friendlyMonth(month), rows);
+      if (Dash.can("attendance.edit")) {              // requests still waiting, from the payroll-close list
+        unpricedFor(month).then(function (u) {
+          REVIEW.pending = u.filter(function (x) { return x.why === "pending_request"; }).length;
+          renderOpenShifts();
+        });
+      }
+      paintMonth([]);
+
+      if (!MONTH.wired) {
+        MONTH.wired = true;
+        tbody.addEventListener("click", function (ev) {
+          var link = ev.target.closest ? ev.target.closest("[data-corr-month]") : null;
+          if (link) {                                   // Correct This Day: the panel, not the day page
+            ev.preventDefault();
+            var k = link.getAttribute("data-corr-month").split("|");
+            var r = MONTH.rows.filter(function (x) { return x.staff_id === k[0] && String(x.work_date).slice(0, 10) === k[1]; })[0];
+            if (r) corrOpen(r, "month");
+            return;
+          }
+          var btn = rowButton(ev);
+          if (!btn) return;
+          monthOpen(Number(btn.getAttribute("data-i")), btn.getAttribute("aria-expanded") !== "true");
+        });
+      }
+      // the panel saved: that day's rows change under the worker, the month is repainted
+      window.__attRefresh = async function (day, staffId, fresh) {
+        var open = Array.prototype.map.call(document.querySelectorAll("#month-rows tr.shift-row.open"), function (tr) {
+          return (MONTH.workers[Number(tr.getAttribute("data-i"))] || {}).staff_id;
+        });
+        MONTH.rows = MONTH.rows.filter(function (x) { return !(x.staff_id === staffId && String(x.work_date).slice(0, 10) === day); });
+        if (fresh) MONTH.rows.push(fresh);
+        MONTH.workers = byWorker(MONTH.rows);
+        DL.cache[MONTH.month + "|" + MONTH.site] = MONTH.workers;   // the download reads the same figures
+        setReview(friendlyMonth(MONTH.month), MONTH.rows);
+        paintMonth(open);
+      };
     }
   </script>
 </body>
