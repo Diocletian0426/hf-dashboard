@@ -133,7 +133,7 @@
   // ---- the sign-in the shell asks for --------------------------------------
   var ACCESS = { ok: true, access: {
     full_name: "Nick Fury (demo)", designation: "office", role: null, status: "active",
-    access_profile_code: "demo", access_profile_name: "Demo",
+    access_profile_code: "office", access_profile_name: "Demo (office baseline)",
     scope_all_projects: true, permissions: PERMS, project_ids: [], legacy: false
   }};
   var USER = { id: "demo-user", email: "demo@example.invalid" };
@@ -275,7 +275,7 @@
     b.innerHTML = "<strong>Demo data</strong> — an invented crew so the layout can be reviewed. " +
       "Nothing here is real and the buttons write nothing to the database. Drop " +
       "<code>?demo=1</code> from the URL for the real page.";
-    main.insertBefore(b, document.getElementById("mp-tiles"));
+    main.insertBefore(b, document.getElementById("mp-bar"));
   });
 
   console.log("[demo] manpower page: sign-in + reads/writes replaced. Nothing hits the database.");

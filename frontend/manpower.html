@@ -7,27 +7,29 @@
   <link rel="stylesheet" href="styles.css" />
   <!-- Page-only bits, tokens only (the Exceptions page did the same). -->
   <style>
-    /* the tiles: one line each, like the Exceptions cards */
-    .istats-slim .istat { padding: 8px 14px; gap: 10px; }
-    .istats-slim .istat-ic { width: 30px; height: 30px; }
-    .istats-slim .istat-ic .ic { width: 16px; height: 16px; }
-    .istats-slim .istat-top b { font-size: var(--fs-lg); }
-    .istat.plain { cursor: default; }
-    .istat.plain:hover { transform: none; background: var(--surface); }
-
-    /* the one bar of controls: search, company, Sites / All Workers, three
-       plain pickers (a laptop has the width), the status legend, Add Worker */
+    /* the one bar of controls (Round 3, 26 Oct: one line): search, company,
+       Sites / All Workers, a Filters button, a "?" about the page, Add Worker */
     .mp-bar { align-items: center; }
     .mp-bar .tool-search { flex: 1 1 260px; }
-    .mp-bar select { margin-left: 0; max-width: 220px; }
-    .mp-bar select.on { border-color: var(--brand-border); background-color: var(--brand-soft); color: var(--brand-ink); }
-    .mp-help-wrap { position: relative; }
-    .mp-help { left: auto; right: 0; width: min(400px, 92vw); }
-    .mp-help .fp-title { margin-bottom: 8px; }
-    .mp-help dl { display: grid; grid-template-columns: auto 1fr; gap: 8px 10px; margin: 0; font-size: var(--fs-sm); align-items: start; }
+    .mp-filter-wrap, .mp-help-wrap { position: relative; }
+    .mp-filters { left: auto; right: 0; width: min(340px, 92vw); }
+    .mp-filters label { display: flex; flex-direction: column; gap: 4px; margin: 0 0 10px;
+                        font-size: var(--fs-xs); font-weight: 600; color: var(--ink-2); }
+    .mp-filters select { width: 100%; margin: 0; max-width: none; }
+    .mp-filters .mp-filters-foot { display: flex; gap: 8px; justify-content: flex-end; }
+    .mp-bar button.on { background: var(--brand-soft); border-color: var(--brand-border); color: var(--brand-ink); }
+    .mp-bar #mp-help-btn { width: 36px; padding-left: 0; padding-right: 0; text-align: center; font-weight: 700; }
+    .mp-help { left: auto; right: 0; width: min(460px, 92vw); }
+    .mp-help .fp-title { margin-bottom: 6px; }
+    .mp-help p { margin: 0 0 10px; font-size: var(--fs-sm); color: var(--ink-2); }
+    .mp-help h4 { margin: 10px 0 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase; color: var(--ink-3); }
+    .mp-help dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; margin: 0; font-size: var(--fs-sm); align-items: start; }
     .mp-help dt { white-space: nowrap; }
     .mp-help dd { margin: 0; color: var(--ink-2); }
     .mp-all { margin-top: var(--sp-2); }
+    /* the office's administration, one closed block under the roster */
+    details.mp-admin { margin-top: var(--sp-5); }
+    details.mp-admin > summary .muted { font-size: var(--fs-xs); }
 
     /* a site block: four things on the collapsed line, the rest inside */
     details.zone.mp-site { margin: var(--sp-2) 0; }
@@ -52,14 +54,12 @@
     tr.mp-row:hover > td { background: var(--surface-2); }
     tr.mp-row.mp-sel > td { background: var(--brand-soft); }
     .mp-sub { display: block; margin-top: 2px; color: var(--ink-3); font-size: var(--fs-xs); font-weight: 400; }
-    /* the last report as a fact: when, and whether it agrees with the record */
-    .st { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 2px 10px;
-          font-size: var(--fs-xs); font-weight: 600; white-space: nowrap; cursor: help; }
-    .st-onsite    { background: #f1f5f9;          color: var(--ink-2); }   /* seen at this site, a while ago */
-    .st-now       { background: var(--ok-soft);   color: var(--ok-ink); }  /* seen at this site today */
-    .st-elsewhere { background: var(--warn-soft); color: var(--warn-ink); }
-    .st-nosite    { background: #f1f5f9;          color: var(--ink-2); }
-    .st-none      { background: #f1f5f9;          color: var(--ink-3); }
+    /* the last report as a fact: when, and whether it agrees with the record.
+       Routine is plain text; only "seen elsewhere" gets a coloured pill. */
+    .st { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-xs); font-weight: 600;
+          white-space: nowrap; cursor: help; color: var(--ink-2); }
+    .st-none      { color: var(--ink-3); font-weight: 500; }
+    .st-elsewhere { background: var(--warn-soft); color: var(--warn-ink); border-radius: 999px; padding: 2px 10px; }
     .mp-empty { padding: var(--sp-5); text-align: center; color: var(--ink-2); }
 
     /* the bottom tabs (office only) */
@@ -152,13 +152,14 @@
          them too (By Punch).
          THE SHAPE (24 Oct review): summary first, operational issues second,
          administration only when asked for.
-           - tiles: active workers, sites, seen elsewhere, awaiting deployment
-           - one search, a company switch, Sites / All Workers, three plain
-             pickers in the bar (Trade, Site, Status) and a Legend
+           - no tiles (26 Oct): the counts are one plain caption sentence
+           - one bar on one line: search, a company switch, Sites / All
+             Workers, a Filters button (Trade, Site, Status), a "?" that
+             explains the page, + Add Worker
            - sites collapsed by default, remembered per browser; a collapsed
              line is name, code, headcount and the Seen Elsewhere count (no
-             machine warnings: the owner's ruling, 25 Oct); trades, supervisor,
-             machines and scope sit inside the expanded block
+             machine warnings: the owner's ruling, 25 Oct); inside: the
+             supervisor of record, Open Project, the trade mix, the rows
            - All Workers: one flat table in name order (Worker, Trade, Site,
              Status), the same search and pickers
            - rows carry the last report as a FACT, not a verdict (25 Oct):
@@ -166,18 +167,24 @@
              elsewhere: the record may be wrong), "Today · No Site" (the punch
              matched no pinned site), "No Report" (nothing in 7 days); office
              staff carry none. The full sentence lives in the worker panel.
-           - the worker panel (right; Round 2 shape, 25 Oct): the facts as
-             label : value rows, then Punch App Phone as rows, then a terse
-             Movement History (date and route only; the full wording stays in
-             the tab), then a bottom row with "Move…" (unfolds the move form)
-             at the left and Mark As Left at the right
+           - the worker panel (right; 25–26 Oct): the facts as label : value
+             rows, then Punch App Phone as rows, then a terse Movement History
+             (date and route only, newest 3, "All n" unfolds), then a bottom
+             row with "Move…" (unfolds the move form) at the left and Mark As
+             Left at the right. A round × closes it; so does the same row
+             again, a click outside or Escape, and a form with typed changes
+             asks "Close without saving?" first.
            - no planning on this page: the owner retired Plan A Move and
              Upcoming Moves on 25 Oct 2026 (nobody used them); the plan
              functions and view stay in the database untouched
-           - office tabs at the bottom: Movement History, Inactive Workers,
-             Data Quality
+           - Administration: one closed block under the roster holding the
+             office tabs (Movement History, Inactive Workers, Data Quality);
+             the 500 history rows are fetched the first time a panel or the
+             block needs them, not on page open
            - Unassigned is split: Office Staff (admin, management, coordinator,
-             store keeper) and Awaiting Deployment (everyone else off site)
+             store keeper) and Not On A Site (everyone else off site)
+           - the office controls show only for a login the database would also
+             accept (OFFICE_BASELINE_PROFILES mirrors fn_is_management_or_office)
            - the test site is hidden unless the URL has ?test=1
          Reads: v_manpower_by_site, v_project_directory, v_project_supervisors,
          v_machine_fleet (anyone with manpower.view);
@@ -189,7 +196,6 @@
     <p class="page-caption" id="mp-sub">Who is on which site, both companies.</p>
 
     <div id="error"></div>
-    <div class="istats istats-slim" id="mp-tiles"></div>
 
     <div class="mp-controls mp-bar" id="mp-bar">
       <span class="tool-search">
@@ -209,25 +215,41 @@
         <button type="button" data-view="site" class="active">Sites</button>
         <button type="button" data-view="all">All Workers</button>
       </span>
-      <select id="f-trade" aria-label="Trade"><option value="all">Any Trade</option></select>
-      <select id="f-site" aria-label="Site"><option value="all">Any Site</option></select>
-      <select id="f-status" aria-label="Status">
-        <option value="all">Any Status</option>
-        <option value="onsite">On Site</option>
-        <option value="elsewhere">Seen Elsewhere</option>
-        <option value="nosite">No Site Match</option>
-        <option value="none">No Report</option>
-      </select>
-      <button type="button" id="mp-clear" hidden>Clear</button>
+      <span class="mp-filter-wrap">
+        <button type="button" id="mp-filters-btn" aria-expanded="false">Filters</button>
+        <div class="filter-pop mp-filters" id="mp-filters" hidden>
+          <label>Trade <select id="f-trade"><option value="all">Any Trade</option></select></label>
+          <label>Site <select id="f-site"><option value="all">Any Site</option></select></label>
+          <label>Status <select id="f-status">
+            <option value="all">Any Status</option>
+            <option value="onsite">On Site</option>
+            <option value="elsewhere">Seen Elsewhere</option>
+            <option value="nosite">No Site Match</option>
+            <option value="none">No Report</option></select></label>
+          <div class="mp-filters-foot">
+            <button type="button" id="mp-filters-clear">Clear</button>
+            <button type="button" id="mp-filters-close">Done</button>
+          </div>
+        </div>
+      </span>
       <span class="mp-help-wrap">
-        <button type="button" id="mp-help-btn" aria-expanded="false" title="What the status words mean">Legend</button>
+        <button type="button" id="mp-help-btn" aria-expanded="false" aria-label="About this page" title="About this page">?</button>
         <div class="filter-pop mp-help" id="mp-help" hidden>
-          <div class="fp-title">Status</div>
+          <div class="fp-title">About This Page</div>
+          <p>Who is on which site, from each worker's record. A verified punch keeps the record up to date; the office corrects it with Move… when a punch could not.</p>
+          <h4>Status</h4>
           <dl>
-            <dt><span class="st st-now">Today</span></dt><dd>Seen at this site today. "Yesterday" or "3 Days" says how long ago.</dd>
+            <dt><span class="st">Today</span> · <span class="st">3 Days</span></dt><dd>Seen at the site on the record, and how long ago. Nothing to do.</dd>
             <dt><span class="st st-elsewhere">Today · HF-XXX-000</span></dt><dd>Seen at another site, named by its code. The record may be wrong: check, then Move… if so.</dd>
-            <dt><span class="st st-nosite">Today · No Site</span></dt><dd>The punch matched no pinned site.</dd>
-            <dt><span class="st st-none">No Report</span></dt><dd>Nothing in the last 7 days.</dd>
+            <dt><span class="st">Today · No Site</span></dt><dd>Punched, but the punch matched no pinned site.</dd>
+            <dt><span class="st st-none">No Report</span></dt><dd>Nothing in the last 7 days. Office staff carry no status.</dd>
+          </dl>
+          <h4>Other Marks</h4>
+          <dl>
+            <dt><span class="chip chip-warn">2 Seen Elsewhere</span></dt><dd>On a site line: workers in that site last seen at another site.</dd>
+            <dt><span class="chip chip-tag">1 of 4</span></dt><dd>Rows shown of the site's total while a search or a filter is on.</dd>
+            <dt><span class="badge badge-gray">By Punch</span> <span class="badge badge-gray">Backfill</span></dt><dd>In Movement History: moved by the worker's own punch; a past move typed in later.</dd>
+            <dt>A tinted row</dt><dd>The worker open in the panel. Click the row again, the ×, or anywhere else to close it.</dd>
           </dl>
         </div>
       </span>
@@ -236,10 +258,14 @@
 
     <div id="mp-groups"><div class="empty">Loading the roster…</div></div>
 
-    <section id="mp-more" hidden>
-      <div class="mp-tabs" id="mp-tabs"></div>
-      <div class="mp-tab-body" id="mp-tab-body"></div>
-    </section>
+    <details class="zone mp-site mp-admin" id="mp-more" hidden>
+      <summary><span class="mp-sum"><span class="mp-site-name">Administration</span>
+        <span class="muted">Movement History · Inactive Workers · Data Quality</span></span></summary>
+      <div class="mp-body">
+        <div class="mp-tabs" id="mp-tabs"></div>
+        <div class="mp-tab-body" id="mp-tab-body"></div>
+      </div>
+    </details>
 
     <aside id="mp-drawer" class="mp-drawer" hidden aria-label="Worker"></aside>
   </main>
@@ -268,7 +294,12 @@
     var COUNTRIES = ["Malaysia", "Myanmar", "Bangladesh", "Indonesia", "Nepal", "India", "Pakistan",
                      "Vietnam", "Thailand", "Philippines", "Cambodia", "Sri Lanka", "China"];
     var REPORT_DAYS = 7;          // a report older than this is "No Report"
-    var HISTORY_IN_PANEL = 8;
+    var HISTORY_IN_PANEL = 3;     // the newest few; "All n" unfolds the rest
+    // The database gates every manpower write with fn_is_management_or_office():
+    // an active account whose access profile carries the office baseline. The
+    // page mirrors that list so a login the database would refuse never sees
+    // the buttons (seeded in DB 0059; the database stays the lock).
+    var OFFICE_BASELINE_PROFILES = ["super_admin", "admin", "management", "office"];
     var HISTORY_IN_TAB = 50;
     var OPEN_KEY = "hf-mp-open";  // which site blocks this browser keeps open
 
@@ -277,6 +308,8 @@
     var M = {
       rows: [], projects: [], dirByPid: {}, supervisorsByPid: {}, machinesBySite: {},
       translog: [], histByStaff: {}, translogErr: "",
+      translogLoaded: false, translogLoading: null,   // fetched the first time something needs it
+      histAll: {},                                     // staff_id -> true once "All n" was pressed
       canEdit: false, canDevView: false, canDev: false,
       showTest: params.get("test") === "1",
       q: "", company: "all", view: "site", trade: "all", site: "all", status: "all",
@@ -312,7 +345,7 @@
     }
     function siteWordsFor(r) {       // the Site column of All Workers
       if (r.current_project_id) return r.project_code + (r.project_name ? " — " + r.project_name : "");
-      return groupOf(r) === "__office" ? "Office Staff" : "Awaiting Deployment";
+      return groupOf(r) === "__office" ? "Office Staff" : "Not On A Site";
     }
     function byName(a, b) { return String(a.full_name).localeCompare(String(b.full_name)); }
     function shortDate(iso) {
@@ -391,32 +424,21 @@
     }
     function projectHref(pid) { return "project.html?project=" + encodeURIComponent(pid); }
 
-    /* -------------------------------- tiles -------------------------------- */
+    /* ------------------------------ the caption ---------------------------- */
 
-    // o.plain = a number to read, not a filter; o.tile = the filter it toggles, o.on = lit
-    function tile(cls, icon, n, label, o) {
-      o = o || {};
-      return '<button type="button" class="istat tone-' + cls + (o.plain ? " plain" : "") + (o.on ? " on" : "") + '"' +
-        (o.tile ? ' data-tile="' + o.tile + '" aria-pressed="' + (o.on ? "true" : "false") + '"' : "") + ">" +
-        '<span class="istat-ic">' + UI.icon(icon) + "</span>" +
-        '<span class="istat-body"><span class="istat-top"><b>' + n + "</b><i>" + escHtml(label) + "</i></span></span></button>";
-    }
-    function renderTiles() {
+    // no tiles (the owner's ruling, 26 Oct): the counts are one plain sentence
+    function renderCaption() {
       var rows = active().filter(inCompany);
       var sites = {};
       rows.forEach(function (r) { if (r.current_project_id) sites[r.project_code] = true; });
+      var ns = Object.keys(sites).length;
       var away = rows.filter(function (r) { return groupOf(r) !== "__office" && statusOf(r).k === "elsewhere"; }).length;
       var await_ = rows.filter(function (r) { return groupOf(r) === "__await"; }).length;
-      document.getElementById("mp-tiles").innerHTML =
-        tile("brand", "worker", rows.length, rows.length === 1 ? "Active Worker" : "Active Workers", { plain: true }) +
-        tile("grey", "site", Object.keys(sites).length, Object.keys(sites).length === 1 ? "Site" : "Sites", { plain: true }) +
-        tile(away ? "warn" : "ok", "alert", away, "Seen Elsewhere", { tile: "elsewhere", on: M.status === "elsewhere" }) +
-        tile(await_ ? "info" : "grey", "clock", await_, "Awaiting Deployment", { tile: "await", on: M.site === "__await" });
-      var caption = M.company === "all"
-        ? "Who is on which site, both companies."
-        : "Who is on which site, " + M.company + " only.";
-      document.getElementById("mp-sub").textContent = caption +
-        (M.canEdit ? "" : " You can look; moves are made by the office.");
+      var s = rows.length + (rows.length === 1 ? " active worker on " : " active workers on ") + ns + (ns === 1 ? " site" : " sites") +
+        (M.company === "all" ? ", both companies" : ", " + M.company) +
+        (away ? " · " + away + " seen elsewhere" : "") +
+        (await_ ? " · " + await_ + " not on a site" : "") + ".";
+      document.getElementById("mp-sub").textContent = s + (M.canEdit ? "" : " You can look; moves are made by the office.");
     }
 
     /* ------------------------------- the groups ---------------------------- */
@@ -464,20 +486,13 @@
       var code = "";
       if (key.indexOf("__") !== 0 && list[0] && list[0].project_code) code = list[0].project_code;
 
-      // inside: the facts about the site, then the trade mix, then the rows
+      // inside: the supervisor and a link (the owner trimmed scope, company
+      // split and machine codes on 26 Oct), then the trade mix, then the rows
       var meta = [];
       if (key.indexOf("__") !== 0 && list[0]) {
-        var pid = list[0].current_project_id, dir = M.dirByPid[pid];
-        if (dir) {
-          var scope = dir.has_bored_scope && dir.has_sheet_scope ? "Bored + Sheet Piles" : dir.has_bored_scope ? "Bored Piles" : dir.has_sheet_scope ? "Sheet Piles" : "";
-          if (scope) meta.push("<b>" + escHtml(scope) + "</b>");
-        }
+        var pid = list[0].current_project_id;
         var sv = M.supervisorsByPid[pid];
         meta.push("Supervisor " + (sv ? "<b>" + escHtml(sv) + "</b>" : '<span class="muted">none of record</span>'));
-        var bp = list.filter(function (r) { return r.company === "HF-BP"; }).length;
-        meta.push("HF-BP <b>" + bp + "</b> · Hai Fu <b>" + (total - bp) + "</b>");
-        var mach = M.machinesBySite[key] || [];
-        meta.push("Machines " + (mach.length ? "<b>" + escHtml(mach.map(function (m) { return m.code; }).join(", ")) + "</b>" : '<span class="muted">none</span>'));
         if (pid) meta.push('<a href="' + esc(projectHref(pid)) + '">Open Project</a>');
       } else if (key === "__await") {
         meta.push("Site workers with no site on the record. Move each one when they are placed.");
@@ -516,7 +531,7 @@
         var groups = {};
         rows.forEach(function (r) {
           var k = groupOf(r);
-          (groups[k] = groups[k] || { title: k === "__await" ? "Awaiting Deployment" : k === "__office" ? "Office Staff" : (r.project_name || r.project_code), list: [] }).list.push(r);
+          (groups[k] = groups[k] || { title: k === "__await" ? "Not On A Site" : k === "__office" ? "Office Staff" : (r.project_name || r.project_code), list: [] }).list.push(r);
         });
         var keys = Object.keys(groups).sort(function (a, b) {
           var sa = a.indexOf("__") === 0, sb = b.indexOf("__") === 0;
@@ -536,13 +551,10 @@
       document.getElementById("mp-groups").innerHTML = html ||
         '<div class="mp-empty">' + (rows.length ? "No worker matches. Clear the search or the pickers." : "No active workers.") + "</div>";
       document.getElementById("f-count").textContent = f ? shownTotal + " of " + rows.length : "";
-      // a set picker is tinted, and Clear shows while any is set
-      var nf = 0;
-      ["f-trade", "f-site", "f-status"].forEach(function (id) {
-        var el = document.getElementById(id), on = el.value !== "all";
-        el.classList.toggle("on", on); if (on) nf++;
-      });
-      document.getElementById("mp-clear").hidden = !nf;
+      var el = document.getElementById("mp-filters-btn");
+      var nf = (M.trade !== "all" ? 1 : 0) + (M.site !== "all" ? 1 : 0) + (M.status !== "all" ? 1 : 0);
+      el.textContent = nf ? "Filters · " + nf : "Filters";
+      el.className = nf ? "on" : "";
     }
 
     /* ------------------------------ the tabs ------------------------------- */
@@ -551,6 +563,8 @@
       var sec = document.getElementById("mp-more");
       if (!M.canEdit) { sec.hidden = true; return; }
       sec.hidden = false;
+      if (!sec.open) return;                       // closed: nothing to draw
+      if (!M.translogLoaded) { ensureTranslog().then(renderMore); }
       var act = active();
       var inactive = M.rows.filter(function (r) { return !r.is_active; });
       var gaps = act.filter(function (r) { return !r.has_date_joined || !r.employee_code || !r.has_contact; }).length;
@@ -617,6 +631,7 @@
         '<span class="muted">History only. The current site is not changed; use Move for that.</span></div></div></div>';
     }
     function historyTab() {
+      if (!M.translogLoaded) return '<div class="mp-tab-head"><span>Loading the history…</span></div>';
       if (M.translogErr) return '<div class="banner banner-red">Could not read the history: ' + escHtml(M.translogErr) + "</div>";
       var log = M.translog.slice(0, HISTORY_IN_TAB);
       var q = M.q;
@@ -664,10 +679,11 @@
 
     /* ------------------------------ the panel ------------------------------ */
 
-    function openWorker(id) {
-      M.sel = id; M.mode = null; M.confirm = null; M.panelErr = ""; M.panelOk = ""; M.msgAt = "top";
+    function openWorker(id, mode) {
+      M.sel = id; M.mode = mode || null; M.confirm = null; M.panelErr = ""; M.panelOk = ""; M.msgAt = "top";
       renderGroups(); renderDrawer();
       if (id && id !== "__new" && M.canEdit) {
+        if (!M.translogLoaded) ensureTranslog().then(function () { if (M.sel === id) renderDrawer(); });
         if (!M.cache[id]) {
           Dash.getStaffDetail(id).then(function (d) { M.cache[id] = d || {}; if (M.sel === id) renderDrawer(); })
             .catch(function () { M.cache[id] = {}; if (M.sel === id) renderDrawer(); });
@@ -680,6 +696,32 @@
     }
     function closeWorker() { M.sel = null; M.mode = null; M.confirm = null; renderGroups(); renderDrawer(); }
 
+    // Closing or switching while a form holds typed changes asks first (the
+    // owner's ruling, 26 Oct): the × , Escape, a click outside, the same row
+    // again or another row all go through here. next = null (close) or
+    // { id, mode } (open that worker instead).
+    function dirtyForm() {
+      if (!M.sel) return false;
+      if (M.sel === "__new") {
+        return ["nw-name", "nw-code", "nw-joined", "nw-contact", "nw-origin"].some(function (id) { return !!val(id); });
+      }
+      return M.mode === "edit" || M.mode === "move" || String(M.mode || "").indexOf("fix:") === 0;
+    }
+    function requestClose(next) {
+      if (dirtyForm()) { M.confirm = { kind: "discard", next: next || null }; renderDrawer(); return; }
+      doClose(next);
+    }
+    function doClose(next) {
+      M.confirm = null; M.mode = null;
+      if (next && next.id) openWorker(next.id, next.mode || null); else closeWorker();
+    }
+    function discardBox() {
+      if (!(M.confirm && M.confirm.kind === "discard")) return "";
+      return '<div class="dr-confirm danger"><p>Close without saving? The changes you typed will be lost.</p>' +
+        '<div class="dr-acts"><button type="button" class="btn btn-danger" data-act="discard-go">Discard</button>' +
+        '<button type="button" class="btn" data-act="confirm-clear">Keep Editing</button></div></div>';
+    }
+
     function confirmBox(kind, id, text, yesLabel, danger) {
       return '<div class="dr-confirm' + (danger ? " danger" : "") + '"><p>' + escHtml(text) + "</p>" +
         '<div class="dr-acts"><button type="button" class="btn ' + (danger ? "btn-danger" : "btn-primary") + '" data-act="' + kind + '-go" data-id="' + esc(id) + '">' + escHtml(yesLabel) + "</button>" +
@@ -689,6 +731,7 @@
     function newWorkerPanel() {
       var dup = M.confirm && M.confirm.kind === "dup-add";
       return '<div class="dr-top"><h2>New Worker</h2><button type="button" class="btn dr-close" data-act="close" aria-label="Close" title="Close">×</button></div>' +
+        discardBox() +
         '<p class="dr-who">A new staff record. The code, the site and the date joined can be added later.</p>' +
         '<div class="dr-form">' +
         '<label class="wide">Full Name <input type="text" id="nw-name" autocomplete="off"></label>' +
@@ -752,14 +795,19 @@
       return h + (M.msgAt === "top" ? msgBlock() : "");
     }
 
+    // the newest few moves; "All n" unfolds the rest (the owner's ruling, 26 Oct)
     function historySection(r) {
       var hist = M.histByStaff[r.staff_id] || [];
-      var h = '<div class="dr-sec"><h3>Movement History<span class="spacer"></span><span class="muted">' + hist.length + "</span></h3>";
-      if (M.translogErr) h += '<div class="dr-line muted">Could not read the history.</div>';
+      var all = M.histAll[r.staff_id] === true;
+      var h = '<div class="dr-sec"><h3>Movement History<span class="spacer"></span><span class="muted">' + (M.translogLoaded ? hist.length : "") + "</span></h3>";
+      if (!M.translogLoaded) h += '<div class="dr-line muted">Loading…</div>';
+      else if (M.translogErr) h += '<div class="dr-line muted">Could not read the history.</div>';
       else if (!hist.length) h += '<div class="dr-line muted">No moves recorded yet.</div>';
       else {
-        h += hist.slice(0, HISTORY_IN_PANEL).map(function (t) { return historyLine(t, true); }).join("");
-        if (hist.length > HISTORY_IN_PANEL) h += '<div class="dr-line muted">+ ' + (hist.length - HISTORY_IN_PANEL) + " older, in Movement History below the roster.</div>";
+        h += (all ? hist : hist.slice(0, HISTORY_IN_PANEL)).map(function (t) { return historyLine(t, true); }).join("");
+        if (!all && hist.length > HISTORY_IN_PANEL) {
+          h += '<div class="dr-acts"><button type="button" class="btn" data-act="hist-all">All ' + hist.length + "</button></div>";
+        }
       }
       return h + (M.msgAt === "history" ? msgBlock() : "") + "</div>";
     }
@@ -824,7 +872,8 @@
     function workerPanel(r) {
       var h = '<div class="dr-top"><h2>' + escHtml(r.full_name) + '</h2><button type="button" class="btn dr-close" data-act="close" aria-label="Close" title="Close">×</button></div>' +
         '<p class="dr-who"><span>' + escHtml([r.employee_code, UI.label(r.role), r.company].filter(Boolean).join(" · ")) + "</span>" +
-        '<span class="spacer"></span>' + (r.is_active ? statusChip(r) : '<span class="st st-none">Left</span>') + "</p>" + factsBlock(r);
+        '<span class="spacer"></span>' + (r.is_active ? statusChip(r) : '<span class="st st-none">Left</span>') + "</p>" +
+        discardBox() + factsBlock(r);
       if (M.canEdit) h += phoneSection(r) + historySection(r) + footRow(r);
       return h;
     }
@@ -854,7 +903,7 @@
       var sites = {};
       act.forEach(function (r) { if (r.current_project_id) sites[r.project_code] = r.project_name || ""; });
       document.getElementById("f-site").innerHTML = '<option value="all">Any Site</option>' +
-        '<option value="__await"' + (M.site === "__await" ? " selected" : "") + ">Awaiting Deployment</option>" +
+        '<option value="__await"' + (M.site === "__await" ? " selected" : "") + ">Not On A Site</option>" +
         '<option value="__office"' + (M.site === "__office" ? " selected" : "") + ">Office Staff</option>" +
         Object.keys(sites).sort().map(function (k) {
           return '<option value="' + esc(k) + '"' + (M.site === k ? " selected" : "") + ">" + escHtml(k + " — " + sites[k]) + "</option>";
@@ -863,11 +912,13 @@
       document.getElementById("mp-add").innerHTML = M.canEdit ? '<button type="button" class="btn" data-act="new">+ Add Worker</button>' : "";
     }
     function render() {
-      renderError(); renderTiles(); renderFilterOptions(); renderGroups(); renderMore(); renderDrawer();
+      renderError(); renderCaption(); renderFilterOptions(); renderGroups(); renderMore(); renderDrawer();
     }
 
     /* ------------------------------- loading ------------------------------- */
 
+    // the newest 500 history rows: not on page open, but the first time a
+    // worker's panel or the Administration block needs them, then kept fresh
     async function loadTranslog() {
       if (!M.canEdit) return;
       try { M.translog = await Dash.getTransferLog(500); M.translogErr = ""; }
@@ -877,9 +928,15 @@
         if (t.subject_type !== "staff" || !t.staff_id) return;
         (M.histByStaff[t.staff_id] = M.histByStaff[t.staff_id] || []).push(t);
       });
+      M.translogLoaded = true;
+    }
+    function ensureTranslog() {
+      if (M.translogLoaded) return Promise.resolve();
+      if (!M.translogLoading) M.translogLoading = loadTranslog().then(function () { M.translogLoading = null; });
+      return M.translogLoading;
     }
     async function refresh() {
-      var res = await Promise.all([Dash.getManpowerBySite(), loadTranslog()]);
+      var res = await Promise.all([Dash.getManpowerBySite(), M.translogLoaded ? loadTranslog() : null]);
       M.rows = res[0];
       render();
     }
@@ -913,14 +970,16 @@
       var a = btn.getAttribute("data-act");
       var sel = M.sel && M.sel !== "__new" ? byId(M.sel) : null;
 
-      if (a === "close") { closeWorker(); return; }
+      if (a === "close") { requestClose(null); return; }
+      if (a === "discard-go") { doClose(M.confirm && M.confirm.next); return; }
       if (a === "open") {           // Manage on the open worker closes the panel again
         var oid = btn.getAttribute("data-staff");
-        if (M.sel === oid) closeWorker(); else openWorker(oid);
+        if (M.sel === oid) requestClose(null); else requestClose({ id: oid });
         return;
       }
-      if (a === "open-edit") { openWorker(btn.getAttribute("data-staff")); M.mode = "edit"; renderDrawer(); return; }
-      if (a === "new") { openWorker("__new"); return; }
+      if (a === "open-edit") { requestClose({ id: btn.getAttribute("data-staff"), mode: "edit" }); return; }
+      if (a === "new") { requestClose({ id: "__new" }); return; }
+      if (a === "hist-all") { if (sel) { M.histAll[sel.staff_id] = true; renderDrawer(); } return; }
       if (a === "mode-edit") { M.mode = "edit"; M.confirm = null; M.panelOk = ""; M.panelErr = ""; renderDrawer(); return; }
       if (a === "mode-move") { M.mode = "move"; M.confirm = null; M.panelOk = ""; M.panelErr = ""; renderDrawer(); return; }
       if (a === "mode-clear") { M.mode = null; M.confirm = null; renderDrawer(); renderMore(); return; }
@@ -1095,13 +1154,16 @@
     window.onShellReady = async function () {
       try {
         await Dash.getMyProfile();
-        M.canEdit = Dash.can("manpower.edit");
+        var acc = await Dash.getMyAccess();
+        var profileCode = acc && acc.access ? acc.access.access_profile_code : null;
+        // manpower.edit shows the controls only when the database would also say yes
+        M.canEdit = Dash.can("manpower.edit") && OFFICE_BASELINE_PROFILES.indexOf(profileCode) !== -1;
         M.canDevView = Dash.can("devices.view");
         M.canDev = Dash.can("devices.manage");
 
         var res = await Promise.all([
           Dash.getManpowerBySite(), Dash.getProjectDirectory(), Dash.getProjectSupervisors(),
-          Dash.getMachines(), loadTranslog()
+          Dash.getMachines()
         ]);
         M.rows = res[0]; M.projects = res[1];
         M.projects.forEach(function (p) { M.dirByPid[p.project_id] = p; });
@@ -1132,38 +1194,38 @@
             b.parentElement.querySelectorAll("button").forEach(function (x) { x.classList.remove("active"); });
             b.classList.add("active"); renderGroups(); return;
           }
-          if (b.id === "mp-help-btn") {
-            var pop = document.getElementById("mp-help");
+          if (b.id === "mp-filters-btn" || b.id === "mp-help-btn") {
+            var isF = b.id === "mp-filters-btn";
+            var pop = document.getElementById(isF ? "mp-filters" : "mp-help");
+            var other = document.getElementById(isF ? "mp-help" : "mp-filters");
+            other.hidden = true;
             pop.hidden = !pop.hidden; b.setAttribute("aria-expanded", String(!pop.hidden)); return;
           }
-          if (b.id === "mp-clear") {
-            M.trade = "all"; M.site = "all"; M.status = "all"; renderFilterOptions(); renderTiles(); renderGroups(); return;
+          if (b.id === "mp-filters-close") { document.getElementById("mp-filters").hidden = true; return; }
+          if (b.id === "mp-filters-clear") {
+            M.trade = "all"; M.site = "all"; M.status = "all"; renderFilterOptions(); renderCaption(); renderGroups(); return;
           }
           if (b.getAttribute("data-act")) onAction(b, ev);
         });
-        // the three pickers sit in the bar
-        document.getElementById("mp-bar").addEventListener("change", function (ev) {
+        document.getElementById("mp-filters").addEventListener("change", function (ev) {
           if (ev.target.id === "f-trade") M.trade = ev.target.value;
           else if (ev.target.id === "f-site") M.site = ev.target.value;
           else if (ev.target.id === "f-status") M.status = ev.target.value;
           else return;
-          renderTiles(); renderGroups();
+          renderCaption(); renderGroups();
         });
+        // the two popovers close on a click anywhere else
         document.addEventListener("click", function (ev) {
-          var wrap = document.querySelector(".mp-help-wrap");
-          if (wrap && !wrap.contains(ev.target)) {
-            document.getElementById("mp-help").hidden = true;
-            document.getElementById("mp-help-btn").setAttribute("aria-expanded", "false");
-          }
+          [["mp-filter-wrap", "mp-filters", "mp-filters-btn"], ["mp-help-wrap", "mp-help", "mp-help-btn"]].forEach(function (p) {
+            var wrap = document.querySelector("." + p[0]);
+            if (wrap && !wrap.contains(ev.target)) {
+              document.getElementById(p[1]).hidden = true;
+              document.getElementById(p[2]).setAttribute("aria-expanded", "false");
+            }
+          });
         });
-        // the tiles: Seen Elsewhere and Awaiting Deployment are filters
-        document.getElementById("mp-tiles").addEventListener("click", function (ev) {
-          var b = ev.target.closest("[data-tile]");
-          if (!b) return;
-          if (b.getAttribute("data-tile") === "elsewhere") M.status = M.status === "elsewhere" ? "all" : "elsewhere";
-          else { M.site = M.site === "__await" ? "all" : "__await"; }
-          renderFilterOptions(); renderTiles(); renderGroups();
-        });
+        // Administration draws its tabs the first time it is opened (and fetches the history then)
+        document.getElementById("mp-more").addEventListener("toggle", function () { renderMore(); });
 
         // the groups: open/close memory, row click, the buttons
         var groups = document.getElementById("mp-groups");
@@ -1181,7 +1243,7 @@
           var tr = ev.target.closest("tr[data-staff]");
           if (!tr) return;
           var rid = tr.getAttribute("data-staff");
-          if (M.sel === rid) closeWorker(); else openWorker(rid);   // the same row again closes
+          if (M.sel === rid) requestClose(null); else requestClose({ id: rid });   // the same row again closes
         });
         // a click anywhere outside the panel closes it, unless that click opens a
         // worker. Capture phase on purpose: the panel re-renders itself on its own
@@ -1190,7 +1252,7 @@
         document.addEventListener("click", function (ev) {
           if (!M.sel) return;
           if (ev.target.closest("#mp-drawer, tr[data-staff], button[data-act='open'], button[data-act='open-edit'], button[data-act='new']")) return;
-          closeWorker();
+          requestClose(null);
         }, true);
         document.getElementById("mp-more").addEventListener("click", async function (ev) {
           var tab = ev.target.closest("button[data-tab]");
@@ -1208,7 +1270,7 @@
           ev.preventDefault();
           onAction(btn, ev);
         });
-        document.addEventListener("keydown", function (ev) { if (ev.key === "Escape" && M.sel) closeWorker(); });
+        document.addEventListener("keydown", function (ev) { if (ev.key === "Escape" && M.sel) requestClose(null); });
       } catch (e) {
         document.getElementById("error").innerHTML =
           '<div class="banner banner-red">Could not load: ' + escHtml((e && e.message) || e) + "</div>";
