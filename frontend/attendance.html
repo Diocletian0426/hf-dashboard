@@ -1126,7 +1126,8 @@
       var spec = corrSpec(r);
       CORR = { open: true, view: view, row: r, spec: spec, form: CorrectForm.start(spec), punches: null,
                busy: false, err: "", invalid: "", preview: null, previewKey: "", note: "",
-               askClose: false, askRemove: !!(opts && opts.askRemove) };
+               askClose: false, askRemove: !!(opts && opts.askRemove),
+               mode: (opts && opts.mode) || "correct", kind: (opts && opts.kind) || "" };
       corrRender();
       var el = document.getElementById("corr-panel");
       el.hidden = false; el.scrollTop = 0; el.focus();
@@ -1192,9 +1193,14 @@
       if (!CORR.open) return;
       var r = CORR.row, s = CORR.spec, h = hoursOf(r), p = payOf(r), f = CORR.form;
       var code = CODES[r.staff_id] || "", co = companyName(COMPANY[r.staff_id]);
-      var editable = corrEditable(r);
+      var acting = CORR.mode !== "correct";                 // accept / keep / undo, not a time change
+      var editable = corrEditable(r) && !acting;
+      var TITLES = { "accept-long": "Accept As Punched", "accept-early": "Credit Early Start", "accept-early_keep": "Keep From 8 AM",
+                     "undo-long": "Undo Acceptance", "undo-early": "Undo Early Start Credit" };
+      var eyebrow = acting ? (TITLES[CORR.mode + "-" + CORR.kind] || "Attendance Correction") : "Attendance Correction";
+      var foot = "";
       var head = '<div class="corr-head"><div>' +
-        '<div class="corr-eyebrow">Attendance Correction</div>' +
+        '<div class="corr-eyebrow">' + esc(eyebrow) + "</div>" +
         '<h2 id="corr-title">' + esc(r.full_name) + "</h2>" +
         '<div class="corr-sub">' + esc([code, co, friendlyDate(s.workDate), siteText(r)].filter(Boolean).join(" · ")) + "</div></div>" +
         '<button type="button" class="dl-x" data-corr="close" aria-label="Close" title="Close">&times;</button></div>';
@@ -1231,7 +1237,7 @@
               : (p.key === "unpriced" ? "Unpriced" + (p.why && p.why !== "Unpriced" ? " · " + p.why : "") : p.word);
       var hours = '<p class="detail-head">Hours</p><div class="corr-hours">' +
         '<div><span class="k">Current</span><b>' + esc(cur) + "</b></div>" +
-        '<div><span class="k">After Correction</span><b id="corr-preview">—</b></div></div>';
+        '<div><span class="k">' + (CORR.mode === "undo" ? "After Undoing" : acting ? "After Accepting" : "After Correction") + '</span><b id="corr-preview">—</b></div></div>';
 
       // Reason: a chip fills the box and lights; the office may add to it
       var reason = "";
@@ -1257,11 +1263,23 @@
 
       var details = CORR.punches === null ? '<p class="detail-note">Loading punches…</p>' : "";
 
+      if (acting && CORR.mode === "accept" && corrEditable(r)) {
+        var needs = CORR.kind !== "early_keep";
+        reason = '<p class="detail-head">' + (needs ? "Reason" : "Note") + "</p>" +
+          '<label class="cf-why"><span class="sr-only">Reason</span><input type="text" data-cf="why" maxlength="500" autocomplete="off" value="' + esc(f.why) + '"' +
+            ' placeholder="' + (needs ? (CORR.kind === "long" ? "Why the shift is accepted as punched" : "Why the early start is credited") : "Optional note") + '"' + bad("why") + dis + "></label>" +
+          '<p class="detail-note corr-seen">Kept on record with your name.</p>';
+      }
       var why = "";
-      if (!editable && Dash.can("attendance.edit")) {
+      if (acting && corrEditable(r)) {
+        var actLabel = TITLES[CORR.mode + "-" + CORR.kind] || "Confirm";
+        var actOff = CORR.busy || (CORR.mode === "accept" && CORR.kind !== "early_keep" && !String(f.why || "").trim());
+        foot = '<div class="corr-foot"><div class="cf-err" role="alert">' + esc(CORR.err || "") + "</div>" +
+          '<button type="button" class="btn" data-cf-cancel' + dis + ">Cancel</button>" +
+          '<button type="button" class="btn btn-primary" data-corr="act"' + (actOff ? " disabled" : "") + ">" + (CORR.busy ? "Working…" : esc(actLabel)) + "</button></div>";
+      } else if (!editable && Dash.can("attendance.edit")) {
         why = Number(r.shift_count) > 1 ? twoShiftNote(r) : '<p class="detail-note">A day can be corrected once it is over.</p>';
       }
-      var foot = "";
       if (editable) {
         foot = CORR.askClose
           ? '<div class="corr-foot"><div class="corr-ask"><span class="q">Close without saving?</span>' +
@@ -1290,6 +1308,18 @@
     // the figure the ruling WOULD give — asked of the database, never worked out here
     async function corrPreview() {
       if (!CORR.open || !CORR.form || !corrEditable(CORR.row)) return;
+      if (CORR.mode !== "correct") {                      // accept: the taps as they are, priced as accepted
+        var rr = CORR.row;
+        if (CORR.mode === "undo" || !rr.first_in_at || !rr.last_out_at) { CORR.preview = null; corrPaintPreview(); return; }
+        CORR.preview = "pending"; corrPaintPreview();
+        try {
+          var pr = await Dash.priceShift(rr.staff_id, CORR.spec.workDate, rr.first_in_at, rr.last_out_at, CORR.kind === "early");
+          if (!CORR.open) return;
+          CORR.preview = pr === null ? "none" : pr;
+        } catch (e) { CORR.preview = "none"; }
+        corrPaintPreview();
+        return;
+      }
       // read the pair with a stand-in reason: a missing reason stops a save, not the figure
       var got = CorrectForm.read(CORR.spec, Object.assign({}, CORR.form, { why: CORR.form.why || "preview" }));
       var st = CorrectForm.standing(CORR.spec);
@@ -1318,6 +1348,7 @@
       var si = el.querySelector('[data-state="tIn"]');  if (si) si.textContent = inChanged ? "Changed" : st0.ruledIn ? "Set By Office" : "As Tapped";
       var so = el.querySelector('[data-state="tOut"]'); if (so) so.textContent = outChanged ? "Changed" : st0.ruledOut ? "Set By Office" : "As Tapped";
       var save = el.querySelector("[data-cf-save]"); if (save) save.disabled = CORR.busy || !corrDirty();
+      var act = el.querySelector('[data-corr="act"]'); if (act) act.disabled = CORR.busy || (CORR.mode === "accept" && CORR.kind !== "early_keep" && !String(f.why || "").trim());
       Array.prototype.forEach.call(el.querySelectorAll("[data-cf-reason]"), function (b) {
         b.setAttribute("aria-pressed", String(f.why || "").indexOf(b.getAttribute("data-cf-reason")) === 0 ? "true" : "false");
       });
@@ -1357,6 +1388,34 @@
         }
         CORR.err = "Could not save the correction: " + ((res && res.message) || (res && res.code) || "unknown error");
       } catch (e) { CORR.err = "Could not save the correction: " + (e.message || e); }
+      CORR.busy = false; corrRender();
+    }
+    // accept a shift as punched / credit or keep an early start / take either back
+    async function corrAct() {
+      var r = CORR.row, kind = CORR.kind, why = String(CORR.form.why || "").trim(), date = CORR.spec.workDate;
+      if (CORR.mode === "accept" && kind !== "early_keep" && !why) {
+        CORR.err = "Give a reason. It stays on record with your name."; CORR.invalid = "why"; corrRender();
+        var fld = document.querySelector('#corr-panel [data-cf="why"]'); if (fld) fld.focus();
+        return;
+      }
+      CORR.busy = true; CORR.err = ""; CORR.invalid = ""; corrRender();
+      try {
+        var res = CORR.mode === "undo"
+          ? await Dash.clearShiftAcceptance(r.staff_id, date, 1, kind)
+          : await Dash.acceptShiftAsPunched(r.staff_id, date, 1, kind, why || null);
+        if (res && res.ok) {
+          var when = r.full_name + "\u2019s " + friendlyDate(date);
+          var text = CORR.mode === "undo" ? "Undone — " + when + " is back as it was."
+                   : kind === "long" ? "Accepted — " + when + " is priced as punched."
+                   : kind === "early" ? "Credited — " + when + " counts from the punch-in."
+                   : "Kept — " + when + " stays counted from 8 AM.";
+          await corrRefresh();
+          corrClose(true);
+          showNote(text);
+          return;
+        }
+        CORR.err = "Could not do that: " + ((res && res.message) || (res && res.code) || "unknown error");
+      } catch (e) { CORR.err = "Could not do that: " + (e.message || e); }
       CORR.busy = false; corrRender();
     }
     async function corrRemove() {
@@ -1407,6 +1466,7 @@
         else if (a === "remove-ask") { CORR.askRemove = true; corrRender(); }
         else if (a === "remove-no") { CORR.askRemove = false; corrRender(); }
         else if (a === "remove-yes") await corrRemove();
+        else if (a === "act") await corrAct();
       });
       document.addEventListener("keydown", function (ev) { if (ev.key === "Escape" && CORR.open) corrClose(false); });
       // a click anywhere else closes it (capture phase: the panel re-renders on its own clicks)
@@ -1430,7 +1490,7 @@
     function moreCell(r, view) {
       if (!Dash.can("attendance.edit")) return '<td class="more-cell"></td>';
       return '<td class="more-cell"><button type="button" class="row-more" data-more="' + view + "|" + esc(r.staff_id) + "|" +
-             esc(String(r.work_date).slice(0, 10)) + '" aria-haspopup="menu" aria-expanded="false" aria-label="More for this day" title="More">\u22EF</button></td>';
+             esc(String(r.work_date).slice(0, 10)) + '" aria-haspopup="menu" aria-expanded="false" aria-label="More for this day" title="More">\u22EE</button></td>';
     }
     function menuOpen(btn) {
       var k = btn.getAttribute("data-more").split("|"), r = rowFor(k[0], k[1], k[2]);
@@ -1441,6 +1501,16 @@
       else if (day >= Dash.todayKL()) items.push('<span class="rm-item is-off" role="menuitem" aria-disabled="true">Edit Hours<small>Once the day is over</small></span>');
       else {
         items.push('<button type="button" class="rm-item" role="menuitem" data-menu="edit">' + (r.has_correction ? "Change Correction" : "Edit Hours") + "</button>");
+        // the Exceptions page's rulings, here too (0124): a shift over 16 h accepted as
+        // punched, an early start credited from the punch-in or kept from 8 AM, and
+        // either taken back. A correction settles an Overlong shift by itself.
+        if (r.long_shift && !r.long_accepted) items.push('<button type="button" class="rm-item" role="menuitem" data-menu="accept-long">Accept As Punched</button>');
+        if (r.long_accepted) items.push('<button type="button" class="rm-item" role="menuitem" data-menu="undo-long">Undo Acceptance</button>');
+        if (r.early_start && !r.early_accepted) {
+          items.push('<button type="button" class="rm-item" role="menuitem" data-menu="accept-early">Credit Early Start</button>');
+          items.push('<button type="button" class="rm-item" role="menuitem" data-menu="accept-early_keep">Keep From 8 AM</button>');
+        }
+        if (r.early_accepted) items.push('<button type="button" class="rm-item" role="menuitem" data-menu="undo-early">Undo Early Start Credit</button>');
         if (r.has_correction) items.push('<button type="button" class="rm-item rm-danger" role="menuitem" data-menu="remove">Remove Correction</button>');
       }
       m.innerHTML = items.join("");
@@ -1473,6 +1543,8 @@
         menuClose();
         if (act === "edit") corrOpen(r, view);
         if (act === "remove") corrOpen(r, view, { askRemove: true });
+        if (act.indexOf("accept-") === 0) corrOpen(r, view, { mode: "accept", kind: act.slice(7) });
+        if (act.indexOf("undo-") === 0) corrOpen(r, view, { mode: "undo", kind: act.slice(5) });
         return;
       }
       if (MENU.open && !(t.closest && t.closest("#row-menu"))) menuClose();
