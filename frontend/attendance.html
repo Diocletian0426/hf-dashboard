@@ -113,6 +113,12 @@
         </select>
       </label>
       <a id="punch-toggle" href="#" class="btn att-btn att-push-right">Show Every Punch</a>
+      <!-- "?" (owner, 26 Oct 2026): the words explained on request, in a small panel
+           under the button, instead of a legend sitting under every table. The
+           legend block further down stays in the page for PAPER only (the print key). -->
+      <button type="button" class="btn att-btn att-help" id="help-btn" aria-label="What The Words Mean"
+              title="What The Words Mean" aria-expanded="false">?</button>
+      <div class="att-words" id="help-pop" hidden tabindex="-1" role="dialog" aria-label="What The Words Mean"></div>
     </div>
 
     <div class="table-wrap">
@@ -134,7 +140,7 @@
          the day has a figure; LOCATION says whether the phone was where it should
          be; the small FACTS say what else is true of the day. Only an Unpriced
          day is amber; a location word is never amber. -->
-    <div class="table-legend legend-list" id="legend" hidden>
+    <div class="table-legend legend-list print-only" id="legend">
       <div class="legend-title">What The Words Mean</div>
       <span><span class="pay pay-ok">Priced</span> The day has its figure</span>
       <span><span class="pay pay-progress">In Progress</span> Punched in today, not out yet</span>
@@ -1064,6 +1070,22 @@
       showEl.value = params.get("show") || "";
       showEl.addEventListener("change", refilter);
 
+      // the "?" panel: the legend's words, on request; the same words print as the key
+      var helpBtn = document.getElementById("help-btn"), helpPop = document.getElementById("help-pop");
+      helpPop.innerHTML = '<button type="button" class="dl-x help-x" id="help-x" aria-label="Close" title="Close">&times;</button>' +
+                          document.getElementById("legend").innerHTML;
+      function helpOpen(on) {
+        helpPop.hidden = !on;
+        helpBtn.setAttribute("aria-expanded", on ? "true" : "false");
+        if (on) helpPop.focus(); else helpBtn.focus();
+      }
+      helpBtn.addEventListener("click", function () { helpOpen(helpPop.hidden); });
+      document.getElementById("help-x").addEventListener("click", function () { helpOpen(false); });
+      document.addEventListener("click", function (ev) {
+        if (!helpPop.hidden && !helpPop.contains(ev.target) && !helpBtn.contains(ev.target)) { helpPop.hidden = true; helpBtn.setAttribute("aria-expanded", "false"); }
+      });
+      document.addEventListener("keydown", function (ev) { if (ev.key === "Escape" && !helpPop.hidden) helpOpen(false); });
+
       var tbody = document.getElementById("rows");
       try {
         var results = await Promise.all([
@@ -1128,7 +1150,7 @@
               codeCell(s.staff_id) +
               '<td><button type="button" class="worker-btn" data-i="' + i + '" ' +
                    'aria-expanded="false" aria-controls="d' + i + '">' +
-                 '<span class="who-line"><strong>' + esc(s.full_name) + "</strong>" + codeTag(s.staff_id) +
+                 '<span class="who-line"><strong title="' + esc(s.full_name) + '">' + esc(s.full_name) + "</strong>" + codeTag(s.staff_id) +
                  "</span></button></td>" +
               siteCell(s) +
               // the times the day is PAID from, the office's where it ruled (0092)
@@ -1141,7 +1163,6 @@
             "</tr>" +
             '<tr class="detail-row" id="d' + i + '" hidden><td colspan="8"></td></tr>';
           }).join("");
-          document.getElementById("legend").hidden = false;
           if (findEl.value || companyEl.value || showEl.value) applyFind("rows", 8);
         }
 
@@ -2082,7 +2103,7 @@
                  esc(findKey(w, Object.keys(w.sites).concat(Object.keys(w.codes)).join(" "))) + '">' +
           codeCell(w.staff_id) +
           '<td><button type="button" class="worker-btn" data-i="' + i + '" aria-expanded="false">' +
-            '<span class="who-line"><strong>' + esc(w.name) + "</strong>" + codeTag(w.staff_id) + "</span>" +
+            '<span class="who-line"><strong title="' + esc(w.name) + '">' + esc(w.name) + "</strong>" + codeTag(w.staff_id) + "</span>" +
             "</button></td>" +
           '<td class="num">' + w.days + "</td>" +
           '<td class="num">' + hm(mwm / 60) + "</td>" +

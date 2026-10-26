@@ -3687,8 +3687,22 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
 .att-review .rv-queue { margin-left: auto; color: var(--brand-ink); font-weight: 600; text-decoration: none; }
 .att-readable .unpriced-note { color: var(--ink); }
 .dl-progress { color: var(--ink-2); }
+/* the "?" panel (the legend on request) and the legend as the print key only */
+.att-readable .att-help { width: 40px; height: 40px; padding: 0; justify-content: center; border-radius: 50%; font-weight: 700; font-size: 17px; }
+.att-readable .filters.att-narrow { position: relative; }
+.att-words { position: absolute; right: 0; top: calc(100% + 8px); z-index: 40; width: min(640px, 100%); padding: 14px 16px 8px;
+            background: #fff; border: 1px solid var(--line-strong); border-radius: var(--r-lg); box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14); outline: none; }
+.att-words .help-x { position: absolute; right: 10px; top: 8px; }
+.att-words .legend-title { margin: 0 32px 10px 0; }
+.att-words > span { display: flex; align-items: baseline; gap: 10px; margin: 0 0 8px; line-height: 1.5; font-size: 14px; color: var(--ink-2); }
+.att-words > span > .pay, .att-words > span > .loc, .att-words > span > .facts { flex: 0 0 auto; display: inline-block; margin: 0; color: var(--ink); }
+.att-readable .print-only { display: none; }
+/* long names stay in their column: two lines at most, then an ellipsis; the full name on hover and in the drawer */
+.att-readable .att-table .worker-btn, .att-readable .att-table .who-line { white-space: normal; }
+.att-readable .att-table .who-line strong { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; max-width: 230px; line-height: 1.3; }
 @media print {
-  .att-review { display: none !important; }
+  .att-review, .att-words, .att-help { display: none !important; }
+  body.att-readable .print-only { display: block !important; }
   body.att-readable .pay-no { background: #fff !important; border: 1px solid #000; border-radius: 999px; padding: 1px 6px; font-size: 10.5px; }
   body.att-readable .facts, body.att-readable .loc { color: #333 !important; }
 }
