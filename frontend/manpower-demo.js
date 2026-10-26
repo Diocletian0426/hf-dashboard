@@ -176,11 +176,20 @@
         if (d < from || d > to || d > r.last_reported_date) continue;
         if (new Date(d + "T00:00:00Z").getUTCDay() === 0) continue;               // Sunday off
         var open = n === 0, late = (n + i) % 3 === 0;
-        out.push({ staff_id: r.staff_id, full_name: r.full_name, work_date: d,
-          effective_in_at: ts(d, "07:" + (30 + (i * 7) % 29)), effective_out_at: open ? null : ts(d, late ? "19:0" + (i % 5) : "17:1" + (i % 9)),
-          working_minutes: open ? 0 : 450, ot_minutes: open ? 0 : (late ? 120 : 0),
-          project_name: r.project_name, out_project_name: null,
-          needs_review: String(r.last_reported_project_id || "") !== String(r.current_project_id || ""), open_shift: open });
+        var missed = n === 4 && i % 2 === 0, corrected = n === 6 && i % 2 === 1;
+        var inAt = ts(d, "07:" + (30 + (i * 7) % 29)), outAt = open ? null : ts(d, missed ? "06:05" : late ? "19:0" + (i % 5) : "17:1" + (i % 9));
+        var away = String(r.last_reported_project_id || "") !== String(r.current_project_id || "");
+        out.push({ staff_id: r.staff_id, full_name: r.full_name, work_date: d, day_kind: "normal",
+          project_id: r.current_project_id, project_name: r.project_name, out_project_id: null, out_project_name: null,
+          first_in_at: inAt, last_out_at: outAt, effective_in_at: inAt, effective_out_at: outAt,
+          working_minutes: open ? 0 : 450, ot_minutes: open || missed ? 0 : (late ? 120 : 0),
+          has_anomaly: away, has_late_sync: false, out_unknown: false, needs_review: away && !corrected,
+          open_shift: open, missed_out: missed, has_correction: corrected,
+          correction_reason: corrected ? "Forgot to punch out" : null, corrected_by_name: corrected ? "Maria Hill (demo)" : null,
+          corrected_at: corrected ? ts(day(n - 1), "09:10") : null,
+          long_shift: false, long_accepted: false, early_start: false, early_accepted: false, under_name: null, worker_note: null,
+          shifts: [{ shift_no: 1, in_at: inAt, out_at: outAt, raw_in_at: inAt, raw_out_at: corrected ? ts(d, "23:59") : outAt,
+                     corrected: corrected, closed_by_system: missed, entered_by_office: false, missed: missed }] });
       }
     });
     return out;
