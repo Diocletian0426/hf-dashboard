@@ -98,11 +98,11 @@
     .dr-links { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 4px; }
     .dr-links .btn { text-decoration: none; }
     .dr-links .btn.on { background: var(--brand-soft); border-color: var(--brand-border); color: var(--brand-ink); }
-    /* Recent Attendance: a pop-up box beside the panel, rows only (the owner's
-       reference, 26 Oct): Date, In – Out, Hours, Site, a status pill; the
-       latest 5 shifts, Show More for the rest, a fixed footer */
-    .mp-punches { position: fixed; top: 72px; right: calc(min(480px, 96vw) + 12px); z-index: 71;
-                  width: min(640px, 92vw); max-height: min(76vh, 640px); display: flex; flex-direction: column;
+    /* Recent Attendance: a pop-up box over the page and the panel, rows only
+       (the owner's reference, 26 Oct): Date, In – Out, Hours, Site, a status
+       pill; the latest 5 shifts, Show More for the rest, a fixed footer */
+    .mp-punches { position: fixed; top: 72px; left: 50%; transform: translateX(-50%); z-index: 71;   /* over the page and the panel */
+                  width: min(820px, 94vw); max-height: min(78vh, 680px); display: flex; flex-direction: column;
                   background: #fff; border: 1px solid var(--line-strong); border-radius: var(--r-lg);
                   box-shadow: var(--shadow-2); padding: 16px 18px 14px; animation: pop-in 0.15s ease-out; }
     .mp-punches[hidden] { display: none; }
@@ -114,13 +114,12 @@
     .pu-top .pu-count { align-self: center; white-space: nowrap; }
     .pu-top .pu-close { width: 40px; height: 40px; padding: 0; border-radius: 999px; display: inline-flex;
                         align-items: center; justify-content: center; font-size: 22px; line-height: 1; flex: none; }
-    .pu-head, .pu-row { display: grid; grid-template-columns: 56px 1fr 62px 118px 112px; gap: 10px; align-items: center; }
+    .pu-head, .pu-row { display: grid; grid-template-columns: 90px 1.2fr 100px 1fr 150px; gap: 14px; align-items: center; }
     .pu-head { font-size: var(--fs-sm); color: var(--ink-2); padding: 6px 0 8px; border-bottom: 1px solid var(--line); flex: none; }
     .pu-body { overflow-y: auto; min-height: 0; flex: 1 1 auto; }
     .pu-row { font-size: var(--fs-md); padding: 10px 0; border-bottom: 1px solid var(--rule); }
     .pu-row .pu-date { font-weight: 600; }
     .pu-row .n { color: var(--ink); white-space: nowrap; }
-    .pu-note { display: block; font-size: var(--fs-xs); color: var(--brand); margin-top: 2px; }
     .pu-site { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: help; }
     .pu-pill { display: inline-block; border-radius: 999px; padding: 3px 12px; font-size: var(--fs-xs); font-weight: 600;
                white-space: nowrap; cursor: help; }
@@ -167,7 +166,8 @@
 
     @media (max-width: 760px) {
       .mp-drawer { width: 100vw; border-radius: 0; padding: var(--sp-3) var(--sp-4) var(--sp-6); }
-      .mp-punches { top: 0; left: 0; right: 0; width: auto; max-height: 100vh; border-radius: 0; }
+      .mp-punches { top: 0; left: 0; right: 0; transform: none; width: auto; max-height: 100vh; border-radius: 0; }
+      .pu-head, .pu-row { grid-template-columns: 56px 1fr 56px 90px 100px; gap: 8px; }
       .dr-form { grid-template-columns: 1fr; }
       .mp-bar .tool-search { flex-basis: 100%; }
     }
@@ -860,8 +860,7 @@
           var full = siteName(x.project_id, x.project_name) + (x.out_project_id ? " → " + siteName(x.out_project_id, x.out_project_name) : "");
           body += '<div class="pu-row">' +
             '<span class="pu-date">' + escHtml(shortDate(x.work_date)) + "</span>" +
-            "<span>" + escHtml(klTime(x.effective_in_at)) + " – " + escHtml(klTime(x.effective_out_at)) +
-            (x.open_shift ? '<span class="pu-note">● Ongoing shift</span>' : "") + "</span>" +
+            "<span>" + escHtml(klTime(x.effective_in_at)) + " – " + escHtml(klTime(x.effective_out_at)) + "</span>" +
             '<span class="n">' + escHtml(hoursWords(x)) + "</span>" +
             '<span class="pu-site" title="' + esc(full) + '">' + escHtml(code) + "</span>" +
             '<span><span class="pu-pill t-' + st.tone + '" title="' + esc(st.why) + '">' + escHtml(st.label) + "</span></span></div>";
