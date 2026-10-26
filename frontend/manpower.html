@@ -98,12 +98,23 @@
     .dr-links { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 4px; }
     .dr-links .btn { text-decoration: none; }
     .dr-links .btn.on { background: var(--brand-soft); border-color: var(--brand-border); color: var(--brand-ink); }
-    /* Recent Punches: the last 14 days, one line per day, unfolded under the buttons */
-    .dr-punches { margin: 8px 0 4px; }
+    /* Recent Punches: a pop-up box beside the panel (the owner's ask, 26 Oct),
+       the last 14 days one line per day; closes on ×, Escape or a click elsewhere */
+    .mp-punches { position: fixed; top: 72px; right: calc(min(480px, 96vw) + 12px); z-index: 71;
+                  width: min(480px, 92vw); max-height: calc(100vh - 96px); overflow-y: auto;
+                  background: #fff; border: 1px solid var(--line-strong); border-radius: var(--r-md);
+                  box-shadow: var(--shadow-2); padding: 12px 14px 10px; animation: pop-in 0.15s ease-out; }
+    .mp-punches[hidden] { display: none; }
+    .pu-top { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; }
+    .pu-top h3 { flex: 1; margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase; color: var(--ink-2); }
+    .pu-top .pu-who { font-size: var(--fs-sm); color: var(--ink); font-weight: 600; }
+    .pu-top .pu-close { width: 36px; height: 36px; padding: 0; border-radius: 999px; display: inline-flex;
+                        align-items: center; justify-content: center; font-size: 20px; line-height: 1; }
     .dr-punch { display: grid; grid-template-columns: 52px 100px 42px 1fr auto; gap: 8px; align-items: center;
                 font-size: var(--fs-sm); padding: 4px 0; border-bottom: 1px solid var(--rule); }
     .dr-punch .n { text-align: right; color: var(--ink-2); white-space: nowrap; }
     .dr-punch .muted { min-width: 0; overflow-wrap: anywhere; }
+    .pu-foot { margin-top: 8px; font-size: var(--fs-sm); }
     .dr-sec { margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px solid var(--rule); }
     .dr-sec > h3 { margin: 0 0 8px; font-size: 11px; font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase; color: var(--ink-2);
                    display: flex; align-items: center; gap: 8px; }
@@ -140,6 +151,7 @@
 
     @media (max-width: 760px) {
       .mp-drawer { width: 100vw; border-radius: 0; padding: var(--sp-3) var(--sp-4) var(--sp-6); }
+      .mp-punches { top: 0; left: 0; right: 0; width: auto; max-height: 100vh; border-radius: 0; }
       .dr-form { grid-template-columns: 1fr; }
       .mp-bar .tool-search { flex-basis: 100%; }
     }
@@ -175,9 +187,10 @@
              matched no pinned site), "No Report" (nothing in 7 days); office
              staff carry none. The full sentence lives in the worker panel.
            - the worker panel (right; 25–26 Oct): the facts as label : value
-             rows, Edit Details and Recent Punches (the last 14 days from
-             get_shifts_range, attendance.view, one fetch per visit; "Open
-             Attendance" link under it), then Punch App Phone as rows, then a terse Movement History
+             rows, Edit Details and Recent Punches (a pop-up box beside the
+             panel: the last 14 days from get_shifts_range, attendance.view,
+             one fetch per visit; "Open Attendance" link in it), then Punch
+             App Phone as rows, then a terse Movement History
              (date and route only, newest 3, "All n" unfolds), then a bottom
              row with "Move…" (unfolds the move form) at the left and Mark As
              Left at the right. A round × closes it; so does the same row
@@ -278,6 +291,7 @@
     </details>
 
     <aside id="mp-drawer" class="mp-drawer" hidden aria-label="Worker"></aside>
+    <div id="mp-punches" class="mp-punches" hidden aria-label="Recent punches"></div>
   </main>
 
   <script src="vendor/supabase.js"></script>
@@ -786,9 +800,12 @@
         .then(function () { M.shiftsLoading = null; });
       return M.shiftsLoading;
     }
-    function punchesSection(r) {
-      if (!M.punchesOpen) return "";
-      var h = '<div class="dr-punches">';
+    function renderPunches() {
+      var el = document.getElementById("mp-punches");
+      var r = M.sel && M.sel !== "__new" ? byId(M.sel) : null;
+      if (!M.punchesOpen || !r) { el.hidden = true; el.innerHTML = ""; return; }
+      var h = '<div class="pu-top"><h3>Recent Punches</h3><span class="pu-who">' + escHtml(r.full_name) + "</span>" +
+        '<button type="button" class="btn pu-close" data-act="punches-close" aria-label="Close" title="Close">×</button></div>';
       if (M.shiftRows === null) h += '<div class="dr-line muted">Loading…</div>';
       else if (M.shiftsErr) h += '<div class="dr-line muted">' + escHtml(M.shiftsErr) + "</div>";
       else {
@@ -806,7 +823,8 @@
             "<span>" + (x.needs_review ? '<span class="st st-elsewhere">Unverified</span>' : "") + "</span></div>";
         });
       }
-      return h + '<div class="dr-line"><a class="muted" href="' + esc(attendanceHref(r)) + '">Open Attendance</a></div></div>';
+      el.innerHTML = h + '<div class="pu-foot"><a class="muted" href="' + esc(attendanceHref(r)) + '">Open Attendance</a></div>';
+      el.hidden = false;
     }
     function factRow(label, value) { return "<dt>" + escHtml(label) + "</dt><dd>" + value + "</dd>"; }
 
@@ -831,7 +849,7 @@
           '<div class="dr-links">' +
           (M.canEdit ? '<button type="button" class="btn" data-act="mode-edit">Edit Details</button>' : "") +
           (M.canAtt ? '<button type="button" class="btn' + (M.punchesOpen ? " on" : "") + '" data-act="punches">Recent Punches</button>' : "") +
-          "</div>" + punchesSection(r);
+          "</div>";
       } else {
         var dup = M.confirm && M.confirm.kind === "dup-edit";
         h += '<div class="dr-form">' +
@@ -937,12 +955,13 @@
 
     function renderDrawer() {
       var el = document.getElementById("mp-drawer");
-      if (!M.sel) { el.hidden = true; el.innerHTML = ""; return; }
-      if (M.sel === "__new") { el.innerHTML = newWorkerPanel(); el.hidden = false; return; }
+      if (!M.sel) { el.hidden = true; el.innerHTML = ""; renderPunches(); return; }
+      if (M.sel === "__new") { el.innerHTML = newWorkerPanel(); el.hidden = false; renderPunches(); return; }
       var r = byId(M.sel);
       if (!r) { closeWorker(); return; }
       el.innerHTML = workerPanel(r);
       el.hidden = false;
+      renderPunches();
     }
 
     /* ----------------------------- rendering ------------------------------- */
@@ -1037,9 +1056,10 @@
       if (a === "open-edit") { requestClose({ id: btn.getAttribute("data-staff"), mode: "edit" }); return; }
       if (a === "new") { requestClose({ id: "__new" }); return; }
       if (a === "hist-all") { if (sel) { M.histAll[sel.staff_id] = true; renderDrawer(); } return; }
-      if (a === "punches") {
-        M.punchesOpen = !M.punchesOpen; renderDrawer();
-        if (M.punchesOpen) ensureShifts().then(function () { if (M.sel) renderDrawer(); });
+      if (a === "punches" || a === "punches-close") {
+        M.punchesOpen = a === "punches" ? !M.punchesOpen : false;
+        renderDrawer();
+        if (M.punchesOpen) ensureShifts().then(renderPunches);
         return;
       }
       if (a === "mode-edit") { M.mode = "edit"; M.confirm = null; M.panelOk = ""; M.panelErr = ""; renderDrawer(); return; }
@@ -1314,9 +1334,15 @@
         // document, and a detached target no longer counts as "inside the panel".
         document.addEventListener("click", function (ev) {
           if (!M.sel) return;
-          if (ev.target.closest("#mp-drawer, tr[data-staff], button[data-act='open'], button[data-act='open-edit'], button[data-act='new']")) return;
+          // the Recent Punches box closes on a click anywhere outside it
+          if (M.punchesOpen && !ev.target.closest("#mp-punches, button[data-act='punches']")) { M.punchesOpen = false; renderDrawer(); }
+          if (ev.target.closest("#mp-drawer, #mp-punches, tr[data-staff], button[data-act='open'], button[data-act='open-edit'], button[data-act='new']")) return;
           requestClose(null);
         }, true);
+        document.getElementById("mp-punches").addEventListener("click", function (ev) {
+          var btn = ev.target.closest("button[data-act]");
+          if (btn) { ev.preventDefault(); onAction(btn, ev); }
+        });
         document.getElementById("mp-more").addEventListener("click", async function (ev) {
           var tab = ev.target.closest("button[data-tab]");
           if (tab) { M.tab = tab.getAttribute("data-tab"); M.mode = null; M.confirm = null; renderMore(); return; }
@@ -1333,7 +1359,11 @@
           ev.preventDefault();
           onAction(btn, ev);
         });
-        document.addEventListener("keydown", function (ev) { if (ev.key === "Escape" && M.sel) requestClose(null); });
+        document.addEventListener("keydown", function (ev) {
+          if (ev.key !== "Escape" || !M.sel) return;
+          if (M.punchesOpen) { M.punchesOpen = false; renderDrawer(); return; }   // the box first, the panel next
+          requestClose(null);
+        });
       } catch (e) {
         document.getElementById("error").innerHTML =
           '<div class="banner banner-red">Could not load: ' + escHtml((e && e.message) || e) + "</div>";
