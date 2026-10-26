@@ -98,36 +98,39 @@
     .dr-links { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 4px; }
     .dr-links .btn { text-decoration: none; }
     .dr-links .btn.on { background: var(--brand-soft); border-color: var(--brand-border); color: var(--brand-ink); }
-    /* Recent Attendance: a compact pop-up box beside the panel (the owner's
-       spec, 26 Oct): the latest 5 shifts, Show More for the rest, a row opens
-       its details, a fixed footer with the link to the full page */
+    /* Recent Attendance: a pop-up box beside the panel, rows only (the owner's
+       reference, 26 Oct): Date, In – Out, Hours, Site, a status pill; the
+       latest 5 shifts, Show More for the rest, a fixed footer */
     .mp-punches { position: fixed; top: 72px; right: calc(min(480px, 96vw) + 12px); z-index: 71;
-                  width: min(520px, 92vw); max-height: min(72vh, 600px); display: flex; flex-direction: column;
-                  background: #fff; border: 1px solid var(--line-strong); border-radius: var(--r-md);
-                  box-shadow: var(--shadow-2); padding: 12px 14px 10px; animation: pop-in 0.15s ease-out; }
+                  width: min(640px, 92vw); max-height: min(76vh, 640px); display: flex; flex-direction: column;
+                  background: #fff; border: 1px solid var(--line-strong); border-radius: var(--r-lg);
+                  box-shadow: var(--shadow-2); padding: 16px 18px 14px; animation: pop-in 0.15s ease-out; }
     .mp-punches[hidden] { display: none; }
-    .pu-top { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; flex: none; }
-    .pu-top h3 { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase; color: var(--ink-2); }
-    .pu-top .pu-who { flex: 1; font-size: var(--fs-sm); color: var(--ink); font-weight: 600; min-width: 0;
+    .pu-top { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 10px; flex: none; }
+    .pu-top .pu-title { flex: 1; min-width: 0; }
+    .pu-top h2 { margin: 0; font-size: var(--fs-xl); line-height: 1.2; }
+    .pu-top .pu-who { display: block; margin-top: 2px; font-size: var(--fs-sm); color: var(--ink-2);
                       overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .pu-top .pu-count { font-size: var(--fs-xs); font-weight: 600; color: var(--warn-ink); white-space: nowrap; }
-    .pu-top .pu-close { width: 36px; height: 36px; padding: 0; border-radius: 999px; display: inline-flex;
-                        align-items: center; justify-content: center; font-size: 20px; line-height: 1; flex: none; }
-    .pu-head, .pu-row { display: grid; grid-template-columns: 50px 1fr 46px 96px; gap: 8px; align-items: start; }
-    .pu-head { font-size: 11px; font-weight: 600; letter-spacing: 0.4px; text-transform: uppercase; color: var(--ink-3);
-               padding: 2px 0 4px; border-bottom: 1px solid var(--rule); flex: none; }
+    .pu-top .pu-count { align-self: center; white-space: nowrap; }
+    .pu-top .pu-close { width: 40px; height: 40px; padding: 0; border-radius: 999px; display: inline-flex;
+                        align-items: center; justify-content: center; font-size: 22px; line-height: 1; flex: none; }
+    .pu-head, .pu-row { display: grid; grid-template-columns: 56px 1fr 62px 118px 112px; gap: 10px; align-items: center; }
+    .pu-head { font-size: var(--fs-sm); color: var(--ink-2); padding: 6px 0 8px; border-bottom: 1px solid var(--line); flex: none; }
     .pu-body { overflow-y: auto; min-height: 0; flex: 1 1 auto; }
-    .pu-row { font-size: var(--fs-sm); padding: 5px 0; border-bottom: 1px solid var(--rule); cursor: pointer; }
-    .pu-row:hover { background: var(--surface-2); }
-    .pu-row.open { background: var(--brand-soft); }
-    .pu-row .n { text-align: right; color: var(--ink-2); white-space: nowrap; }
-    .pu-site { display: block; font-size: var(--fs-xs); color: var(--ink-3); }
-    .pu-st { font-size: var(--fs-xs); font-weight: 600; color: var(--ink-3); text-align: right; white-space: nowrap; cursor: help; }
-    .pu-st.warn { color: var(--warn-ink); }
-    .pu-detail { grid-column: 1 / -1; margin: 4px 0 2px; padding: 6px 8px; background: var(--surface-solid);
-                 border: 1px solid var(--line); border-radius: var(--r-sm); font-size: var(--fs-xs); grid-template-columns: 84px 1fr; }
+    .pu-row { font-size: var(--fs-md); padding: 10px 0; border-bottom: 1px solid var(--rule); }
+    .pu-row .pu-date { font-weight: 600; }
+    .pu-row .n { color: var(--ink); white-space: nowrap; }
+    .pu-note { display: block; font-size: var(--fs-xs); color: var(--brand); margin-top: 2px; }
+    .pu-site { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: help; }
+    .pu-pill { display: inline-block; border-radius: 999px; padding: 3px 12px; font-size: var(--fs-xs); font-weight: 600;
+               white-space: nowrap; cursor: help; }
+    .pu-pill.t-info { background: var(--brand-soft); color: var(--brand-ink); }
+    .pu-pill.t-warn { background: var(--warn-soft); color: var(--warn-ink); }
+    .pu-pill.t-ok   { background: var(--ok-soft);   color: var(--ok-ink); }
+    .pu-pill.t-grey { background: #f1f5f9;          color: var(--ink-2); }
     .pu-foot { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px;
-               margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--rule); font-size: var(--fs-sm); }
+               margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+    .pu-foot .btn { text-decoration: none; }
     .dr-sec { margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px solid var(--rule); }
     .dr-sec > h3 { margin: 0 0 8px; font-size: 11px; font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase; color: var(--ink-2);
                    display: flex; align-items: center; gap: 8px; }
@@ -200,12 +203,12 @@
              matched no pinned site), "No Report" (nothing in 7 days); office
              staff carry none. The full sentence lives in the worker panel.
            - the worker panel (right; 25–26 Oct): the facts as label : value
-             rows, Edit Details and Recent Attendance (a compact pop-up box
-             beside the panel: the latest 5 shifts of the last 14 days from
+             rows, Edit Details and Recent Attendance (a pop-up box beside
+             the panel, rows only: Date, In – Out, Hours, Site, a status
+             pill; the latest 5 shifts of the last 14 days from
              get_shifts_range, attendance.view, one fetch per visit; Show
-             More, a row opens its punches, one status word per day, a
-             Flagged count, "Open Full Attendance" in a fixed footer), then
-             Punch App Phone as rows, then a terse Movement History
+             More; "Open Full Attendance" in a fixed footer), then Punch App
+             Phone as rows, then a terse Movement History
              (date and route only, newest 3, "All n" unfolds), then a bottom
              row with "Move…" (unfolds the move form) at the left and Mark As
              Left at the right. A round × closes it; so does the same row
@@ -286,7 +289,7 @@
             <dt><span class="chip chip-warn">2 Seen Elsewhere</span></dt><dd>On a site line: workers in that site last seen at another site.</dd>
             <dt><span class="chip chip-tag">1 of 4</span></dt><dd>Rows shown of the site's total while a search or a filter is on.</dd>
             <dt><span class="badge badge-gray">By Punch</span> <span class="badge badge-gray">Backfill</span></dt><dd>In Movement History: moved by the worker's own punch; a past move typed in later.</dd>
-            <dt><span class="pu-st warn">GPS Unverified</span></dt><dd>In Recent Attendance: a day the office should look at. Also No Punch-Out, Long Shift, Early Start, To Review. Click the row for the punches.</dd>
+            <dt><span class="pu-pill t-warn">Unverified</span></dt><dd>In Recent Attendance: a day the office should look at. Also No Punch-Out, Long Shift, Early Start, To Review. Hover a pill for the reason.</dd>
             <dt>A tinted row</dt><dd>The worker open in the panel. Click the row again, the ×, or anywhere else to close it.</dd>
           </dl>
         </div>
@@ -351,7 +354,7 @@
       translog: [], histByStaff: {}, translogErr: "",
       translogLoaded: false, translogLoading: null,   // fetched the first time something needs it
       histAll: {},                                     // staff_id -> true once "All n" was pressed
-      punchesOpen: false, punchesAll: false, punchDay: null,   // the Recent Attendance box: open, Show More pressed, the day expanded
+      punchesOpen: false, punchesAll: false,           // the Recent Attendance box: open, Show More pressed
       shiftRows: null, shiftsLoading: null, shiftsErr: "",   // the last 14 days, all workers, once per visit
       canEdit: false, canDevView: false, canDev: false, canAtt: false,
       showTest: params.get("test") === "1",
@@ -724,7 +727,7 @@
 
     function openWorker(id, mode) {
       M.sel = id; M.mode = mode || null; M.confirm = null; M.panelErr = ""; M.panelOk = ""; M.msgAt = "top";
-      M.punchesOpen = false; M.punchesAll = false; M.punchDay = null;
+      M.punchesOpen = false; M.punchesAll = false;
       renderGroups(); renderDrawer();
       if (id && id !== "__new" && M.canEdit) {
         if (!M.translogLoaded) ensureTranslog().then(function () { if (M.sel === id) renderDrawer(); });
@@ -822,87 +825,58 @@
       var p = pid ? M.dirByPid[pid] : null;
       return p ? p.project_code + " — " + (p.project_name || "") : (fallback || "No site matched");
     }
-    // one short word for a day, the first that applies, with the sentence behind it;
-    // warn = the office should look (counted in the header)
+    // one pill per day, the first that applies, with the sentence behind it on hover
     function dayStatus(x) {
-      if (x.open_shift) return { label: "In Only", warn: false, why: "Punched in; no punch-out yet. The shift is still running." };
-      if (x.has_correction) return { label: "Corrected", warn: false, why: "The office set the times for this day." };
-      if (x.missed_out) return { label: "No Punch-Out", warn: true, why: "The punch-out never came; the system closed the shift." };
-      if (x.has_anomaly) return { label: "GPS Unverified", warn: true, why: "A punch did not verify at a site" + (x.has_late_sync ? ", or was sent late from the offline queue" : "") + "." };
-      if (x.long_shift && !x.long_accepted) return { label: "Long Shift", warn: true, why: "Over 16 hours and not yet accepted by the office." };
-      if (x.early_start && !x.early_accepted) return { label: "Early Start", warn: true, why: "Punched in before 06:00 and not yet accepted by the office." };
-      if (x.needs_review) return { label: "To Review", warn: true, why: "Waiting for the office's review." };
-      if (x.has_late_sync) return { label: "Synced Late", warn: false, why: "Sent later from the phone's offline queue." };
-      return { label: "Verified", warn: false, why: "Punches verified at the site." };
+      if (x.open_shift) return { label: "In Only", tone: "info", why: "Punched in; no punch-out yet. The shift is still running." };
+      if (x.has_correction) return { label: "Corrected", tone: "grey", why: "The office set the times for this day." };
+      if (x.missed_out) return { label: "No Punch-Out", tone: "warn", why: "The punch-out never came; the system closed the shift." };
+      if (x.has_anomaly) return { label: "Unverified", tone: "warn", why: "A punch did not verify at a site" + (x.has_late_sync ? ", or was sent late from the offline queue" : "") + "." };
+      if (x.long_shift && !x.long_accepted) return { label: "Long Shift", tone: "warn", why: "Over 16 hours and not yet accepted by the office." };
+      if (x.early_start && !x.early_accepted) return { label: "Early Start", tone: "warn", why: "Punched in before 06:00 and not yet accepted by the office." };
+      if (x.needs_review) return { label: "To Review", tone: "warn", why: "Waiting for the office's review." };
+      if (x.has_late_sync) return { label: "Synced Late", tone: "grey", why: "Sent later from the phone's offline queue." };
+      return { label: "Verified", tone: "ok", why: "Punches verified at the site." };
     }
     function hoursWords(x) {
-      if (!x.effective_out_at) return "";
+      if (!x.effective_out_at) return "—";
       var mins = (x.working_minutes || 0) + (x.ot_minutes || 0);
-      return mins ? (Math.round(mins / 6) / 10) + " h" : "";
-    }
-    // the expanded row: the punches behind the day, from the data the row already carries
-    function dayDetail(x) {
-      var lines = [], shifts = x.shifts || [];
-      shifts.forEach(function (s, i) {
-        var t = klTime(s.in_at) + " – " + klTime(s.out_at), notes = [];
-        if (s.corrected) notes.push("corrected" + (s.raw_in_at || s.raw_out_at ? " from " + klTime(s.raw_in_at) + " – " + klTime(s.raw_out_at) : ""));
-        if (s.closed_by_system) notes.push("closed by the system");
-        if (s.entered_by_office) notes.push("entered by the office");
-        if (s.missed) notes.push("punch-out missed");
-        lines.push(factRow(shifts.length > 1 ? "Shift " + (i + 1) : "Punches", escHtml(t) + (notes.length ? ' <span class="muted">' + escHtml(notes.join(", ")) + "</span>" : "")));
-      });
-      if (!shifts.length) lines.push(factRow("Punches", escHtml(klTime(x.first_in_at) + " – " + klTime(x.last_out_at))));
-      lines.push(factRow("Site", escHtml(siteName(x.project_id, x.project_name)) + (x.out_project_id ? " → " + escHtml(siteName(x.out_project_id, x.out_project_name)) : "")));
-      var gps = x.has_anomaly ? "A punch did not verify at a site" : "All punches verified at the site";
-      if (x.has_late_sync) gps += "; sent late from the offline queue";
-      if (x.out_unknown) gps += "; the punch-out was at an unknown location";
-      lines.push(factRow("GPS", escHtml(gps + ".")));
-      if (x.under_name) lines.push(factRow("Under", escHtml(x.under_name)));
-      if (x.effective_out_at) {
-        lines.push(factRow("Hours", escHtml(((x.working_minutes || 0) / 60).toFixed(1) + " h" +
-          (x.ot_minutes ? " + " + ((x.ot_minutes || 0) / 60).toFixed(1) + " h overtime" : "") +
-          (x.day_kind && x.day_kind !== "normal" ? " · " + UI.label(x.day_kind) : ""))));
-      }
-      if (x.has_correction) lines.push(factRow("Correction", escHtml((x.correction_reason || "") + (x.corrected_by_name ? " — " + x.corrected_by_name : "") + (x.corrected_at ? ", " + Dash.klDateTime(x.corrected_at) : ""))));
-      if (x.worker_note) lines.push(factRow("Worker Note", escHtml(x.worker_note)));
-      if (x.needs_review) lines.push(factRow("Review", "Waiting for the office."));
-      return '<dl class="dr-facts pu-detail">' + lines.join("") + "</dl>";
+      return mins ? (Math.round(mins / 6) / 10) + " h" : "—";
     }
     function renderPunches() {
       var el = document.getElementById("mp-punches");
       var r = M.sel && M.sel !== "__new" ? byId(M.sel) : null;
       if (!M.punchesOpen || !r) { el.hidden = true; el.innerHTML = ""; return; }
-      var days = [], flagged = 0, body = "";
+      var days = [], body = "";
       if (M.shiftRows === null) body = '<div class="dr-line muted">Loading…</div>';
       else if (M.shiftsErr) body = '<div class="dr-line muted">' + escHtml(M.shiftsErr) + "</div>";
       else {
         days = M.shiftRows.filter(function (x) { return x.staff_id === r.staff_id; })
           .sort(function (a, b) { return a.work_date < b.work_date ? 1 : a.work_date > b.work_date ? -1 : 0; });
-        days.forEach(function (x) { if (dayStatus(x).warn) flagged++; });
         var shown = M.punchesAll ? days : days.slice(0, PUNCH_ROWS);
         if (!days.length) body = '<div class="dr-line muted">No shifts in the last ' + PUNCH_DAYS + " days.</div>";
         shown.forEach(function (x) {
-          var st = dayStatus(x), open = M.punchDay === x.work_date;
+          var st = dayStatus(x);
           var code = siteCode(x.project_id, x.project_name) + (x.out_project_id ? " → " + siteCode(x.out_project_id, x.out_project_name) : "");
           var full = siteName(x.project_id, x.project_name) + (x.out_project_id ? " → " + siteName(x.out_project_id, x.out_project_name) : "");
-          body += '<div class="pu-row' + (open ? " open" : "") + '" data-day="' + esc(x.work_date) + '" title="' + (open ? "Click to fold" : "Click for the punches") + '">' +
-            "<span>" + escHtml(shortDate(x.work_date)) + "</span>" +
+          body += '<div class="pu-row">' +
+            '<span class="pu-date">' + escHtml(shortDate(x.work_date)) + "</span>" +
             "<span>" + escHtml(klTime(x.effective_in_at)) + " – " + escHtml(klTime(x.effective_out_at)) +
-            '<span class="pu-site" title="' + esc(full) + '">' + escHtml(code) + "</span></span>" +
+            (x.open_shift ? '<span class="pu-note">● Ongoing shift</span>' : "") + "</span>" +
             '<span class="n">' + escHtml(hoursWords(x)) + "</span>" +
-            '<span class="pu-st' + (st.warn ? " warn" : "") + '" title="' + esc(st.why) + '">' + escHtml(st.label) + "</span>" +
-            (open ? dayDetail(x) : "") + "</div>";
+            '<span class="pu-site" title="' + esc(full) + '">' + escHtml(code) + "</span>" +
+            '<span><span class="pu-pill t-' + st.tone + '" title="' + esc(st.why) + '">' + escHtml(st.label) + "</span></span></div>";
         });
       }
       var more = days.length - PUNCH_ROWS;
-      el.innerHTML = '<div class="pu-top"><h3>Recent Attendance</h3><span class="pu-who">' + escHtml(r.full_name) + "</span>" +
-        (flagged ? '<span class="pu-count" title="Days the office should look at">' + flagged + " Flagged</span>" : "") +
+      el.innerHTML = '<div class="pu-top"><div class="pu-title"><h2>Recent Attendance</h2>' +
+        '<span class="pu-who">' + escHtml([r.full_name, r.employee_code].filter(Boolean).join(" · ")) + "</span></div>" +
+        (days.length ? '<span class="chip pu-count">' + days.length + (days.length === 1 ? " Record" : " Records") + "</span>" : "") +
         '<button type="button" class="btn pu-close" data-act="punches-close" aria-label="Close" title="Close">×</button></div>' +
-        '<div class="pu-head"><span>Date</span><span>In – Out</span><span class="n">Hours</span><span class="pu-st">Status</span></div>' +
+        '<div class="pu-head"><span>Date</span><span>In – Out</span><span>Hours</span><span>Site</span><span>Status</span></div>' +
         '<div class="pu-body">' + body + "</div>" +
         '<div class="pu-foot"><span>' +
-        (more > 0 ? '<button type="button" class="btn" data-act="punches-more">' + (M.punchesAll ? "Show Less" : "Show More (" + more + ")") + "</button>" : "") +
-        '</span><a class="btn" href="' + esc(attendanceHref(r)) + '">Open Full Attendance</a></div>';
+        (more > 0 ? '<button type="button" class="btn" data-act="punches-more">' + (M.punchesAll ? "Show Less ▴" : "Show More ▾") + "</button>" : "") +
+        '</span><a class="btn btn-primary" href="' + esc(attendanceHref(r)) + '">Open Full Attendance ↗</a></div>';
       el.hidden = false;
     }
     function factRow(label, value) { return "<dt>" + escHtml(label) + "</dt><dd>" + value + "</dd>"; }
@@ -1137,7 +1111,7 @@
       if (a === "hist-all") { if (sel) { M.histAll[sel.staff_id] = true; renderDrawer(); } return; }
       if (a === "punches" || a === "punches-close") {
         M.punchesOpen = a === "punches" ? !M.punchesOpen : false;
-        M.punchesAll = false; M.punchDay = null;
+        M.punchesAll = false;
         renderDrawer();
         if (M.punchesOpen) ensureShifts().then(renderPunches);
         return;
@@ -1422,10 +1396,7 @@
         }, true);
         document.getElementById("mp-punches").addEventListener("click", function (ev) {
           var btn = ev.target.closest("button[data-act]");
-          if (btn) { ev.preventDefault(); onAction(btn, ev); return; }
-          if (ev.target.closest("a")) return;
-          var row = ev.target.closest(".pu-row");            // a row opens its punches; again folds them
-          if (row) { var d = row.getAttribute("data-day"); M.punchDay = M.punchDay === d ? null : d; renderPunches(); }
+          if (btn) { ev.preventDefault(); onAction(btn, ev); }
         });
         document.getElementById("mp-more").addEventListener("click", async function (ev) {
           var tab = ev.target.closest("button[data-tab]");
