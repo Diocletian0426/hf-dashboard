@@ -97,6 +97,13 @@
     .dr-facts dt { color: var(--ink-3); } .dr-facts dd { margin: 0; color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
     .dr-links { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 4px; }
     .dr-links .btn { text-decoration: none; }
+    .dr-links .btn.on { background: var(--brand-soft); border-color: var(--brand-border); color: var(--brand-ink); }
+    /* Recent Punches: the last 14 days, one line per day, unfolded under the buttons */
+    .dr-punches { margin: 8px 0 4px; }
+    .dr-punch { display: grid; grid-template-columns: 52px 100px 42px 1fr auto; gap: 8px; align-items: center;
+                font-size: var(--fs-sm); padding: 4px 0; border-bottom: 1px solid var(--rule); }
+    .dr-punch .n { text-align: right; color: var(--ink-2); white-space: nowrap; }
+    .dr-punch .muted { min-width: 0; overflow-wrap: anywhere; }
     .dr-sec { margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px solid var(--rule); }
     .dr-sec > h3 { margin: 0 0 8px; font-size: 11px; font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase; color: var(--ink-2);
                    display: flex; align-items: center; gap: 8px; }
@@ -168,7 +175,9 @@
              matched no pinned site), "No Report" (nothing in 7 days); office
              staff carry none. The full sentence lives in the worker panel.
            - the worker panel (right; 25–26 Oct): the facts as label : value
-             rows, then Punch App Phone as rows, then a terse Movement History
+             rows, Edit Details and Recent Punches (the last 14 days from
+             get_shifts_range, attendance.view, one fetch per visit; "Open
+             Attendance" link under it), then Punch App Phone as rows, then a terse Movement History
              (date and route only, newest 3, "All n" unfolds), then a bottom
              row with "Move…" (unfolds the move form) at the left and Mark As
              Left at the right. A round × closes it; so does the same row
@@ -189,7 +198,7 @@
          Reads: v_manpower_by_site, v_project_directory, v_project_supervisors,
          v_machine_fleet (anyone with manpower.view);
          get_transfer_log, get_staff_detail (manpower.edit); get_worker_devices
-         (devices.view). Writes re-check the caller in the database every time;
+         (devices.view); get_shifts_range (attendance.view). Writes re-check the caller in the database every time;
          the buttons only stop the page lying to a viewer. -->
     <div class="page-eyebrow">Manpower</div>
     <h1>Site Manpower</h1>
@@ -249,6 +258,7 @@
             <dt><span class="chip chip-warn">2 Seen Elsewhere</span></dt><dd>On a site line: workers in that site last seen at another site.</dd>
             <dt><span class="chip chip-tag">1 of 4</span></dt><dd>Rows shown of the site's total while a search or a filter is on.</dd>
             <dt><span class="badge badge-gray">By Punch</span> <span class="badge badge-gray">Backfill</span></dt><dd>In Movement History: moved by the worker's own punch; a past move typed in later.</dd>
+            <dt><span class="st st-elsewhere">Unverified</span></dt><dd>In Recent Punches: that day's punches matched no site; it sits in the office review queue.</dd>
             <dt>A tinted row</dt><dd>The worker open in the panel. Click the row again, the ×, or anywhere else to close it.</dd>
           </dl>
         </div>
@@ -295,6 +305,7 @@
                      "Vietnam", "Thailand", "Philippines", "Cambodia", "Sri Lanka", "China"];
     var REPORT_DAYS = 7;          // a report older than this is "No Report"
     var HISTORY_IN_PANEL = 3;     // the newest few; "All n" unfolds the rest
+    var PUNCH_DAYS = 14;          // Recent Punches in the panel
     // The database gates every manpower write with fn_is_management_or_office():
     // an active account whose access profile carries the office baseline. The
     // page mirrors that list so a login the database would refuse never sees
@@ -310,7 +321,9 @@
       translog: [], histByStaff: {}, translogErr: "",
       translogLoaded: false, translogLoading: null,   // fetched the first time something needs it
       histAll: {},                                     // staff_id -> true once "All n" was pressed
-      canEdit: false, canDevView: false, canDev: false,
+      punchesOpen: false,                              // Recent Punches unfolded in the panel
+      shiftRows: null, shiftsLoading: null, shiftsErr: "",   // the last 14 days, all workers, once per visit
+      canEdit: false, canDevView: false, canDev: false, canAtt: false,
       showTest: params.get("test") === "1",
       q: "", company: "all", view: "site", trade: "all", site: "all", status: "all",
       open: loadOpen(),
@@ -680,7 +693,7 @@
     /* ------------------------------ the panel ------------------------------ */
 
     function openWorker(id, mode) {
-      M.sel = id; M.mode = mode || null; M.confirm = null; M.panelErr = ""; M.panelOk = ""; M.msgAt = "top";
+      M.sel = id; M.mode = mode || null; M.confirm = null; M.panelErr = ""; M.panelOk = ""; M.msgAt = "top"; M.punchesOpen = false;
       renderGroups(); renderDrawer();
       if (id && id !== "__new" && M.canEdit) {
         if (!M.translogLoaded) ensureTranslog().then(function () { if (M.sel === id) renderDrawer(); });
@@ -752,6 +765,49 @@
     function msgBlock() {
       return '<p class="dr-ok">' + escHtml(M.panelOk) + '</p><p class="dr-err">' + escHtml(M.panelErr) + "</p>";
     }
+
+    // Recent Punches (the owner's ask, 26 Oct): the last 14 days of a worker's
+    // punches from the read the Attendance page uses (get_shifts_range, gated on
+    // attendance.view). One fetch for everyone the first time it is opened in
+    // this visit, then filtered per worker.
+    function klTime(iso) {
+      if (!iso) return "";
+      return new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kuala_Lumpur" }).format(new Date(iso));
+    }
+    function ensureShifts() {
+      if (M.shiftRows !== null) return Promise.resolve();
+      if (M.shiftsLoading) return M.shiftsLoading;
+      var to = Dash.todayKL();
+      var d = new Date(to + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() - (PUNCH_DAYS - 1));
+      var from = d.toISOString().slice(0, 10);
+      M.shiftsLoading = Dash.getShiftsRange(from, to, null)
+        .then(function (rows) { M.shiftRows = rows || []; M.shiftsErr = rows === null ? "Unavailable." : ""; })
+        .catch(function (e) { M.shiftRows = []; M.shiftsErr = (e && e.message) || String(e); })
+        .then(function () { M.shiftsLoading = null; });
+      return M.shiftsLoading;
+    }
+    function punchesSection(r) {
+      if (!M.punchesOpen) return "";
+      var h = '<div class="dr-punches">';
+      if (M.shiftRows === null) h += '<div class="dr-line muted">Loading…</div>';
+      else if (M.shiftsErr) h += '<div class="dr-line muted">' + escHtml(M.shiftsErr) + "</div>";
+      else {
+        var days = M.shiftRows.filter(function (x) { return x.staff_id === r.staff_id; })
+          .sort(function (a, b) { return a.work_date < b.work_date ? 1 : a.work_date > b.work_date ? -1 : 0; });
+        if (!days.length) h += '<div class="dr-line muted">No punches in the last ' + PUNCH_DAYS + " days.</div>";
+        days.forEach(function (x) {
+          var mins = (x.working_minutes || 0) + (x.ot_minutes || 0);
+          var site = x.project_name || "No Site";
+          if (x.out_project_name) site += " → " + x.out_project_name;
+          h += '<div class="dr-punch"><span>' + escHtml(shortDate(x.work_date)) + "</span>" +
+            "<span>" + escHtml(klTime(x.effective_in_at)) + " – " + escHtml(klTime(x.effective_out_at)) + "</span>" +
+            '<span class="n">' + (x.effective_out_at && mins ? (Math.round(mins / 6) / 10) + " h" : "") + "</span>" +
+            '<span class="muted">' + escHtml(site) + "</span>" +
+            "<span>" + (x.needs_review ? '<span class="st st-elsewhere">Unverified</span>' : "") + "</span></div>";
+        });
+      }
+      return h + '<div class="dr-line"><a class="muted" href="' + esc(attendanceHref(r)) + '">Open Attendance</a></div></div>';
+    }
     function factRow(label, value) { return "<dt>" + escHtml(label) + "</dt><dd>" + value + "</dd>"; }
 
     // the facts at the top of the panel as label : value rows (the owner's
@@ -774,7 +830,8 @@
           (M.canEdit && !loaded ? '<div class="dr-line muted">Loading…</div>' : "") +
           '<div class="dr-links">' +
           (M.canEdit ? '<button type="button" class="btn" data-act="mode-edit">Edit Details</button>' : "") +
-          '<a class="btn" href="' + esc(attendanceHref(r)) + '">Attendance</a></div>';
+          (M.canAtt ? '<button type="button" class="btn' + (M.punchesOpen ? " on" : "") + '" data-act="punches">Recent Punches</button>' : "") +
+          "</div>" + punchesSection(r);
       } else {
         var dup = M.confirm && M.confirm.kind === "dup-edit";
         h += '<div class="dr-form">' +
@@ -980,6 +1037,11 @@
       if (a === "open-edit") { requestClose({ id: btn.getAttribute("data-staff"), mode: "edit" }); return; }
       if (a === "new") { requestClose({ id: "__new" }); return; }
       if (a === "hist-all") { if (sel) { M.histAll[sel.staff_id] = true; renderDrawer(); } return; }
+      if (a === "punches") {
+        M.punchesOpen = !M.punchesOpen; renderDrawer();
+        if (M.punchesOpen) ensureShifts().then(function () { if (M.sel) renderDrawer(); });
+        return;
+      }
       if (a === "mode-edit") { M.mode = "edit"; M.confirm = null; M.panelOk = ""; M.panelErr = ""; renderDrawer(); return; }
       if (a === "mode-move") { M.mode = "move"; M.confirm = null; M.panelOk = ""; M.panelErr = ""; renderDrawer(); return; }
       if (a === "mode-clear") { M.mode = null; M.confirm = null; renderDrawer(); renderMore(); return; }
@@ -1160,6 +1222,7 @@
         M.canEdit = Dash.can("manpower.edit") && OFFICE_BASELINE_PROFILES.indexOf(profileCode) !== -1;
         M.canDevView = Dash.can("devices.view");
         M.canDev = Dash.can("devices.manage");
+        M.canAtt = Dash.can("attendance.view");
 
         var res = await Promise.all([
           Dash.getManpowerBySite(), Dash.getProjectDirectory(), Dash.getProjectSupervisors(),

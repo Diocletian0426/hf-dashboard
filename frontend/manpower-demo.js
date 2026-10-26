@@ -28,7 +28,7 @@
   var params = new URLSearchParams(location.search);
   if (params.get("demo") !== "1") return;                        // self-gate
 
-  var PERMS = ["manpower.view", "manpower.edit", "devices.view", "devices.manage", "machines.view"];
+  var PERMS = ["manpower.view", "manpower.edit", "devices.view", "devices.manage", "machines.view", "attendance.view"];
 
   var today = Dash.todayKL();
   function day(n) {                                    // today minus n days
@@ -164,6 +164,27 @@
                            is_active: r.is_active, ot_eligible: r.ot_eligible }, r._detail);
   };
   Dash.getWorkerDevices = async function (id) { await wait(150); return copy(dev(id)); };
+  // the last 14 days as v_worker_daily_shifts rows: a working day per weekday up
+  // to each worker's last report, unverified when that report was off the record
+  Dash.getShiftsRange = async function (from, to) {
+    await wait(200);
+    var out = [];
+    ROWS.forEach(function (r, i) {
+      if (!r.is_active || !r.last_reported_date) return;
+      for (var n = 0; n < 14; n++) {
+        var d = day(n);
+        if (d < from || d > to || d > r.last_reported_date) continue;
+        if (new Date(d + "T00:00:00Z").getUTCDay() === 0) continue;               // Sunday off
+        var open = n === 0, late = (n + i) % 3 === 0;
+        out.push({ staff_id: r.staff_id, full_name: r.full_name, work_date: d,
+          effective_in_at: ts(d, "07:" + (30 + (i * 7) % 29)), effective_out_at: open ? null : ts(d, late ? "19:0" + (i % 5) : "17:1" + (i % 9)),
+          working_minutes: open ? 0 : 450, ot_minutes: open ? 0 : (late ? 120 : 0),
+          project_name: r.project_name, out_project_name: null,
+          needs_review: String(r.last_reported_project_id || "") !== String(r.current_project_id || ""), open_shift: open });
+      }
+    });
+    return out;
+  };
 
   // ---- writes: in memory only ----------------------------------------------
   function dupName(name, exceptId) {
