@@ -126,10 +126,10 @@
         <thead>
           <tr>
             <th>Employee Code</th><th>Worker</th><th>Site</th><th>Shift</th>
-            <th class="num">Working Hours</th><th class="num">Over Time</th><th>Pay</th><th>Location</th>
+            <th class="num">Working Hours</th><th class="num">Over Time</th><th>Pay</th><th>Location</th><th class="more-th"><span class="sr-only">Actions</span></th>
           </tr>
         </thead>
-        <tbody id="rows"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
+        <tbody id="rows"><tr><td colspan="9" class="empty">Loading…</td></tr></tbody>
       </table>
     </div>
 
@@ -192,6 +192,7 @@
        page stays lit behind it. One form for Day and Month (correct-form.js, shared
        with Exceptions). Nothing here edits a punch: the ruling is laid on top. -->
   <aside class="corr-panel" id="corr-panel" hidden tabindex="-1" role="dialog" aria-labelledby="corr-title"></aside>
+  <div class="row-menu" id="row-menu" hidden role="menu"></div>
 
   <div class="dl-back" id="dl-back" hidden>
     <div class="dl-card" id="dl-card" role="dialog" aria-modal="false" aria-labelledby="dl-title">
@@ -698,10 +699,17 @@
       if (r.ot_eligible === false) w.push("Not paid overtime: every worked hour counts as a normal hour.");
       return w.join(" ");
     }
-    function payCell(r) {
+    // hover = true (the month's day lines, owner 27 Oct 2026): the reason and the
+    // facts sit in the hover text, the cell shows the one word
+    function payCell(r, hover) {
       var p = payOf(r), f = factsOf(r);
       // the pill is ONE word; an unpriced day's reason sits on the small line under it
       var why = (p.key === "unpriced" && p.why && p.why !== "Unpriced") ? p.why : "";
+      if (hover) {
+        var tip = [why].concat(f).filter(Boolean).join(" · ");
+        return '<td class="pay-cell"><span class="pay ' + p.cls + '" title="' + esc((tip ? tip + ". " : "") + PAY_HOVER[p.key]) + '">' +
+               (p.key === "unpriced" ? "Unpriced" : esc(p.word)) + "</span></td>";
+      }
       return '<td class="pay-cell"><span class="pay ' + p.cls + '" title="' + esc(PAY_HOVER[p.key]) + '">' +
              (p.key === "unpriced" ? "Unpriced" : esc(p.word)) + "</span>" +
              (why ? '<span class="facts facts-why">' + esc(why) + "</span>" : "") +
@@ -865,6 +873,7 @@
     function renderOpenShifts() {
       var el = document.getElementById("open-shifts");
       var html = "";
+      if (NOTE) html += '<div class="banner banner-green att-saved">' + esc(NOTE) + "</div>";
       if (OS.err) html += '<div class="banner banner-red">' + esc(OS.err) + "</div>";
       if (REVIEW.label) {
         var parts = [REVIEW.n + " Worker" + (REVIEW.n === 1 ? "" : "s")];
@@ -1019,7 +1028,7 @@
              '<span class="pl-type">' + esc((p.punch_type || "").toUpperCase()) + "</span>" +
              '<span class="pl-time">' + Dash.klTime(p.punched_at) + "</span>" +
              ((p.punched_by && (v === "office_closed" || v === "auto_closed")) ? ""
-               : '<span class="badge badge-' + vCls + '">' + esc(checkWords(v)) + "</span> ") +
+               : '<span class="badge badge-' + vCls + '" title="' + esc(CHECK_HOVER[v] || "") + '">' + esc(checkWords(v)) + "</span> ") +
              provenance(p) +
              (tail ? '<span class="pl-where">' + esc(tail) + "</span>" : "") + "</li>";
     }
@@ -1062,14 +1071,6 @@
         ? '<p class="detail-note"><strong>' + Number(s.shift_count) + " shifts this day</strong> — rule them one by one on the " +
           '<a class="fix-link" href="exceptions.html">Exceptions page \u2197</a>.</p>' : "";
     }
-    // the door to the panel: for a login that may rule, a finished day, one shift
-    function corrButton(s, i) {
-      if (!Dash.can("attendance.edit") || Number(s.shift_count) > 1) return "";
-      if (String(s.work_date).slice(0, 10) >= Dash.todayKL()) return "";   // the database rules finished days only
-      return '<div class="amend-wrap"><button type="button" class="amend-open" data-corr-open="' + i + '">' +
-             (s.has_correction ? "Change Correction" : "Correct Hours") + "</button></div>";
-    }
-
     // one day row of the day table (the detail row under it is added by the caller)
     function dayRowHtml(s, i) {
       var h = hoursOf(s), p = payOf(s), l = locOf(s);
@@ -1087,6 +1088,7 @@
         '<td class="num">' + (h ? hm(h.ot) : "—") + "</td>" +
         payCell(s) +
         locCell(s) +
+        moreCell(s, "day") +
       "</tr>";
     }
 
@@ -1118,11 +1120,12 @@
                officialInAt: r.corrected_in_at || r.first_in_at, officialOutAt: r.corrected_out_at || r.last_out_at,
                adjusted: !!r.has_correction };
     }
-    async function corrOpen(r, view) {
+    async function corrOpen(r, view, opts) {
       if (!r) return;
       var spec = corrSpec(r);
       CORR = { open: true, view: view, row: r, spec: spec, form: CorrectForm.start(spec), punches: null,
-               busy: false, err: "", invalid: "", preview: null, previewKey: "", note: "", askClose: false, askRemove: false };
+               busy: false, err: "", invalid: "", preview: null, previewKey: "", note: "",
+               askClose: false, askRemove: !!(opts && opts.askRemove) };
       corrRender();
       var el = document.getElementById("corr-panel");
       el.hidden = false; el.scrollTop = 0; el.focus();
@@ -1140,65 +1143,132 @@
     }
     function corrClose(force) {
       if (!CORR.open) return;
-      if (!force && corrDirty() && !CORR.note) { CORR.askClose = true; corrRender(); return; }
+      if (!force && corrDirty()) { CORR.askClose = true; corrRender(); return; }
       CORR = { open: false };
       document.getElementById("corr-panel").hidden = true;
+    }
+    // may this login rule this day here? (two shifts go to Exceptions; today is not over)
+    function corrEditable(r) {
+      return Dash.can("attendance.edit") && Number(r.shift_count) <= 1 && String(r.work_date).slice(0, 10) < Dash.todayKL();
+    }
+    var CHECK_HOVER = {
+      verified: "Inside the site's circle.", outside_geofence: "Outside the site's circle.",
+      low_accuracy: "The phone's GPS fix was too loose to trust.", no_gps: "The phone gave no location.",
+      no_geofence: "The site had no circle set at the time.", no_site: "No site's circle around this point.",
+      office_closed: "Entered by the office.", auto_closed: "Closed by the system, not tapped."
+    };
+    // one end of the day as it was TAPPED: the time, and the check in a small word
+    function origCell(ts, punch) {
+      if (!ts) return '<span class="orig-time">—</span>';
+      var v = punch ? (punch.verification_status || "") : "";
+      var words = !punch ? "" : (punch.punched_by === "system" || v === "auto_closed") ? "Auto Closed"
+                : (punch.punched_by === "office" || v === "office_closed") ? "Office" : checkWords(v);
+      var d = punch ? plainDistance(punch.distance_m) : "";
+      return '<span class="orig-time">' + esc(Dash.klTime(ts)) + "</span>" +
+             (words ? '<span class="orig-check" title="' + esc(CHECK_HOVER[v] || "") + '">' + esc(words) + (d ? " · " + esc(d) : "") + "</span>" : "");
     }
     function corrRender() {
       var el = document.getElementById("corr-panel");
       if (!CORR.open) return;
-      var r = CORR.row, s = CORR.spec, h = hoursOf(r), p = payOf(r), canEdit = Dash.can("attendance.edit");
+      var r = CORR.row, s = CORR.spec, h = hoursOf(r), p = payOf(r), f = CORR.form;
       var code = CODES[r.staff_id] || "", co = companyName(COMPANY[r.staff_id]);
+      var editable = corrEditable(r);
       var head = '<div class="corr-head"><div>' +
-        '<div class="corr-eyebrow">Correct Hours</div>' +
+        '<div class="corr-eyebrow">Attendance Correction</div>' +
         '<h2 id="corr-title">' + esc(r.full_name) + "</h2>" +
         '<div class="corr-sub">' + esc([code, co, friendlyDate(s.workDate), siteText(r)].filter(Boolean).join(" · ")) + "</div></div>" +
         '<button type="button" class="dl-x" data-corr="close" aria-label="Close" title="Close">&times;</button></div>';
-      var now = '<p class="corr-now"><span class="pay ' + p.cls + '">' + (p.key === "unpriced" ? "Unpriced" : esc(p.word)) + "</span>" +
-        (p.key === "unpriced" && p.why && p.why !== "Unpriced" ? '<span class="facts-why">' + esc(p.why) + "</span>" : "") +
-        (h ? '<span class="corr-fig">' + hm(h.normal) + " + " + hm(h.ot) + " OT</span>" : "") + "</p>";
       var note = CORR.note ? '<div class="banner banner-green corr-note">' + esc(CORR.note) + "</div>" : "";
-      var taps = CORR.punches === null ? '<p class="detail-note">Loading punches…</p>'
-        : (CORR.punches.length
-            ? '<p class="detail-head">Original Punches</p><ul class="punch-lines">' + CORR.punches.map(punchLine).join("") + "</ul>"
-            : '<p class="detail-note">No Punches Found</p>');
-      var body = "";
-      if (!canEdit) body = "";
-      else if (Number(r.shift_count) > 1) body = twoShiftNote(r);
-      else if (s.workDate >= Dash.todayKL()) body = '<p class="detail-note">A day can be corrected once it is over.</p>';
-      else if (CORR.askClose) {
-        body = '<div class="corr-ask"><span class="q">Close without saving?</span>' +
-          '<button type="button" class="btn" data-corr="close-discard">Discard</button>' +
-          '<button type="button" class="btn btn-primary" data-corr="close-keep">Keep Editing</button></div>';
-      } else {
-        body = '<p class="detail-head">The Ruling</p>' +
-          CorrectForm.html(s, CORR.form, { busy: CORR.busy, err: CORR.err, invalid: CORR.invalid, saveLabel: "Save Correction" }) +
-          '<p class="corr-preview" id="corr-preview"></p>' +
-          (r.has_correction
-            ? (CORR.askRemove
-                ? '<div class="corr-ask"><span class="q">Remove this correction? The worker\u2019s own punch times stand again.</span>' +
-                  '<button type="button" class="btn" data-corr="remove-yes"' + (CORR.busy ? " disabled" : "") + ">Remove</button>" +
-                  '<button type="button" class="btn btn-primary" data-corr="remove-no">Keep</button></div>'
-                : '<div class="corr-remove"><button type="button" class="btn" data-corr="remove-ask"' + (CORR.busy ? " disabled" : "") + ">Remove Correction</button></div>")
-            : "");
+
+      // Punch Times: the tap beside the time to be paid from; a changed value lights up
+      var pin = null, pout = null;
+      (CORR.punches || []).forEach(function (x) { if (x.punch_type === "in" && !pin) pin = x; if (x.punch_type === "out") pout = x; });
+      var tapIn = r.first_in_at, tapOut = r.last_out_at;
+      var inChanged = editable && !!f.tIn && f.tIn !== CorrectForm.klHHMM(tapIn);
+      var outChanged = editable && !!f.tOut && (f.tOut !== CorrectForm.klHHMM(tapOut) || !!f.next !== (CorrectForm.klDate(tapOut) > s.workDate));
+      var dis = CORR.busy ? " disabled" : "";
+      var bad = function (k) { return CORR.invalid === k ? ' aria-invalid="true"' : ""; };
+      var corrIn = editable
+        ? '<input type="time" data-cf="tIn" step="60" value="' + esc(f.tIn) + '"' + bad("tIn") + dis + ">"
+        : '<span class="orig-time">' + (effIn(r) ? esc(Dash.klTime(effIn(r))) : "—") + "</span>";
+      var corrOut = editable
+        ? '<input type="time" data-cf="tOut" step="60" value="' + esc(f.tOut) + '"' + bad("tOut") + dis + ">"
+        : '<span class="orig-time">' + (effOut(r) ? esc(Dash.klTime(effOut(r))) : "—") + "</span>";
+      var times = '<p class="detail-head">Punch Times</p>' +
+        '<div class="corr-grid">' +
+          '<span></span><span class="gh">Original</span><span class="gh">Corrected</span>' +
+          '<span class="gk">In</span><div data-cell="in"' + (inChanged ? ' class="changed"' : "") + ">" + origCell(tapIn, pin) + "</div><div data-cell=\"in-new\"" + (inChanged ? ' class="changed"' : "") + ">" + corrIn + "</div>" +
+          '<span class="gk">Out</span><div data-cell="out"' + (outChanged ? ' class="changed"' : "") + ">" + origCell(tapOut, pout) + "</div><div data-cell=\"out-new\"" + (outChanged ? ' class="changed"' : "") + ">" + corrOut + "</div>" +
+          (editable ? '<label class="corr-next"><input type="checkbox" data-cf="next"' + (f.next ? " checked" : "") + dis + "> Punch Out Was The Next Day (" + esc(friendlyDate(shiftDay(s.workDate, 1))) + ")</label>" : "") +
+        "</div>";
+
+      // Hours: the figure now, and the figure the ruling would give (from the database)
+      var cur = h ? hm(h.normal) + " + " + hm(h.ot) + " OT"
+              : (p.key === "unpriced" ? "Unpriced" + (p.why && p.why !== "Unpriced" ? " · " + p.why : "") : p.word);
+      var hours = '<p class="detail-head">Hours</p><div class="corr-hours">' +
+        '<div><span class="k">Current</span><b>' + esc(cur) + "</b></div>" +
+        '<div><span class="k">After Correction</span><b id="corr-preview">—</b></div></div>';
+
+      // Reason: a chip fills the box and lights; the office may add to it
+      var reason = "";
+      if (editable) {
+        reason = '<p class="detail-head">Reason</p>' +
+          '<div class="cf-reasons">' + CorrectForm.REASONS.map(function (x) {
+            var on = String(f.why || "").indexOf(x) === 0;
+            return '<button type="button" data-cf-reason="' + esc(x) + '" aria-pressed="' + (on ? "true" : "false") + '"' + dis + ">" + esc(x) + "</button>";
+          }).join("") + "</div>" +
+          '<label class="cf-why"><span class="sr-only">Reason</span><input type="text" data-cf="why" maxlength="500" autocomplete="off" value="' + esc(f.why) + '"' +
+            ' placeholder="Select a reason or write one"' + bad("why") + dis + "></label>" +
+          '<p class="detail-note corr-seen">The worker will see this reason. Malaysia time.</p>';
       }
-      el.innerHTML = head + now + note + correctionBlock(r) + taps + body;
+
+      // the standing ruling, with the way to take it back
+      var standing = correctionBlock(r) +
+        (editable && r.has_correction && !CORR.askRemove
+          ? '<p class="detail-note"><a href="#" class="fix-link" data-corr="remove-ask">Remove This Correction</a></p>' : "") +
+        (editable && CORR.askRemove
+          ? '<div class="corr-ask"><span class="q">Remove this correction? The worker\u2019s own punch times stand again.</span>' +
+            '<button type="button" class="btn" data-corr="remove-yes"' + dis + ">Remove</button>" +
+            '<button type="button" class="btn btn-primary" data-corr="remove-no">Keep</button></div>' : "");
+
+      var details = CORR.punches === null ? '<p class="detail-note">Loading punches…</p>'
+        : (CORR.punches.length
+            ? '<p class="detail-head">Punch Details</p><ul class="punch-lines">' + CORR.punches.map(punchLine).join("") + "</ul>"
+            : '<p class="detail-note">No Punches Found</p>');
+
+      var why = "";
+      if (!editable && Dash.can("attendance.edit")) {
+        why = Number(r.shift_count) > 1 ? twoShiftNote(r) : '<p class="detail-note">A day can be corrected once it is over.</p>';
+      }
+      var foot = "";
+      if (editable) {
+        foot = CORR.askClose
+          ? '<div class="corr-foot"><div class="corr-ask"><span class="q">Close without saving?</span>' +
+            '<button type="button" class="btn" data-corr="close-discard">Discard</button>' +
+            '<button type="button" class="btn btn-primary" data-corr="close-keep">Keep Editing</button></div></div>'
+          : '<div class="corr-foot">' +
+            '<div class="cf-err" role="alert">' + esc(CORR.err || "") + "</div>" +
+            '<button type="button" class="btn" data-cf-cancel' + dis + ">Cancel</button>" +
+            '<button type="button" class="btn btn-primary" data-cf-save' + (CORR.busy || !corrDirty() ? " disabled" : "") + ">" + (CORR.busy ? "Saving…" : "Save Correction") + "</button>" +
+            "</div>";
+      }
+      el.innerHTML = head + note + times + hours + reason + standing + why + details + foot;
       corrPaintPreview();
     }
     function corrPaintPreview() {
       var el = document.getElementById("corr-preview");
       if (!el) return;
       var p = CORR.preview;
-      el.innerHTML = p === "pending" ? "Pricing…"
+      el.textContent = p === "pending" ? "Pricing…"
         : (p && typeof p === "object")
           ? (p.working_minutes === null || p.working_minutes === undefined
-              ? "After saving: <b>Unpriced</b> — check the times"
-              : "After saving: <b>" + hm(Number(p.working_minutes) / 60) + " + " + hm(Number(p.ot_minutes || 0) / 60) + " OT</b>")
-          : "";
+              ? "Unpriced — check the times"
+              : hm(Number(p.working_minutes) / 60) + " + " + hm(Number(p.ot_minutes || 0) / 60) + " OT")
+          : "—";
     }
     // the figure the ruling WOULD give — asked of the database, never worked out here
     async function corrPreview() {
-      if (!CORR.open || !Dash.can("attendance.edit") || !CORR.form) return;
+      if (!CORR.open || !CORR.form || !corrEditable(CORR.row)) return;
       // read the pair with a stand-in reason: a missing reason stops a save, not the figure
       var got = CorrectForm.read(CORR.spec, Object.assign({}, CORR.form, { why: CORR.form.why || "preview" }));
       var st = CorrectForm.standing(CORR.spec);
@@ -1216,49 +1286,67 @@
       } catch (e) { CORR.preview = "none"; }
       corrPaintPreview();
     }
+    // what a typed change does at once, without re-rendering the form (focus stays)
+    function corrTouch() {
+      var el = document.getElementById("corr-panel"), f = CORR.form, r = CORR.row, s = CORR.spec;
+      var inChanged = !!f.tIn && f.tIn !== CorrectForm.klHHMM(r.first_in_at);
+      var outChanged = !!f.tOut && (f.tOut !== CorrectForm.klHHMM(r.last_out_at) || !!f.next !== (CorrectForm.klDate(r.last_out_at) > s.workDate));
+      ["in", "in-new"].forEach(function (k) { var c = el.querySelector('[data-cell="' + k + '"]'); if (c) c.classList.toggle("changed", inChanged); });
+      ["out", "out-new"].forEach(function (k) { var c = el.querySelector('[data-cell="' + k + '"]'); if (c) c.classList.toggle("changed", outChanged); });
+      var save = el.querySelector("[data-cf-save]"); if (save) save.disabled = CORR.busy || !corrDirty();
+      Array.prototype.forEach.call(el.querySelectorAll("[data-cf-reason]"), function (b) {
+        b.setAttribute("aria-pressed", String(f.why || "").indexOf(b.getAttribute("data-cf-reason")) === 0 ? "true" : "false");
+      });
+    }
+    // the note after a save: above the table, where the row just changed
+    var NOTE = "";
+    function showNote(text) {
+      NOTE = text; renderOpenShifts();
+      setTimeout(function () { if (NOTE === text) { NOTE = ""; renderOpenShifts(); } }, 10000);
+    }
     // after a write: re-read the one day, let the view patch its rows in
     async function corrRefresh() {
       var r = CORR.row, date = CORR.spec.workDate;
       var rows = dropTest(await Dash.getShifts(date, null));
       var fresh = rows.filter(function (x) { return x.staff_id === r.staff_id; })[0] || null;
       PUNCH_DAY[date] = null;
-      if (fresh) {
-        CORR.row = fresh; CORR.spec = corrSpec(fresh); CORR.form = CorrectForm.start(CORR.spec);
-        CORR.preview = null; CORR.previewKey = ""; CORR.askRemove = false;
-      }
       if (typeof window.__attRefresh === "function") await window.__attRefresh(date, r.staff_id, fresh);
     }
     async function corrSave() {
       var got = CorrectForm.read(CORR.spec, CORR.form);
       if (got.error) {
         CORR.err = got.error; CORR.invalid = got.field; corrRender();
-        var f = document.querySelector('#corr-panel [data-cf="' + got.field + '"]'); if (f) f.focus();
+        var fld = document.querySelector('#corr-panel [data-cf="' + got.field + '"]'); if (fld) fld.focus();
         return;
       }
-      CORR.busy = true; CORR.err = ""; CORR.invalid = ""; CORR.note = ""; corrRender();
+      CORR.busy = true; CORR.err = ""; CORR.invalid = ""; corrRender();
       try {
         var res = await Dash.setDayCorrection(CORR.row.staff_id, CORR.spec.workDate, got.inISO, got.outISO, got.why);
         if (res && res.ok) {
-          CORR.note = "Saved — " + CORR.row.full_name + "\u2019s hours for " + friendlyDate(CORR.spec.workDate) + " are now " +
-                      String(res.in_at_local || "").slice(11) + " to " + String(res.out_at_local || "").slice(11) +
-                      ". The worker will see the reason in their app.";
+          var text = "Saved — " + CORR.row.full_name + "\u2019s hours for " + friendlyDate(CORR.spec.workDate) + " are now " +
+                     String(res.in_at_local || "").slice(11) + " to " + String(res.out_at_local || "").slice(11) +
+                     ". The worker will see the reason in their app.";
           await corrRefresh();
-        } else {
-          CORR.err = "Could not save the correction: " + ((res && res.message) || (res && res.code) || "unknown error");
+          corrClose(true);                        // the row behind has changed; the note says so
+          showNote(text);
+          return;
         }
+        CORR.err = "Could not save the correction: " + ((res && res.message) || (res && res.code) || "unknown error");
       } catch (e) { CORR.err = "Could not save the correction: " + (e.message || e); }
       CORR.busy = false; corrRender();
     }
     async function corrRemove() {
-      CORR.busy = true; CORR.err = ""; CORR.note = ""; corrRender();
+      CORR.busy = true; CORR.err = ""; corrRender();
       try {
         var res = await Dash.clearDayCorrection(CORR.row.staff_id, CORR.spec.workDate);
         if (res && res.ok) {
-          CORR.note = "Correction removed — " + CORR.row.full_name + "\u2019s own punch times for " + friendlyDate(CORR.spec.workDate) + " stand again.";
+          var text = "Correction removed — " + CORR.row.full_name + "\u2019s own punch times for " + friendlyDate(CORR.spec.workDate) + " stand again.";
           await corrRefresh();
-        } else {
-          CORR.err = "Could not remove the correction: " + ((res && res.message) || (res && res.code) || "unknown error");
+          corrClose(true);
+          showNote(text);
+          return;
         }
+        CORR.err = "Could not remove the correction: " + ((res && res.message) || (res && res.code) || "unknown error");
       } catch (e) { CORR.err = "Could not remove the correction: " + (e.message || e); }
       CORR.busy = false; CORR.askRemove = false; corrRender();
     }
@@ -1269,6 +1357,7 @@
         if (!k || !CORR.open) return;
         if (k === "next") CORR.form.next = ev.target.checked; else CORR.form[k] = ev.target.value;
         if (ev.target.getAttribute("aria-invalid")) ev.target.removeAttribute("aria-invalid");
+        corrTouch();
         clearTimeout(timer); timer = setTimeout(corrPreview, 350);
       }
       el.addEventListener("input", onTyped);
@@ -1277,12 +1366,16 @@
         var t = ev.target.closest ? ev.target.closest("[data-cf-reason],[data-cf-save],[data-cf-cancel],[data-corr]") : null;
         if (!t || !CORR.open) return;
         if (t.hasAttribute("data-cf-reason")) {
-          CORR.form.why = t.getAttribute("data-cf-reason"); CORR.err = ""; CORR.invalid = ""; corrRender();
-          var w = el.querySelector('[data-cf="why"]'); if (w) w.focus();
+          ev.preventDefault();
+          var pick = t.getAttribute("data-cf-reason");
+          CORR.form.why = (String(CORR.form.why || "").indexOf(pick) === 0) ? "" : pick;   // press again to clear
+          CORR.err = ""; CORR.invalid = ""; corrRender();
+          var w = el.querySelector('[data-cf="why"]'); if (w) { w.focus(); w.setSelectionRange(w.value.length, w.value.length); }
           corrPreview(); return;
         }
         if (t.hasAttribute("data-cf-cancel")) { corrClose(false); return; }
         if (t.hasAttribute("data-cf-save")) { await corrSave(); return; }
+        ev.preventDefault();
         var a = t.getAttribute("data-corr");
         if (a === "close") corrClose(false);
         else if (a === "close-discard") corrClose(true);
@@ -1295,10 +1388,74 @@
       // a click anywhere else closes it (capture phase: the panel re-renders on its own clicks)
       document.addEventListener("click", function (ev) {
         if (!CORR.open || el.contains(ev.target)) return;
-        if (ev.target.closest && (ev.target.closest("[data-corr-open]") || ev.target.closest("[data-corr-month]"))) return;
+        if (ev.target.closest && (ev.target.closest(".row-more") || ev.target.closest("#row-menu"))) return;
         corrClose(false);
       }, true);
     })();
+
+    /* ---- THE "⋯" MENU on a day row (owner, 27 Oct 2026) -----------------------
+       At the right end of every day row — the Day table and the day lines of a
+       worker's month — for a login that may rule: Edit Hours (or Change
+       Correction) opens the panel; Remove Correction opens it asking first.
+       A day with two shifts is sent to Exceptions; today waits until it is over. */
+    var MENU = { open: false };
+    function rowFor(view, staffId, day) {
+      var pool = view === "month" ? MONTH.rows : DAY_SHIFTS;
+      return (pool || []).filter(function (x) { return x.staff_id === staffId && String(x.work_date).slice(0, 10) === day; })[0] || null;
+    }
+    function moreCell(r, view) {
+      if (!Dash.can("attendance.edit")) return '<td class="more-cell"></td>';
+      return '<td class="more-cell"><button type="button" class="row-more" data-more="' + view + "|" + esc(r.staff_id) + "|" +
+             esc(String(r.work_date).slice(0, 10)) + '" aria-haspopup="menu" aria-expanded="false" aria-label="More for this day" title="More">\u22EF</button></td>';
+    }
+    function menuOpen(btn) {
+      var k = btn.getAttribute("data-more").split("|"), r = rowFor(k[0], k[1], k[2]);
+      var m = document.getElementById("row-menu");
+      if (!r) return;
+      var day = String(r.work_date).slice(0, 10), items = [];
+      if (Number(r.shift_count) > 1) items.push('<a class="rm-item" role="menuitem" href="exceptions.html">Rule On Exceptions \u2197</a>');
+      else if (day >= Dash.todayKL()) items.push('<span class="rm-item is-off" role="menuitem" aria-disabled="true">Edit Hours<small>Once the day is over</small></span>');
+      else {
+        items.push('<button type="button" class="rm-item" role="menuitem" data-menu="edit">' + (r.has_correction ? "Change Correction" : "Edit Hours") + "</button>");
+        if (r.has_correction) items.push('<button type="button" class="rm-item rm-danger" role="menuitem" data-menu="remove">Remove Correction</button>');
+      }
+      m.innerHTML = items.join("");
+      MENU = { open: true, row: r, view: k[0], btn: btn, at: Date.now() };
+      m.hidden = false;
+      var b = btn.getBoundingClientRect(), w = m.offsetWidth || 220, hgt = m.offsetHeight || 60;
+      var top = b.bottom + 6; if (top + hgt > window.innerHeight - 8) top = Math.max(8, b.top - hgt - 6);
+      m.style.top = top + "px";
+      m.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, b.right - w)) + "px";
+      btn.setAttribute("aria-expanded", "true");
+      var first = m.querySelector("[data-menu],a"); if (first) first.focus();
+    }
+    function menuClose() {
+      if (!MENU.open) return;
+      document.getElementById("row-menu").hidden = true;
+      if (MENU.btn) MENU.btn.setAttribute("aria-expanded", "false");
+      MENU = { open: false };
+    }
+    document.addEventListener("click", function (ev) {
+      var t = ev.target;
+      var more = t.closest ? t.closest(".row-more") : null;
+      if (more) {
+        ev.preventDefault();
+        if (MENU.open && MENU.btn === more) { menuClose(); return; }
+        menuClose(); menuOpen(more); return;
+      }
+      var item = t.closest ? t.closest("#row-menu [data-menu]") : null;
+      if (item) {
+        var r = MENU.row, view = MENU.view, act = item.getAttribute("data-menu");
+        menuClose();
+        if (act === "edit") corrOpen(r, view);
+        if (act === "remove") corrOpen(r, view, { askRemove: true });
+        return;
+      }
+      if (MENU.open && !(t.closest && t.closest("#row-menu"))) menuClose();
+    });
+    document.addEventListener("keydown", function (ev) { if (ev.key === "Escape" && MENU.open) { var b = MENU.btn; menuClose(); if (b) b.focus(); } });
+    // a scroll closes it — but not the browser's own scroll-into-view that lands just before the opening click
+    window.addEventListener("scroll", function () { if (MENU.open && Date.now() - (MENU.at || 0) > 400) menuClose(); }, { passive: true });
 
     window.onShellReady = async function () {
       var params  = new URLSearchParams(location.search);
@@ -1399,7 +1556,7 @@
 
       var findEl = document.getElementById("f-find");
       findEl.value = params.get("find") || "";
-      function refilter() { applyFind(view === "month" ? "month-rows" : "rows", view === "month" ? 7 : 8); }
+      function refilter() { applyFind(view === "month" ? "month-rows" : "rows", view === "month" ? 7 : 9); }
       findEl.addEventListener("input", refilter);
       var companyEl = document.getElementById("f-company");
       companyEl.value = params.get("company") || "";
@@ -1479,12 +1636,12 @@
         // checked out. That detail is the answer to "why is this flagged",
         // which is the only reason anyone opens this page twice.
         if (!shifts.length) {
-          tbody.innerHTML = '<tr><td colspan="8" class="empty">No punches on ' + esc(friendlyDate(date)) + ".</td></tr>";
+          tbody.innerHTML = '<tr><td colspan="9" class="empty">No punches on ' + esc(friendlyDate(date)) + ".</td></tr>";
         } else {
           tbody.innerHTML = shifts.map(function (s, i) {
-            return dayRowHtml(s, i) + '<tr class="detail-row" id="d' + i + '" hidden><td colspan="8"></td></tr>';
+            return dayRowHtml(s, i) + '<tr class="detail-row" id="d' + i + '" hidden><td colspan="9"></td></tr>';
           }).join("");
-          if (findEl.value || companyEl.value || showEl.value) applyFind("rows", 8);
+          if (findEl.value || companyEl.value || showEl.value) applyFind("rows", 9);
         }
 
         setReview(friendlyDate(date), shifts);
@@ -1519,7 +1676,6 @@
               ? (s.has_correction ? '<p class="detail-head">Original Punches</p>' : "") +
                 '<ul class="punch-lines">' + punches.map(punchLine).join("") + "</ul>"
               : '<p class="detail-note">No Punches Found</p>') +
-            corrButton(s, i) +
           "</div>";
         }
 
@@ -1566,11 +1722,6 @@
            The button in a drawer opens the panel on the right. When the panel
            saves or removes a ruling it re-reads that day and hands the fresh
            row here; this view swaps its own row and drawer in place. */
-        tbody.addEventListener("click", function (ev) {
-          var b = ev.target.closest ? ev.target.closest("[data-corr-open]") : null;
-          if (!b) return;
-          corrOpen(shifts[Number(b.getAttribute("data-corr-open"))], "day");
-        });
         window.__attRefresh = async function (day, staffId, fresh) {
           if (day !== date) return;
           var idx = -1;
@@ -1585,7 +1736,7 @@
           punchCache = null;
           if (wasOpen) { setOpen(idx, true); await loadDrawer(idx); }
           setReview(friendlyDate(date), shifts);
-          applyFind("rows", 8);
+          applyFind("rows", 9);
         };
 
         /* ---- arriving with something to show ----------------------------------
@@ -1597,7 +1748,7 @@
           shifts.forEach(function (x, k) { if (x.staff_id === wantOpen) idx = k; });
           if (idx >= 0) {
             var tr = tbody.querySelector('tr.shift-row[data-i="' + idx + '"]');
-            if (tr && tr.hidden) { findEl.value = ""; showEl.value = ""; applyFind("rows", 8); }   // never open a row the filters hide
+            if (tr && tr.hidden) { findEl.value = ""; showEl.value = ""; applyFind("rows", 9); }   // never open a row the filters hide
             setOpen(idx, true);
             await loadDrawer(idx);
             if (Dash.can("attendance.edit") && Number(shifts[idx].shift_count) <= 1 && date < Dash.todayKL()) corrOpen(shifts[idx], "day");
@@ -2043,19 +2194,15 @@
     }
 
     function monthDetail(w) {
-      var canFix = Dash.can("attendance.edit") && !!w.staff_id, todayIso = Dash.todayKL();
+      var canFix = Dash.can("attendance.edit") && !!w.staff_id;
       var lines = w.rows.slice().sort(function (a, b) {
         return a.work_date < b.work_date ? -1 : 1;
       }).map(function (r) {
-        var h = hoursOf(r), p = payOf(r);
+        var h = hoursOf(r);
         var day = String(r.work_date).slice(0, 10);
         // EVERY DATE IS THE DOOR to that day (Round 1): the day view with this
-        // worker's row open. The words "Correct This Day" stay only where the day
-        // needs ruling and the login may rule it; never for today — the database
-        // will not correct a day that is not over.
+        // worker's row open. The "⋯" at the right end rules the day here.
         var dayLink = "attendance.html?date=" + encodeURIComponent(day) + (w.staff_id ? "&open=" + encodeURIComponent(w.staff_id) : "");
-        var fixLink = (canFix && day < todayIso && (p.key === "unpriced" || (r.early_start && !r.early_accepted)))
-          ? '<a class="fix-link" href="' + dayLink + '" data-corr-month="' + esc(w.staff_id) + "|" + esc(day) + '">Correct This Day</a>' : "";
         // the worker's REST DAY stands out (DB 0103); before 0104 a Sunday is the best guess
         var isRest = r.day_kind ? r.day_kind === "rest" : isSunday(r.work_date);
         return "<tr" + (isRest ? ' class="is-rest"' : "") + ">" +
@@ -2064,14 +2211,14 @@
           "<td>" + shiftCell(r) + "</td>" +
           '<td class="num">' + (h ? hm(h.normal) : "—") + "</td>" +
           '<td class="num">' + (h ? hm(h.ot) : "—") + "</td>" +
-          payCell(r) +
+          payCell(r, true) +
           locCell(r) +
-          (canFix ? "<td>" + fixLink + "</td>" : "") +
+          (canFix ? moreCell(r, "month") : "") +
         "</tr>";
       }).join("");
       return '<div class="detail-box"><table class="att-table month-days"><thead><tr>' +
         "<th>Date</th><th>Site</th><th>Shift</th><th class=\"num\">Working Hours</th>" +
-        "<th class=\"num\">Over Time</th><th>Pay</th><th>Location</th>" + (canFix ? "<th></th>" : "") + "</tr></thead><tbody>" +
+        "<th class=\"num\">Over Time</th><th>Pay</th><th>Location</th>" + (canFix ? '<th class="more-th"></th>' : "") + "</tr></thead><tbody>" +
         lines + "</tbody></table></div>";
     }
 
@@ -2111,11 +2258,11 @@
         if (w.open)     why.push(w.open + " Still Open");
         if (w.progress) facts.push(w.progress + " In Progress");
         if (w.early)    facts.push(w.early + " Early Start");
+        // the reasons and the running / early-start days on hover (owner, 27 Oct 2026)
+        var tip = why.concat(facts).join(" · ");
         var pay = unpriced
-          ? '<span class="pay pay-no" title="Days with no figure; not in the totals until settled.">' + unpriced + " Unpriced</span>" +
-            '<span class="facts">' + esc(why.join(" · ")) + "</span>"
-          : '<span class="pay pay-ok" title="Every finished day has its figure.">Ready</span>';
-        if (facts.length) pay += '<span class="facts">' + esc(facts.join(" · ")) + "</span>";
+          ? '<span class="pay pay-no" title="' + esc(tip + ". Days with no figure are not in the totals until settled.") + '">' + unpriced + " Unpriced</span>"
+          : '<span class="pay pay-ok" title="' + esc((tip ? tip + ". " : "") + "Every finished day has its figure.") + '">Ready</span>';
         var loc = w.unconfirmed
           ? '<span class="loc loc-bad" title="Days with a punch outside the site, with weak GPS or with no site matched.">' + w.unconfirmed + " Unconfirmed</span>"
           : '<span class="loc loc-ok">Confirmed</span>';

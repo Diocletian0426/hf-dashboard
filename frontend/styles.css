@@ -3740,10 +3740,48 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
 .corr-ask { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface-2);
             display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .corr-ask .q { flex-basis: 100%; }
+/* the "⋯" on a day row and its small menu (owner, 27 Oct 2026) */
+.att-readable .att-table .more-cell, .att-readable .att-table .more-th { width: 40px; padding-left: 4px; padding-right: 4px; text-align: center; }
+.row-more { width: 34px; height: 34px; padding: 0 0 6px; border-radius: 50%; border: 1px solid transparent; background: transparent;
+            color: var(--ink-2); font-size: 22px; line-height: 1; cursor: pointer; }
+.row-more:hover, .row-more[aria-expanded="true"] { background: rgba(37, 99, 235, 0.08); color: var(--brand-ink); border-color: var(--line-strong); }
+.row-menu { position: fixed; z-index: 80; min-width: 210px; padding: 6px; background: #fff; border: 1px solid var(--line-strong);
+            border-radius: 12px; box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14); display: flex; flex-direction: column; }
+.row-menu[hidden] { display: none; }
+.rm-item { display: block; width: 100%; text-align: left; padding: 9px 12px; border: 0; background: transparent; border-radius: 8px;
+           font-family: var(--font); font-size: 14.5px; color: var(--ink); cursor: pointer; text-decoration: none; box-sizing: border-box; }
+.rm-item:hover, .rm-item:focus-visible { background: var(--surface-2); outline: none; }
+.rm-item.rm-danger { color: var(--danger-ink); }
+.rm-item.is-off { color: var(--ink-3); cursor: default; }
+.rm-item small { display: block; font-size: 12px; color: var(--ink-3); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+/* the panel's layout per the 27 Oct review: Original | Corrected, Current | After, a sticky footer */
+.corr-grid { display: grid; grid-template-columns: 40px 1fr 1fr; gap: 8px 12px; align-items: center; }
+.corr-grid .gh { font-size: 12px; color: var(--ink-2); text-transform: uppercase; letter-spacing: 0.04em; }
+.corr-grid .gk { font-weight: 700; font-size: 13px; color: var(--ink-2); }
+.corr-grid .orig-time { font-weight: 600; }
+.corr-grid .orig-check { display: block; font-size: 12px; color: var(--ink-2); }
+.corr-grid [data-cell] { min-height: 40px; display: flex; flex-direction: column; justify-content: center; border-radius: 10px; padding: 2px 6px; }
+.corr-grid .changed { background: #eff6ff; }
+.corr-grid .changed .orig-time { text-decoration: line-through; color: var(--ink-2); font-weight: 500; }
+.corr-grid .changed input { border-color: var(--brand); }
+.corr-grid input[type="time"] { width: 100%; box-sizing: border-box; }
+.corr-next { grid-column: 2 / -1; display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink); }
+.corr-hours { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.corr-hours > div { padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
+.corr-hours .k { display: block; font-size: 12px; color: var(--ink-2); margin-bottom: 2px; }
+.corr-hours b { font-size: 15px; }
+.corr-panel .cf-reasons button[aria-pressed="true"] { background: var(--brand); color: #fff; border-color: var(--brand); }
+.corr-seen { margin-top: 6px; }
+.corr-panel { padding-bottom: 0; }
+.corr-foot { position: sticky; bottom: 0; margin: 16px calc(-1 * var(--sp-5)) 0; padding: 12px var(--sp-5) 16px; background: #fff;
+             border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end; }
+.corr-foot .cf-err { flex-basis: 100%; margin: 0; }
+.corr-foot .corr-ask { margin: 0; flex: 1 1 100%; }
 .corr-remove { margin-top: 14px; }
 .corr-remove button { color: var(--danger-ink); border-color: #fecaca; }
 @media print {
-  .corr-panel { display: none !important; }
+  .corr-panel, .row-menu, .row-more { display: none !important; }
   .att-review, .att-words, .att-help { display: none !important; }
   body.att-readable .print-only { display: block !important; }
   body.att-readable .pay-no { background: #fff !important; border: 1px solid #000; border-radius: 999px; padding: 1px 6px; font-size: 10.5px; }
