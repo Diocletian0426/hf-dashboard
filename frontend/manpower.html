@@ -87,7 +87,9 @@
     .mp-drawer[hidden] { display: none; }
     .dr-top { display: flex; align-items: flex-start; gap: 8px; }
     .dr-top h2 { margin: 0; font-size: var(--fs-xl); line-height: 1.2; flex: 1; }
-    .dr-top .dr-close { flex: none; }
+    /* one round × (the owner's ask, 26 Oct); a click outside the panel closes it too */
+    .dr-top .dr-close { flex: none; width: 40px; height: 40px; padding: 0; border-radius: 999px;
+                        display: inline-flex; align-items: center; justify-content: center; font-size: 22px; line-height: 1; }
     .dr-who { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--ink-2); font-size: var(--fs-sm); margin: 2px 0 12px; }
     .dr-who .spacer { flex: 1; }
     /* label : value rows, used for the facts and for the phone state */
@@ -686,7 +688,7 @@
 
     function newWorkerPanel() {
       var dup = M.confirm && M.confirm.kind === "dup-add";
-      return '<div class="dr-top"><h2>New Worker</h2><button type="button" class="btn dr-close" data-act="close">Close</button></div>' +
+      return '<div class="dr-top"><h2>New Worker</h2><button type="button" class="btn dr-close" data-act="close" aria-label="Close" title="Close">×</button></div>' +
         '<p class="dr-who">A new staff record. The code, the site and the date joined can be added later.</p>' +
         '<div class="dr-form">' +
         '<label class="wide">Full Name <input type="text" id="nw-name" autocomplete="off"></label>' +
@@ -820,7 +822,7 @@
 
     // name and status, the facts, then for the office: phone, history, the bottom row
     function workerPanel(r) {
-      var h = '<div class="dr-top"><h2>' + escHtml(r.full_name) + '</h2><button type="button" class="btn dr-close" data-act="close">Close</button></div>' +
+      var h = '<div class="dr-top"><h2>' + escHtml(r.full_name) + '</h2><button type="button" class="btn dr-close" data-act="close" aria-label="Close" title="Close">×</button></div>' +
         '<p class="dr-who"><span>' + escHtml([r.employee_code, UI.label(r.role), r.company].filter(Boolean).join(" · ")) + "</span>" +
         '<span class="spacer"></span>' + (r.is_active ? statusChip(r) : '<span class="st st-none">Left</span>') + "</p>" + factsBlock(r);
       if (M.canEdit) h += phoneSection(r) + historySection(r) + footRow(r);
@@ -912,7 +914,11 @@
       var sel = M.sel && M.sel !== "__new" ? byId(M.sel) : null;
 
       if (a === "close") { closeWorker(); return; }
-      if (a === "open") { openWorker(btn.getAttribute("data-staff")); return; }
+      if (a === "open") {           // Manage on the open worker closes the panel again
+        var oid = btn.getAttribute("data-staff");
+        if (M.sel === oid) closeWorker(); else openWorker(oid);
+        return;
+      }
       if (a === "open-edit") { openWorker(btn.getAttribute("data-staff")); M.mode = "edit"; renderDrawer(); return; }
       if (a === "new") { openWorker("__new"); return; }
       if (a === "mode-edit") { M.mode = "edit"; M.confirm = null; M.panelOk = ""; M.panelErr = ""; renderDrawer(); return; }
@@ -1173,8 +1179,19 @@
           if (btn) { ev.preventDefault(); onAction(btn, ev); return; }
           if (ev.target.closest("a, summary, select, input")) return;
           var tr = ev.target.closest("tr[data-staff]");
-          if (tr) openWorker(tr.getAttribute("data-staff"));
+          if (!tr) return;
+          var rid = tr.getAttribute("data-staff");
+          if (M.sel === rid) closeWorker(); else openWorker(rid);   // the same row again closes
         });
+        // a click anywhere outside the panel closes it, unless that click opens a
+        // worker. Capture phase on purpose: the panel re-renders itself on its own
+        // clicks, which detaches the clicked button before the event reaches the
+        // document, and a detached target no longer counts as "inside the panel".
+        document.addEventListener("click", function (ev) {
+          if (!M.sel) return;
+          if (ev.target.closest("#mp-drawer, tr[data-staff], button[data-act='open'], button[data-act='open-edit'], button[data-act='new']")) return;
+          closeWorker();
+        }, true);
         document.getElementById("mp-more").addEventListener("click", async function (ev) {
           var tab = ev.target.closest("button[data-tab]");
           if (tab) { M.tab = tab.getAttribute("data-tab"); M.mode = null; M.confirm = null; renderMore(); return; }
