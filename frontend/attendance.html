@@ -145,6 +145,8 @@
       <span><span class="pay pay-ok">Priced</span> The day has its figure</span>
       <span><span class="pay pay-progress">In Progress</span> Punched in today, not out yet</span>
       <span><span class="pay pay-removed">Removed</span> The office removed the day's shifts; it pays nothing, the punches stay</span>
+      <span><span class="t">06:00 pm</span><sup class="t-set">*</sup> A time the office set; the worker tapped a different one</span>
+      <span><span class="short-day">6h 45m</span> Working hours under 7h 30m</span>
       <span><span class="pay pay-no">Unpriced</span> <span class="facts facts-why">Overlong</span> Over 16 hours; no figure until accepted or ruled on the Exceptions page</span>
       <span><span class="pay pay-no">Unpriced</span> <span class="facts facts-why">No Punch Out</span> Left without a punch-out; no figure until HR rules the finish</span>
       <span><span class="pay pay-no">Unpriced</span> <span class="facts facts-why">Still Open</span> An earlier day's shift with no punch-out yet</span>
@@ -368,15 +370,16 @@
       // The tag is VISIBLE. It used to be a dotted underline explained only on
       // hover — and the people reading this column do not hover, and a tablet
       // cannot.
-      return correctedTs
-        ? '<span class="t-office">' + t + '</span> <span class="t-office-tag" title="Set by the ' +
-          'office — the worker tapped a different time. Click the row to see both.">Office</span>'
-        : t;
+      return correctedTs ? '<span class="t-office">' + t + "</span>" + SET_MARK : t;
     }
 
+    // A TIME THE OFFICE SET (owner, 27 Oct 2026): a blue asterisk, not the word
+    // "Office" — shorter, and the hover says what it means (0092: a ruling must
+    // never read as a tap). The "?" panel explains it; the tap is in the drawer.
+    var SET_MARK = '<sup class="t-set" title="Set by the office; the worker tapped a different time. Open the row to see both.">*</sup>';
+
     // THE SHIFT IN ONE CELL (Round 1): "07:52 am – 05:14 pm", a small +1 when the
-    // finish fell on the next day, and the Office tag on the end the office set
-    // (0092: a ruling must never read as a tap). The tap itself is in the drawer.
+    // finish fell on the next day, and the asterisk on the end the office set.
     function shiftCell(r) {
       var tin = effIn(r), tout = effOut(r);
       if (!tin && !tout && r.all_removed) {         // 0128: every shift removed — its times, struck through
@@ -386,11 +389,10 @@
       }
       if (!tin && !tout) return "—";
       var day = String(r.work_date || "").slice(0, 10);
-      var tag = '<span class="t-office-tag t-inline" title="Set by the office — the worker tapped a different time. Open the row to see both.">Office</span>';
-      var a = tin ? '<span class="t">' + esc(Dash.klTime(tin)) + "</span>" + (r.corrected_in_at ? " " + tag : "") : "—";
+      var a = tin ? '<span class="t">' + esc(Dash.klTime(tin)) + "</span>" + (r.corrected_in_at ? SET_MARK : "") : "—";
       var b = tout ? '<span class="t">' + esc(Dash.klTime(tout)) + "</span>" +
                      (day && klInputValue(tout).slice(0, 10) > day ? '<sup class="next-day" title="The next day">+1</sup>' : "") +
-                     (r.corrected_out_at ? " " + tag : "") : "—";
+                     (r.corrected_out_at ? SET_MARK : "") : "—";
       return '<span class="shift-cell">' + a + ' <span class="muted">–</span> ' + b + "</span>";
     }
 
@@ -671,6 +673,22 @@
        day with a figure is priced whatever its other marks say. A missed shift
        the office has since ruled keeps its missed mark in the view today (a view
        fix follows); this keeps its hours in the totals meanwhile. */
+    /* ---- SHORT DAYS (owner, 27 Oct 2026) ----------------------------------------
+       A priced day with under 7h 30m of working hours reads amber, so a short day
+       is seen without adding anything up. Not a Hai Fu rest day or public holiday
+       (0 working there by design: every hour counts as OT), not a removed day
+       (0 on purpose). Display only: the figure itself is the database's. */
+    var FULL_DAY_MIN = 450;
+    function isShortDay(r) {
+      if (r.working_minutes === null || r.working_minutes === undefined || r.all_removed) return false;
+      if (r.company_code === "Hai Fu" && (r.day_kind === "rest" || r.day_kind === "holiday")) return false;
+      return Number(r.working_minutes) < FULL_DAY_MIN;
+    }
+    function workCell(r, h) {
+      if (!h) return "—";
+      return isShortDay(r) ? '<span class="short-day" title="Under 7h 30m">' + hm(h.normal) + "</span>" : hm(h.normal);
+    }
+
     /* ---- THE SHIFTS OF A DAY (Remove Shift, DB 0128) -------------------------
        The view lists every shift of the day (shifts[]); since 0128 each one says
        whether the office removed it, and the row carries removed_count. Before
@@ -1159,7 +1177,7 @@
         // the times the day is PAID from, the office's where it ruled (0092)
         "<td>" + shiftCell(s) + "</td>" +
         // the database's figures, or a dash where it declined to price the day
-        '<td class="num">' + (h ? hm(h.normal) : "—") + "</td>" +
+        '<td class="num">' + workCell(s, h) + "</td>" +
         '<td class="num">' + (h ? hm(h.ot) : "—") + "</td>" +
         payCell(s) +
         locCell(s) +
@@ -1242,8 +1260,12 @@
       document.getElementById("corr-panel").hidden = true;
     }
     // may this login rule this day here? (two shifts go to Exceptions; today is not over)
+    // THE SAME TIMING AS THE DATABASE (owner's ruling 6, 0117; confirmed 27 Oct
+    // 2026): a past day, or today once its shift has a punch-out
+    function shiftEnded(r) { return !!effOut(r) && !r.open_shift; }
     function corrEditable(r) {
-      return Dash.can("attendance.edit") && Number(r.shift_count) <= 1 && String(r.work_date).slice(0, 10) < Dash.todayKL();
+      var day = String(r.work_date).slice(0, 10), today = Dash.todayKL();
+      return Dash.can("attendance.edit") && Number(r.shift_count) <= 1 && (day < today || (day === today && shiftEnded(r)));
     }
     var CHECK_HOVER = {
       verified: "Inside the site's circle.", outside_geofence: "Outside the site's circle.",
@@ -1386,7 +1408,7 @@
           '<button type="button" class="btn" data-cf-cancel' + dis + ">Cancel</button>" +
           '<button type="button" class="btn btn-primary" data-corr="act"' + (actOff ? " disabled" : "") + ">" + (CORR.busy ? "Working…" : esc(actLabel)) + "</button></div>";
       } else if (!editable && Dash.can("attendance.edit")) {
-        why = Number(r.shift_count) > 1 ? twoShiftNote(r) : '<p class="detail-note">A day can be corrected once it is over.</p>';
+        why = Number(r.shift_count) > 1 ? twoShiftNote(r) : '<p class="detail-note">A shift can be corrected once it has a punch-out.</p>';
       }
       if (editable) {
         foot = CORR.askClose
@@ -1783,13 +1805,14 @@
       return '<td class="more-cell"><button type="button" class="row-more" data-more="' + view + "|" + esc(r.staff_id) + "|" +
              esc(String(r.work_date).slice(0, 10)) + '" aria-haspopup="menu" aria-expanded="false" aria-label="More for this day" title="More">\u22EE</button></td>';
     }
-    function menuOpen(btn) {
+    function menuOpen(btn, at) {
       var k = btn.getAttribute("data-more").split("|"), r = rowFor(k[0], k[1], k[2]);
       var m = document.getElementById("row-menu");
       if (!r) return;
       var day = String(r.work_date).slice(0, 10), items = [];
       if (Number(r.shift_count) > 1) items.push('<a class="rm-item" role="menuitem" href="exceptions.html">Rule On Exceptions \u2197</a>');
-      else if (day >= Dash.todayKL()) items.push('<span class="rm-item is-off" role="menuitem" aria-disabled="true">Edit Hours<small>Once the day is over</small></span>');
+      else if (day > Dash.todayKL() || (day === Dash.todayKL() && !shiftEnded(r)))
+        items.push('<span class="rm-item is-off" role="menuitem" aria-disabled="true">Edit Hours<small>Once the shift ends</small></span>');
       else if (!r.all_removed) {
         items.push('<button type="button" class="rm-item" role="menuitem" data-menu="edit">' + (r.has_correction ? "Change Correction" : "Edit Hours") + "</button>");
         // the Exceptions page's rulings, here too (0124): a shift over 16 h accepted as
@@ -1816,10 +1839,15 @@
       m.innerHTML = items.join("");
       MENU = { open: true, row: r, view: k[0], btn: btn, at: Date.now() };
       m.hidden = false;
-      var b = btn.getBoundingClientRect(), w = m.offsetWidth || 220, hgt = m.offsetHeight || 60;
+      var b = btn.getBoundingClientRect(), w = m.offsetWidth || 180, hgt = m.offsetHeight || 60;
       var top = b.bottom + 6; if (top + hgt > window.innerHeight - 8) top = Math.max(8, b.top - hgt - 6);
+      var left = b.right - w;
+      if (at) {                                        // a right-click: at the pointer
+        top = at.y + 2; if (top + hgt > window.innerHeight - 8) top = Math.max(8, at.y - hgt - 2);
+        left = at.x + 2;
+      }
       m.style.top = top + "px";
-      m.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, b.right - w)) + "px";
+      m.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, left)) + "px";
       btn.setAttribute("aria-expanded", "true");
       var first = m.querySelector("[data-menu],a"); if (first) first.focus();
     }
@@ -1858,6 +1886,19 @@
         return;
       }
       if (MENU.open && !(t.closest && t.closest("#row-menu"))) menuClose();
+    });
+    // RIGHT-CLICK ON A ROW (owner, 27 Oct 2026): the same menu as its ⋮, at the
+    // pointer — a day row of the Day table or a day line of a worker's month. On
+    // a link or a field the browser's own menu stays (open in a new tab, copy).
+    document.addEventListener("contextmenu", function (ev) {
+      var t = ev.target;
+      if (!t.closest || t.closest("a, input, textarea, select")) return;
+      var tr = t.closest("#rows tr.shift-row, #month-rows .month-days tr");
+      var more = tr ? tr.querySelector(".row-more") : null;
+      if (!more) return;
+      ev.preventDefault();
+      menuClose();
+      menuOpen(more, { x: ev.clientX, y: ev.clientY });
     });
     document.addEventListener("keydown", function (ev) { if (ev.key === "Escape" && MENU.open) { var b = MENU.btn; menuClose(); if (b) b.focus(); } });
     // a scroll closes it — but not the browser's own scroll-into-view that lands just before the opening click
@@ -2156,7 +2197,7 @@
             if (tr && tr.hidden) { findEl.value = ""; showEl.value = ""; applyFind("rows", 9); }   // never open a row the filters hide
             setOpen(idx, true);
             await loadDrawer(idx);
-            if (Dash.can("attendance.edit") && Number(shifts[idx].shift_count) <= 1 && date < Dash.todayKL()) corrOpen(shifts[idx], "day");
+            if (corrEditable(shifts[idx])) corrOpen(shifts[idx], "day");
             if (tr && tr.scrollIntoView) tr.scrollIntoView({ block: "center" });
           }
           params.delete("open");                       // used once — stepping to another day must not re-open it
@@ -2612,14 +2653,15 @@
         var day = String(r.work_date).slice(0, 10);
         // EVERY DATE IS THE DOOR to that day (Round 1): the day view with this
         // worker's row open. The "⋯" at the right end rules the day here.
-        var dayLink = "attendance.html?date=" + encodeURIComponent(day) + (w.staff_id ? "&open=" + encodeURIComponent(w.staff_id) : "");
+        var dayLink = "attendance.html?date=" + encodeURIComponent(day) + (w.staff_id ? "&open=" + encodeURIComponent(w.staff_id) : "") +
+                      (new URLSearchParams(location.search).get("demo") === "1" ? "&demo=1" : "");   // the demo stays the demo
         // the worker's REST DAY stands out (DB 0103); before 0104 a Sunday is the best guess
         var isRest = r.day_kind ? r.day_kind === "rest" : isSunday(r.work_date);
         return "<tr" + (isRest ? ' class="is-rest"' : "") + ">" +
           '<td><a class="day-link" href="' + dayLink + '">' + esc(friendlyDate(r.work_date)) + "</a></td>" +
           siteCell(r) +
           "<td>" + shiftCell(r) + "</td>" +
-          '<td class="num">' + (h ? hm(h.normal) : "—") + "</td>" +
+          '<td class="num">' + workCell(r, h) + "</td>" +
           '<td class="num">' + (h ? hm(h.ot) : "—") + "</td>" +
           payCell(r, true) +
           locCell(r) +
