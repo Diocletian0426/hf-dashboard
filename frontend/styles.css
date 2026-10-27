@@ -3657,6 +3657,7 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
 .att-readable .pay { display: inline-block; white-space: nowrap; }
 .att-readable .pay-ok { color: var(--ink); }
 .att-readable .pay-progress { color: var(--ink-2); font-weight: 600; }
+.att-readable .pay-removed { color: var(--ink-2); font-weight: 600; }   /* 0128: settled at 0, not amber */
 .att-readable .pay-no { background: var(--amber-soft); color: #92400e; border-radius: 999px; padding: 3px 11px; font-size: 13px; font-weight: 600; }
 .att-readable .facts { display: block; font-size: 12.5px; color: var(--ink-2); margin-top: 3px; white-space: normal; line-height: 1.35; }
 .att-readable .loc { font-size: 14px; white-space: nowrap; }
@@ -3806,6 +3807,24 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
 .corr-remove { margin-top: 14px; }
 .corr-remove button { color: var(--danger-ink); border-color: #fecaca; }
 @media (max-width: 760px) { .corr-panel { width: 100vw; border-left: 0; } }
+/* ---- Remove Shift (owner, 27 Oct 2026; DB 0128) -----------------------------
+   The drawer by shift, a removed shift struck through, the panel's shift choices. */
+.shift-cell.is-removed { text-decoration: line-through; color: var(--ink-3); }
+.shift-group { padding: 8px 0 4px; border-top: 1px solid var(--rule); }
+.shift-group:first-child { border-top: 0; }
+.shift-group .sg-head { margin: 0 0 2px; font-size: 13.5px; color: var(--ink); }
+.shift-group .sg-title { font-weight: 700; }
+.shift-group .sg-tag { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; background: #eef1f6; color: var(--ink-2); font-size: 12px; font-weight: 600; }
+.shift-group.is-removed .sg-title, .shift-group.is-removed .pl-time { text-decoration: line-through; color: var(--ink-3); }
+.shift-group .sg-why { margin: 2px 0 0; }
+.sp-list { display: flex; flex-direction: column; gap: 6px; }
+.sp-choice { display: grid; grid-template-columns: 22px 1fr auto; align-items: center; gap: 8px; min-height: 40px; padding: 6px 12px;
+             border: 1px solid var(--line-strong); border-radius: 10px; background: #fff; cursor: pointer; font-size: 14px; }
+.sp-choice.is-on { border-color: var(--brand); background: #eff6ff; }
+.sp-choice.is-off { color: var(--ink-3); cursor: default; }
+.sp-choice .sp-side { font-size: 12.5px; color: var(--ink-2); text-align: right; }
+.sp-choice .sp-side.is-warn { color: var(--warn-ink); }
+.corr-panel .sp-sunday { margin: 8px 0 0; color: var(--ink); font-weight: 600; }
 @media print {
   .corr-panel, .row-menu, .row-more { display: none !important; }
   .att-review, .att-words, .att-help { display: none !important; }

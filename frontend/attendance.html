@@ -144,12 +144,13 @@
       <div class="legend-title">What The Words Mean</div>
       <span><span class="pay pay-ok">Priced</span> The day has its figure</span>
       <span><span class="pay pay-progress">In Progress</span> Punched in today, not out yet</span>
+      <span><span class="pay pay-removed">Removed</span> The office removed the day's shifts; it pays nothing, the punches stay</span>
       <span><span class="pay pay-no">Unpriced</span> <span class="facts facts-why">Overlong</span> Over 16 hours; no figure until accepted or ruled on the Exceptions page</span>
       <span><span class="pay pay-no">Unpriced</span> <span class="facts facts-why">No Punch Out</span> Left without a punch-out; no figure until HR rules the finish</span>
       <span><span class="pay pay-no">Unpriced</span> <span class="facts facts-why">Still Open</span> An earlier day's shift with no punch-out yet</span>
       <span><span class="loc loc-ok">Confirmed</span> Every punch that day matched the site</span>
       <span><span class="loc loc-bad">Unconfirmed</span> A punch was outside the site, had weak GPS or matched no site; the row opens to show which</span>
-      <span><span class="facts">Corrected · Accepted · Early Start · Rest Day · Public Holiday · No OT</span> Facts about the day; the row opens for the detail</span>
+      <span><span class="facts">2 Shifts · 1 Removed · Corrected · Accepted · Early Start · Rest Day · Public Holiday · No OT</span> Facts about the day; the row opens for the detail</span>
     </div>
 
     <div class="table-wrap" id="month-wrap" hidden>
@@ -378,6 +379,11 @@
     // (0092: a ruling must never read as a tap). The tap itself is in the drawer.
     function shiftCell(r) {
       var tin = effIn(r), tout = effOut(r);
+      if (!tin && !tout && r.all_removed) {         // 0128: every shift removed — its times, struck through
+        var x0 = shiftsOf(r)[0] || {}, a0 = x0.raw_in_at || x0.in_at, b0 = x0.raw_out_at || x0.out_at;
+        return '<span class="shift-cell is-removed" title="Removed by the office">' +
+               esc((a0 ? Dash.klTime(a0) : "—") + " – " + (b0 ? Dash.klTime(b0) : "—")) + "</span>";
+      }
       if (!tin && !tout) return "—";
       var day = String(r.work_date || "").slice(0, 10);
       var tag = '<span class="t-office-tag t-inline" title="Set by the office — the worker tapped a different time. Open the row to see both.">Office</span>';
@@ -665,8 +671,24 @@
        day with a figure is priced whatever its other marks say. A missed shift
        the office has since ruled keeps its missed mark in the view today (a view
        fix follows); this keeps its hours in the totals meanwhile. */
+    /* ---- THE SHIFTS OF A DAY (Remove Shift, DB 0128) -------------------------
+       The view lists every shift of the day (shifts[]); since 0128 each one says
+       whether the office removed it, and the row carries removed_count. Before
+       0128 those keys are absent and the page offers nothing about removal. */
+    function shiftsOf(r) { return Array.isArray(r.shifts) ? r.shifts : []; }
+    function canRemoveShifts(r) { return r.removed_count !== undefined && r.removed_count !== null; }
+    function removedCount(r) { return Number(r.removed_count) || 0; }
+    // "08:27 am – 08:28 am · 1m": a shift as paid (or as tapped, for a removed one)
+    function shiftSpan(x, tapped) {
+      var a = tapped ? (x.raw_in_at || x.in_at) : (x.in_at || x.raw_in_at);
+      var b = tapped ? (x.raw_out_at || x.out_at) : (x.out_at || x.raw_out_at);
+      var len = a && b ? hm((new Date(b) - new Date(a)) / 3600000) : "";
+      return (a ? Dash.klTime(a) : "—") + " – " + (b ? Dash.klTime(b) : "No Punch Out") + (len ? " · " + len : "");
+    }
+
     function payOf(r) {
       var today = Dash.todayKL(), day = String(r.work_date || "").slice(0, 10);
+      if (r.all_removed) return { key: "removed", word: "Removed", cls: "pay-removed" };   // 0128: priced 0 on purpose
       if (r.working_minutes !== null && r.working_minutes !== undefined) return { key: "priced", word: "Priced", cls: "pay-ok" };
       var open = !!(r.open_shift || (r.in_count && !r.out_count && !effOut(r)));
       if (open && day === today) return { key: "progress", word: "In Progress", cls: "pay-progress" };
@@ -678,10 +700,19 @@
     var PAY_HOVER = {
       priced:   "The database priced this day from the times shown.",
       progress: "Punched in today, no punch-out yet.",
-      unpriced: "No figure for this day until it is settled on the Exceptions page or ruled here."
+      unpriced: "No figure for this day until it is settled on the Exceptions page or ruled here.",
+      removed:  "The office removed this day's shifts. It pays nothing; the punches stay on record."
     };
     function factsOf(r) {
-      var f = [];
+      var f = [], n = shiftsOf(r).length, k = removedCount(r);
+      // 0128: how many shifts, how many removed; a fully removed day shows its reason
+      if (r.all_removed) {
+        var gone = shiftsOf(r).filter(function (x) { return x.removed && x.removed_reason; })[0];
+        if (gone) f.push(capFirst(gone.removed_reason));
+      } else {
+        if (n > 1) f.push(n + " Shifts");
+        if (k) f.push(k + " Removed");
+      }
       if (r.has_correction) f.push("Corrected");
       if (r.long_accepted || r.early_accepted) f.push("Accepted");
       if (r.early_start && !r.early_accepted) f.push("Early Start");
@@ -691,6 +722,11 @@
     }
     function factsHover(r) {
       var w = [];
+      if (shiftsOf(r).length > 1 && !r.all_removed) w.push(shiftsOf(r).length + " shifts this day; open the row to see each.");
+      shiftsOf(r).forEach(function (x) {
+        if (x.removed) w.push("Shift " + x.shift_no + " removed by the office" + (x.removed_by_name ? " (" + x.removed_by_name + ")" : "") +
+                              (x.removed_reason ? " — " + capFirst(x.removed_reason) : "") + ".");
+      });
       if (r.has_correction) w.push("The office corrected this day" + (r.corrected_by_name ? " (" + r.corrected_by_name + ")" : "") + (r.correction_reason ? " — " + r.correction_reason : "") + ".");
       if (r.long_accepted || r.early_accepted) w.push("The office accepted this shift as punched, or credited its early start.");
       if (r.early_start && !r.early_accepted) w.push("Started before 6 AM; counted from 8 AM until the office credits it.");
@@ -717,6 +753,7 @@
              (f.length ? '<span class="facts" title="' + esc(factsHover(r)) + '">' + esc(f.join(" · ")) + "</span>" : "") + "</td>";
     }
     function locOf(r) {
+      if (r.all_removed) return { key: "ok", word: "—" };                 // 0128: no shift counts
       if (!r.has_anomaly) return { key: "ok", word: "Confirmed" };
       if (!r.project_id && !r.out_project_id) return { key: "bad", word: "No Site" };
       return { key: "bad", word: "Unconfirmed" };
@@ -1011,6 +1048,43 @@
       return out.join(" ");
     }
 
+    /* ---- THE PUNCHES BY SHIFT (0128) ------------------------------------------
+       A day with two or more shifts, or one the office removed, lists each shift
+       on its own: its times, its length, its punches, so a one-minute shift
+       stands out. A punch is matched to its shift by the worker's own tap times
+       (shifts[].raw_in_at / raw_out_at); anything left over is listed last. */
+    function punchesHtml(s, punches) {
+      var list = shiftsOf(s);
+      if (list.length <= 1 && !removedCount(s)) return '<ul class="punch-lines">' + punches.map(punchLine).join("") + "</ul>";
+      var used = {};
+      var same = function (a, b) { return !!a && !!b && new Date(a).getTime() === new Date(b).getTime(); };
+      var html = list.map(function (x) {
+        var mine = punches.filter(function (p, k) {
+          if (used[k]) return false;
+          var hit = (p.punch_type === "in" && same(p.punched_at, x.raw_in_at)) || (p.punch_type === "out" && same(p.punched_at, x.raw_out_at));
+          if (hit) used[k] = true;
+          return hit;
+        });
+        return shiftGroupHtml(s, x, mine);
+      }).join("");
+      var rest = punches.filter(function (p, k) { return !used[k]; });
+      return html + (rest.length ? '<div class="shift-group"><p class="sg-head"><span class="sg-title">Other Punches</span></p>' +
+                                   '<ul class="punch-lines">' + rest.map(punchLine).join("") + "</ul></div>" : "");
+    }
+    function shiftGroupHtml(s, x, mine) {
+      var gone = !!x.removed;
+      var restore = gone && Dash.can("attendance.edit")
+        ? ' · <a href="#" class="fix-link" data-shift-restore="' + esc(s.staff_id) + "|" + esc(String(s.work_date).slice(0, 10)) + "|" + x.shift_no + '">Restore Shift</a>' : "";
+      return '<div class="shift-group' + (gone ? " is-removed" : "") + '">' +
+        '<p class="sg-head"><span class="sg-title">Shift ' + x.shift_no + " · " + esc(shiftSpan(x, gone)) + "</span>" +
+          (gone ? ' <span class="sg-tag">Removed</span>' : x.entered_by_office ? ' <span class="sg-tag">Entered By The Office</span>' : "") + "</p>" +
+        (mine.length ? '<ul class="punch-lines">' + mine.map(punchLine).join("") + "</ul>" : "") +
+        (gone ? '<p class="detail-note sg-why">Removed By The Office' +
+                esc((x.removed_reason ? " · " + capFirst(x.removed_reason) : "") + (x.removed_by_name ? " · " + x.removed_by_name : "") +
+                    (x.removed_at ? " · " + Dash.klDateTime(x.removed_at) : "")) + restore + "</p>" : "") +
+      "</div>";
+    }
+
     function punchLine(p) {
       var v = p.verification_status || "";
       var vCls = v === "verified" ? "verified" : "anomaly";
@@ -1127,7 +1201,8 @@
       CORR = { open: true, view: view, row: r, spec: spec, form: CorrectForm.start(spec), punches: null,
                busy: false, err: "", invalid: "", preview: null, previewKey: "", note: "",
                askClose: false, askRemove: !!(opts && opts.askRemove),
-               mode: (opts && opts.mode) || "correct", kind: (opts && opts.kind) || "" };
+               mode: (opts && opts.mode) || "correct", kind: (opts && opts.kind) || "",
+               shift: (opts && opts.shift) || null };
       corrRender();
       var el = document.getElementById("corr-panel");
       el.hidden = false; el.scrollTop = 0; el.focus();
@@ -1207,9 +1282,19 @@
                       esc([words + (d ? " · " + d : "")].concat(extra).join(" · ")) + mapLink(punch) + "</span>" : "") +
              (note ? '<span class="orig-check">Note: ' + esc(note) + "</span>" : "");
     }
+    // the panel's head: who, which day, where
+    function corrHead(eyebrow) {
+      var r = CORR.row, s = CORR.spec, code = CODES[r.staff_id] || "", co = companyName(COMPANY[r.staff_id]);
+      return '<div class="corr-head"><div>' +
+        '<div class="corr-eyebrow">' + esc(eyebrow) + "</div>" +
+        '<h2 id="corr-title">' + esc(r.full_name) + "</h2>" +
+        '<div class="corr-sub">' + esc([code, co, friendlyDate(s.workDate), siteText(r)].filter(Boolean).join(" · ")) + "</div></div>" +
+        '<button type="button" class="dl-x" data-corr="close" aria-label="Close" title="Close">&times;</button></div>';
+    }
     function corrRender() {
       var el = document.getElementById("corr-panel");
       if (!CORR.open) return;
+      if (CORR.mode === "remove" || CORR.mode === "restore") { shiftPanelRender(); return; }
       var r = CORR.row, s = CORR.spec, h = hoursOf(r), p = payOf(r), f = CORR.form;
       var code = CODES[r.staff_id] || "", co = companyName(COMPANY[r.staff_id]);
       var acting = CORR.mode !== "correct";                 // accept / keep / undo, not a time change
@@ -1218,11 +1303,7 @@
                      "undo-long": "Undo Acceptance", "undo-early": "Undo Early Start Credit" };
       var eyebrow = acting ? (TITLES[CORR.mode + "-" + CORR.kind] || "Attendance Correction") : "Attendance Correction";
       var foot = "";
-      var head = '<div class="corr-head"><div>' +
-        '<div class="corr-eyebrow">' + esc(eyebrow) + "</div>" +
-        '<h2 id="corr-title">' + esc(r.full_name) + "</h2>" +
-        '<div class="corr-sub">' + esc([code, co, friendlyDate(s.workDate), siteText(r)].filter(Boolean).join(" · ")) + "</div></div>" +
-        '<button type="button" class="dl-x" data-corr="close" aria-label="Close" title="Close">&times;</button></div>';
+      var head = corrHead(eyebrow);
       var note = CORR.note ? '<div class="banner banner-green corr-note">' + esc(CORR.note) + "</div>" : "";
 
       // Punch Times: the tap beside the time to be paid from; a changed value lights up
@@ -1364,6 +1445,7 @@
     }
     // the figure the ruling WOULD give — asked of the database, never worked out here
     async function corrPreview() {
+      if (CORR.open && (CORR.mode === "remove" || CORR.mode === "restore")) return shiftPanelPreview();
       if (!CORR.open || !CORR.form || !corrEditable(CORR.row)) return;
       if (CORR.mode !== "correct") {                      // accept / keep / undo: the times as paid, priced as the mark would leave them
         var rr = CORR.row, aIn = effIn(rr), aOut = effOut(rr);
@@ -1401,6 +1483,7 @@
     }
     // what a typed change does at once, without re-rendering the form (focus stays)
     function corrTouch() {
+      if (CORR.mode === "remove" || CORR.mode === "restore") { shiftPanelTouch(); return; }
       var el = document.getElementById("corr-panel"), f = CORR.form, r = CORR.row, s = CORR.spec;
       var inChanged = !!f.tIn && f.tIn !== CorrectForm.klHHMM(r.first_in_at);
       var outChanged = !!f.tOut && (f.tOut !== CorrectForm.klHHMM(r.last_out_at) || !!f.next !== (CorrectForm.klDate(r.last_out_at) > s.workDate));
@@ -1414,6 +1497,148 @@
         b.setAttribute("aria-pressed", String(f.why || "").indexOf(b.getAttribute("data-cf-reason")) === 0 ? "true" : "false");
       });
     }
+    /* ---- REMOVE / RESTORE A SHIFT (owner, 27 Oct 2026; DB 0128) ---------------
+       The same panel, in its own mode: pick the shift, give a reason, see what
+       the day will pay — and that week's Sunday, when it changes — straight from
+       the database (preview_shift_removal: applied, read through the real view,
+       rolled back). The punches are never touched; Restore Shift undoes it. */
+    var SHIFT_REASONS = ["Double Tap", "Test Punch", "Did Not Work"];
+    var KIND_NAME = { rest: "Rest Day", holiday: "Public Holiday", normal: "Normal Day" };
+    function shiftChoices(r) {
+      var restore = CORR.mode === "restore", day = String(r.work_date).slice(0, 10);
+      return shiftsOf(r).filter(function (x) { return restore ? !!x.removed : !x.removed; }).map(function (x) {
+        // an open shift is still live on the worker's phone until it is marked Missed
+        var why = (!restore && !x.out_at && !x.missed) ? (day >= Dash.todayKL() ? "Still Running" : "Still Open") : "";
+        return { x: x, off: !!why, why: why };
+      });
+    }
+    // the shift's location check, from its punches (amber here when not Confirmed)
+    function shiftLocation(x) {
+      var same = function (a, b) { return !!a && !!b && new Date(a).getTime() === new Date(b).getTime(); };
+      var mine = (CORR.punches || []).filter(function (p) {
+        return (p.punch_type === "in" && same(p.punched_at, x.raw_in_at)) || (p.punch_type === "out" && same(p.punched_at, x.raw_out_at));
+      });
+      if (!mine.length) return { word: x.entered_by_office ? "Entered By The Office" : "", warn: false };
+      var bad = mine.filter(function (p) { return p.verification_status !== "verified" && p.verification_status !== "office_closed" && p.verification_status !== "auto_closed"; })[0];
+      return bad ? { word: checkWords(bad.verification_status), warn: true } : { word: "Location Confirmed", warn: false };
+    }
+    function shiftCanGo() {
+      return !CORR.busy && !!CORR.shift && (CORR.mode === "restore" || !!String(CORR.form.why || "").trim());
+    }
+    function shiftPanelRender() {
+      var el = document.getElementById("corr-panel"), r = CORR.row, f = CORR.form;
+      var restore = CORR.mode === "restore", dis = CORR.busy ? " disabled" : "";
+      var choices = shiftChoices(r);
+      if (!CORR.shift) {                                   // one shift to choose from: chosen for you
+        var on = choices.filter(function (c) { return !c.off; });
+        if (on.length === 1) CORR.shift = on[0].x.shift_no;
+      }
+      var list = '<p class="detail-head">Which Shift</p><div class="sp-list" role="radiogroup" aria-label="Which shift">' +
+        choices.map(function (c) {
+          var x = c.x, picked = CORR.shift === x.shift_no, loc = shiftLocation(x);
+          return '<label class="sp-choice' + (picked ? " is-on" : "") + (c.off ? " is-off" : "") + '">' +
+            '<input type="radio" name="sp-shift" data-sp-shift="' + x.shift_no + '"' + (picked ? " checked" : "") + (c.off ? " disabled" : dis) + ">" +
+            '<span class="sp-main"><b>Shift ' + x.shift_no + "</b> · " + esc(shiftSpan(x, restore)) + "</span>" +
+            '<span class="sp-side' + (!c.off && loc.warn ? " is-warn" : "") + '">' + esc(c.off ? c.why : loc.word) + "</span></label>";
+        }).join("") + "</div>";
+      var h = hoursOf(r), p = payOf(r);
+      var curMain = h ? hm(h.normal) : (p.key === "unpriced" ? "Unpriced" : p.word);
+      var curSub = h ? "+ " + hm(h.ot) + " OT" : (p.key === "unpriced" && p.why && p.why !== "Unpriced" ? p.why : "");
+      var hours = '<p class="detail-head corr-hours-head">Hours</p><div class="corr-hours">' +
+        '<div><span class="k">Current</span><b class="ch-main' + (h ? "" : " ch-quiet") + '">' + esc(curMain) + "</b>" +
+          '<span class="ch-sub">' + esc(curSub) + "</span></div>" +
+        '<div id="corr-after"><span class="k">' + (restore ? "After Restoring" : "After Removing") + "</span>" +
+          '<b class="ch-main ch-quiet" data-after="main"></b><span class="ch-sub" data-after="sub"></span><span class="ch-diff" data-after="diff"></span></div></div>' +
+        '<p class="detail-note sp-sunday" id="sp-sunday" hidden></p>';
+      var reason = restore ? "" :
+        '<p class="detail-head">Reason</p>' +
+        '<div class="cf-reasons">' + SHIFT_REASONS.map(function (x) {
+          var on = String(f.why || "").indexOf(x) === 0;
+          return '<button type="button" data-cf-reason="' + esc(x) + '" aria-pressed="' + (on ? "true" : "false") + '"' + dis + ">" + esc(x) + "</button>";
+        }).join("") + "</div>" +
+        '<label class="cf-why"><span class="sr-only">Reason</span><input type="text" data-cf="why" maxlength="500" autocomplete="off" value="' + esc(f.why) + '"' +
+          ' placeholder="Select a reason or write one"' + dis + "></label>";
+      var said = '<p class="detail-note corr-seen">' + (restore
+        ? "The shift counts again, with every ruling it had."
+        : "The punches stay on record. This shift pays nothing until it is restored. The worker will see the reason.") + "</p>";
+      var label = (restore ? "Restore" : "Remove") + " Shift" + (CORR.shift ? " " + CORR.shift : "");
+      var foot = '<div class="corr-foot"><div class="cf-err" role="alert">' + esc(CORR.err || "") + "</div>" +
+        '<button type="button" class="btn" data-cf-cancel' + dis + ">Cancel</button>" +
+        '<button type="button" class="btn btn-primary" data-corr="shift-go"' + (shiftCanGo() ? "" : " disabled") + ">" +
+          (CORR.busy ? (restore ? "Restoring…" : "Removing…") : esc(label)) + "</button></div>";
+      el.innerHTML = corrHead(restore ? "Restore Shift" : "Remove Shift") + list + hours + reason + said + foot;
+      shiftPanelPaint();
+    }
+    function shiftPanelTouch() {
+      var el = document.getElementById("corr-panel");
+      var go = el.querySelector('[data-corr="shift-go"]'); if (go) go.disabled = !shiftCanGo();
+      Array.prototype.forEach.call(el.querySelectorAll("[data-cf-reason]"), function (b) {
+        b.setAttribute("aria-pressed", String(CORR.form.why || "").indexOf(b.getAttribute("data-cf-reason")) === 0 ? "true" : "false");
+      });
+    }
+    async function shiftPanelPreview() {
+      if (!CORR.open || !CORR.shift) { CORR.preview = null; CORR.previewKey = ""; shiftPanelPaint(); return; }
+      var key = CORR.mode + "|" + CORR.shift;
+      if (key === CORR.previewKey) return;
+      CORR.previewKey = key; CORR.preview = "pending"; shiftPanelPaint();
+      try {
+        var res = await Dash.previewShiftRemoval(CORR.row.staff_id, CORR.spec.workDate, CORR.shift, CORR.mode);
+        if (!CORR.open || CORR.previewKey !== key) return;
+        CORR.preview = (res && res.ok) ? res : "none";       // null = the database predates 0128
+      } catch (e) { CORR.preview = "none"; }
+      shiftPanelPaint();
+    }
+    function shiftPanelPaint() {
+      var box = document.getElementById("corr-after");
+      if (!box) return;
+      var p = CORR.preview, main = "", sub = "", diff = "", figure = false;
+      if (!CORR.shift) main = "Pick A Shift";
+      else if (p === "pending") main = "Pricing\u2026";
+      else if (!p || p === "none") main = "Priced After Saving";
+      else {
+        var a = p.after || {};
+        if (a.working_minutes === null || a.working_minutes === undefined) { main = "Unpriced"; sub = "Check The Day"; }
+        else {
+          figure = true;
+          main = hm(Number(a.working_minutes) / 60);
+          sub = "+ " + hm(Number(a.ot_minutes || 0) / 60) + " OT";
+          diff = hoursDiff(CORR.row, a);
+        }
+      }
+      var m = box.querySelector('[data-after="main"]');
+      m.textContent = main; m.classList.toggle("ch-quiet", !figure);
+      box.querySelector('[data-after="sub"]').textContent = sub;
+      box.querySelector('[data-after="diff"]').textContent = diff;
+      box.classList.toggle("is-new", figure);
+      // that week's Sunday, when the change moves it (the Hai Fu rest day)
+      var sl = document.getElementById("sp-sunday"), su = p && typeof p === "object" ? p.sunday : null;
+      if (sl) {
+        sl.hidden = !su;
+        if (su) sl.textContent = friendlyDate(su.work_date) + ": " + (KIND_NAME[su.before.day_kind] || su.before.day_kind) + " \u2192 " +
+                                 (KIND_NAME[su.after.day_kind] || su.after.day_kind) + " · " + hoursDiff(su.before, su.after);
+      }
+    }
+    async function shiftPanelGo() {
+      if (!shiftCanGo()) return;
+      var r = CORR.row, date = CORR.spec.workDate, n = CORR.shift, restore = CORR.mode === "restore";
+      CORR.busy = true; CORR.err = ""; shiftPanelRender();
+      try {
+        var res = restore ? await Dash.restoreShift(r.staff_id, date, n)
+                          : await Dash.removeShift(r.staff_id, date, n, String(CORR.form.why || "").trim());
+        if (res && res.ok) {
+          var when = r.full_name + "\u2019s " + friendlyDate(date) + " shift " + n;
+          var text = restore ? "Restored — " + when + " counts again."
+                             : "Removed — " + when + " pays nothing now. The worker will see the reason in their app.";
+          await corrRefresh();
+          corrClose(true);
+          showNote(text);
+          return;
+        }
+        CORR.err = (res && res.message) || "Could not do that: " + ((res && res.code) || "unknown error");
+      } catch (e) { CORR.err = "Could not do that: " + (e.message || e); }
+      CORR.busy = false; shiftPanelRender();
+    }
+
     // the note after a save: above the table, where the row just changed
     var NOTE = "";
     function showNote(text) {
@@ -1497,6 +1722,10 @@
     (function wireCorr() {
       var el = document.getElementById("corr-panel"), timer = null;
       function onTyped(ev) {                           // input while typing, change on a time picker
+        var sp = ev.target.getAttribute && ev.target.getAttribute("data-sp-shift");
+        if (sp && CORR.open) {                           // Remove / Restore: a shift picked
+          CORR.shift = Number(sp); CORR.err = ""; shiftPanelRender(); shiftPanelPreview(); return;
+        }
         var k = ev.target.getAttribute && ev.target.getAttribute("data-cf");
         if (!k || !CORR.open) return;
         if (k === "next") CORR.form.next = ev.target.checked; else CORR.form[k] = ev.target.value;
@@ -1528,6 +1757,7 @@
         else if (a === "remove-no") { CORR.askRemove = false; corrRender(); }
         else if (a === "remove-yes") await corrRemove();
         else if (a === "act") await corrAct();
+        else if (a === "shift-go") await shiftPanelGo();
       });
       document.addEventListener("keydown", function (ev) { if (ev.key === "Escape" && CORR.open) corrClose(false); });
       // a click anywhere else closes it (capture phase: the panel re-renders on its own clicks)
@@ -1560,7 +1790,7 @@
       var day = String(r.work_date).slice(0, 10), items = [];
       if (Number(r.shift_count) > 1) items.push('<a class="rm-item" role="menuitem" href="exceptions.html">Rule On Exceptions \u2197</a>');
       else if (day >= Dash.todayKL()) items.push('<span class="rm-item is-off" role="menuitem" aria-disabled="true">Edit Hours<small>Once the day is over</small></span>');
-      else {
+      else if (!r.all_removed) {
         items.push('<button type="button" class="rm-item" role="menuitem" data-menu="edit">' + (r.has_correction ? "Change Correction" : "Edit Hours") + "</button>");
         // the Exceptions page's rulings, here too (0124): a shift over 16 h accepted as
         // punched, an early start credited from the punch-in or kept from 8 AM, and
@@ -1573,6 +1803,15 @@
         }
         if (r.early_accepted) items.push('<button type="button" class="rm-item" role="menuitem" data-menu="undo-early">Undo Early Start Credit</button>');
         if (r.has_correction) items.push('<button type="button" class="rm-item rm-danger" role="menuitem" data-menu="remove">Remove Correction</button>');
+      }
+      // REMOVE SHIFT (owner, 27 Oct 2026; DB 0128): any day up to today with a shift
+      // still counting; Restore where one is removed. Offered only once the
+      // database carries the removal (the row's removed_count).
+      if (canRemoveShifts(r) && day <= Dash.todayKL()) {
+        if (shiftsOf(r).some(function (x) { return !x.removed; }))
+          items.push('<button type="button" class="rm-item" role="menuitem" data-menu="remove-shift">Remove Shift\u2026</button>');
+        if (removedCount(r))
+          items.push('<button type="button" class="rm-item" role="menuitem" data-menu="restore-shift">Restore Shift\u2026</button>');
       }
       m.innerHTML = items.join("");
       MENU = { open: true, row: r, view: k[0], btn: btn, at: Date.now() };
@@ -1606,6 +1845,16 @@
         if (act === "remove") corrOpen(r, view, { askRemove: true });
         if (act.indexOf("accept-") === 0) corrOpen(r, view, { mode: "accept", kind: act.slice(7) });
         if (act.indexOf("undo-") === 0) corrOpen(r, view, { mode: "undo", kind: act.slice(5) });
+        if (act === "remove-shift") corrOpen(r, view, { mode: "remove" });
+        if (act === "restore-shift") corrOpen(r, view, { mode: "restore" });
+        return;
+      }
+      // Restore Shift, from a removed shift in the day drawer
+      var rl = t.closest ? t.closest("[data-shift-restore]") : null;
+      if (rl) {
+        ev.preventDefault();
+        var rk = rl.getAttribute("data-shift-restore").split("|"), rr = rowFor("day", rk[0], rk[1]);
+        if (rr) corrOpen(rr, "day", { mode: "restore", shift: Number(rk[2]) });
         return;
       }
       if (MENU.open && !(t.closest && t.closest("#row-menu"))) menuClose();
@@ -1829,9 +2078,8 @@
           return '<div class="detail-box">' +
             unpricedNote(s) + twoShiftNote(s) +
             correctionBlock(s) +
-            (punches.length
-              ? (s.has_correction ? '<p class="detail-head">Original Punches</p>' : "") +
-                '<ul class="punch-lines">' + punches.map(punchLine).join("") + "</ul>"
+            (punches.length || shiftsOf(s).length > 1
+              ? (s.has_correction ? '<p class="detail-head">Original Punches</p>' : "") + punchesHtml(s, punches)
               : '<p class="detail-note">No Punches Found</p>') +
           "</div>";
         }
@@ -2093,8 +2341,12 @@
           var split = r.weekday_ot_minutes !== undefined && r.weekday_ot_minutes !== null;
           var wo = split ? Number(r.weekday_ot_minutes) || 0 : om;
           var rm = split ? Number(r.rest_minutes) || 0 : 0, hmn = split ? Number(r.holiday_minutes) || 0 : 0;
-          var note = pay.key === "unpriced" ? pay.word : pay.key === "progress" ? "In Progress"
-                     : (r.has_anomaly ? "Location Unconfirmed" : "");
+          // 0128: each removed shift and its reason ("Shift 1 Removed: Double Tap")
+          var gone = shiftsOf(r).filter(function (x) { return x.removed; }).map(function (x) {
+            return "Shift " + x.shift_no + " Removed" + (x.removed_reason ? ": " + capFirst(x.removed_reason) : "");
+          });
+          var note = [pay.key === "unpriced" ? pay.word : pay.key === "progress" ? "In Progress"
+                      : (r.has_anomaly ? "Location Unconfirmed" : "")].concat(gone).filter(Boolean).join("; ");
           daily.push([CODES[w.staff_id] || "", w.name, companyFull(COMPANY[w.staff_id]),
             { v: r.work_date, date: true }, DAY_NAMES[new Date(String(r.work_date).slice(0, 10) + "T00:00:00Z").getUTCDay()],
             kindWords(r), siteFull(r), T(effIn(r)), T(effOut(r)),
@@ -2325,7 +2577,7 @@
         var key = r.staff_id || ("name:" + (r.full_name || "(unnamed)"));
         var w = map[key] || (map[key] = {
           staff_id: r.staff_id || null, name: r.full_name || "(unnamed)",
-          sites: {}, codes: {}, days: 0, normal: 0, ot: 0, wm: 0, om: 0, broken: 0, open: 0, missed: 0, overlong: 0, early: 0, progress: 0, unconfirmed: 0, rows: []
+          sites: {}, codes: {}, days: 0, normal: 0, ot: 0, wm: 0, om: 0, broken: 0, open: 0, missed: 0, overlong: 0, early: 0, progress: 0, unconfirmed: 0, removed: 0, rows: []
         });
         if (r.project_name) { w.sites[r.project_name] = true; w.codes[siteCode(r.project_id, r.project_name)] = true; }
         if (r.out_project_name) { w.sites[r.out_project_name] = true; w.codes[siteCode(r.out_project_id, r.out_project_name)] = true; }   // a day that ended elsewhere (0102)
@@ -2335,7 +2587,8 @@
         if (r.has_anomaly) w.unconfirmed++;
         // THE FIGURE DECIDES (Round 1): a day the database priced counts, whatever
         // its marks say; only a day with no figure is sorted by its reason
-        if (h) {
+        if (r.all_removed) w.removed++;                       // 0128: removed — pays 0, not a day worked
+        else if (h) {
           w.days++; w.normal += h.normal; w.ot += h.ot;
           // whole minutes as the database gave them — the totals row and the
           // Excel sheet add THESE, so they can never drift from the rows
