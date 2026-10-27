@@ -271,9 +271,17 @@
     }
     return out;
   };
-  // the codes lookup is a real read too — the demo crew has no codes (the page
-  // learns each worker's company from the day rows)
-  Dash.getManpowerBySite = async function () { return []; };
+  // the staff list is a real read too: the demo crew's own, with a role each
+  // (More Filters) and no employee codes
+  var ROLES = { "Iron-Man (demo)": "crane_operator", "Captain America (demo)": "site_supervisor", "Black Widow (demo)": "welder",
+                "Hulk (demo)": "general_worker", "Thor (demo)": "boring_operator", "Hawkeye (demo)": "welder",
+                "Falcon (demo)": "vibro_operator", "Scarlet Witch (demo)": "welder" };
+  Dash.getManpowerBySite = async function () {
+    return CREW.map(function (w) {
+      return { staff_id: "demo-" + w.name, full_name: w.name, role: ROLES[w.name] || "general_worker", company: w.company || "HF-BP",
+               employee_code: null, is_active: true, project_code: SITES[w.site].code, current_project_id: SITES[w.site].id };
+    });
+  };
   // the site picker's list: the demo's own three sites, not the real directory
   Dash.getProjectDirectory = async function () {
     return SITES.map(function (s) { return { project_id: s.id, project_code: s.code, project_name: s.name, status: "active" }; });

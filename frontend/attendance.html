@@ -124,7 +124,11 @@
         <span aria-hidden="true">&times;</span> Clear Filters</button>
     </div>
     <!-- ROW 3: the status buttons with their counts (drawn by renderStatus) -->
-    <div class="att-status" id="att-status" role="group" aria-label="Show"></div>
+    <div class="att-status-wrap">
+      <div class="att-status" id="att-status" role="group" aria-label="Show"></div>
+      <!-- MORE FILTERS: the panel under its button, drawn by mfRender -->
+      <div class="mf-pop" id="mf-pop" hidden role="dialog" aria-label="More Filters" tabindex="-1"></div>
+    </div>
     <p class="att-status-note" id="status-note" hidden></p>
 
     <div id="open-shifts"></div>
@@ -561,6 +565,7 @@
         ((await Dash.getManpowerBySite()) || []).forEach(function (m) {
           if (m.staff_id && m.employee_code) CODES[m.staff_id] = m.employee_code;
           if (m.staff_id && m.company) COMPANY[m.staff_id] = m.company;
+          if (m.staff_id && m.role) ROLE[m.staff_id] = m.role;
           if (m.staff_id && isTestCode(m.project_code)) TEST_STAFF[m.staff_id] = true;
           if (m.staff_id && m.is_active && (SHOW_TEST || !isTestCode(m.project_code))) ROSTER.push(m);
         });
@@ -819,12 +824,10 @@
       var words = q ? q.split(/\s+/) : [];
       var company = document.getElementById("f-company").value;
       var body = document.getElementById(tbodyId), shown = 0, total = 0;
+      var items = tbodyId === "month-rows" ? MONTH.workers : DAY_SHIFTS;
       Array.prototype.forEach.call(body.querySelectorAll("tr.shift-row"), function (tr) {
         total++;
-        var key = tr.getAttribute("data-find") || "";
-        var showHit = !SHOW || (" " + (tr.getAttribute("data-st") || "") + " ").indexOf(" " + SHOW + " ") !== -1;
-        var hit = words.every(function (w) { return key.indexOf(w) !== -1; }) &&
-                  (!company || tr.getAttribute("data-company") === company) && showHit;
+        var hit = rowHit(tr, items[Number(tr.getAttribute("data-i"))], words, company, MF);
         tr.hidden = !hit;
         var drawer = tr.nextElementSibling;
         if (drawer && drawer.classList.contains("detail-row")) {
@@ -843,7 +846,7 @@
         var showWord = SHOW === "unpriced" ? "unpriced " : SHOW === "progress" ? "in-progress " : SHOW === "unconfirmed" ? "unconfirmed " : "";
         none.firstChild.textContent = q
           ? "No " + (company ? companyName(company) + " " : "") + showWord + "worker here matches \u201C" + q + "\u201D."
-          : "No " + (company ? companyName(company) + " " : "") + showWord + "workers here.";
+          : "No " + (company ? companyName(company) + " " : "") + showWord + (mfCount(MF) ? "worker here matches these filters." : "workers here.");
         none.hidden = false;
       } else if (none) {
         none.hidden = true;
@@ -856,6 +859,7 @@
       if (q) p.set("find", q); else p.delete("find");
       if (company) p.set("company", company); else p.delete("company");
       if (SHOW) p.set("show", SHOW); else p.delete("show");
+      mfToParams(p, MF);
       history.replaceState(null, "", location.pathname + (p.toString() ? "?" + p : ""));
     }
 
@@ -974,11 +978,11 @@
       return [by.overlong ? by.overlong + " Overlong" : "", by.missed ? by.missed + " No Punch Out" : "",
               by.open ? by.open + " Still Open" : "", by.other ? by.other + " Other" : ""].filter(Boolean).join(" · ");
     }
-    // the rows of this view inside the Company chosen (not the Find box)
+    // the rows of this view inside the Company chosen and More Filters (not the Find box)
     function scopeItems() {
       var company = document.getElementById("f-company").value;
       return ((VIEW === "month" ? MONTH.workers : DAY_SHIFTS) || []).filter(function (x) {
-        return !company || COMPANY[x.staff_id] === company;
+        return (!company || COMPANY[x.staff_id] === company) && mfMatch(x, MF);
       });
     }
     function renderStatus() {
@@ -1009,6 +1013,12 @@
           chip("unconfirmed", "Location Unconfirmed", n.unconfirmed,
                (month ? "Workers with a day where a punch" : "A punch") + " was outside the site, had weak GPS or matched no site") +
         "</span>" +
+        (function () {
+          var k = mfCount(MF), open = !document.getElementById("mf-pop").hidden;
+          return '<button type="button" class="chip chip-more' + (k ? " has-mf" : "") + '" id="btn-mf" aria-haspopup="dialog" aria-controls="mf-pop" aria-expanded="' +
+                 (open ? "true" : "false") + '"' + (items ? "" : " disabled") + ">More Filters" + (k ? " <b>\u00B7 " + k + "</b>" : "") +
+                 '<span class="chev" aria-hidden="true"></span></button>';
+        })() +
         (month && PENDING ? '<a class="att-pending" href="requests.html">' + PENDING + " Request" + (PENDING === 1 ? "" : "s") + " Pending ↗</a>" : "");
       var days = by.overlong + by.missed + by.open + by.other;
       note.hidden = !(month && items);
@@ -1020,13 +1030,13 @@
     // over the table: "Showing 2 of 9 workers · Unpriced · “bp00”", and the site in grey
     function paintShowing(shown, total, q, company) {
       var el = document.getElementById("showing"), site = document.getElementById("f-site");
-      var what = [SHOW ? SHOW_WORDS[SHOW] : "", q ? "“" + q + "”" : "", company ? companyName(company) : ""].filter(Boolean);
+      var what = [SHOW ? SHOW_WORDS[SHOW] : "", q ? "“" + q + "”" : "", company ? companyName(company) : ""].concat(mfWords(MF)).filter(Boolean);
       var siteWord = site.value ? ((DIR[site.value] && DIR[site.value].code) || (site.selectedIndex >= 0 ? site.options[site.selectedIndex].text : "")) : "";
       el.innerHTML = !LOADED || !total ? "" :
         "Showing " + shown + " of " + total + " worker" + (total === 1 ? "" : "s") +
         (what.length ? " · " + esc(what.join(" · ")) : "") +
         (siteWord ? ' <span class="muted">· ' + esc(siteWord) + " only</span>" : "");
-      document.getElementById("btn-clear").hidden = !(q || company || SHOW || site.value);
+      document.getElementById("btn-clear").hidden = !(q || company || SHOW || site.value || mfCount(MF));
     }
     // Month, a login that may correct: requests still waiting, from the payroll-close list
     function readPending(month) {
@@ -1042,6 +1052,250 @@
     function learnCompany(rows) {
       (rows || []).forEach(function (r) { if (r.staff_id && !COMPANY[r.staff_id] && r.company_code) COMPANY[r.staff_id] = r.company_code; });
     }
+
+    /* ---- MORE FILTERS (owner's go, 28 Oct 2026) ------------------------------------
+       The questions the four buttons do not ask: hours over or under a figure, days
+       worked (Month), a late start or an early finish, a role, why a day is unpriced,
+       what the office did. Ticks in one group widen the list (Welder or Driver); the
+       groups, the number boxes and everything else on the page narrow it.
+       In Month a row is a worker: the hours and days boxes compare with the worker's
+       month total, the figures on the row (M1); the times, the reasons and the office
+       actions match when ANY of the worker's days does. Nothing applies until Show N
+       Workers (M3). The status buttons' counts follow what is applied (M2), never the
+       Find box. The Excel is not filtered: it stays the payroll file. */
+    var MF = mfEmpty(), MF_DRAFT = null;
+    var MF_NUM = ["wh_gt", "wh_lt", "ot_gt", "dw_gt", "dw_lt"], MF_TIME = ["in_after", "out_before"], MF_SET = ["role", "why", "office"];
+    var MF_WHY = [["overlong", "Overlong"], ["missed", "No Punch Out"], ["open", "Still Open"], ["other", "Other"]];
+    var MF_OFFICE = [["corrected", "Corrected"], ["accepted", "Accepted As Punched"], ["credited", "Early Start Credited"],
+                     ["kept", "Kept From 8 AM"], ["removed", "Shift Removed"]];
+    var ROLE = {};                        // staff_id -> role ("boring_operator"), from the staff list
+    function mfEmpty() { return { wh_gt: "", wh_lt: "", ot_gt: "", dw_gt: "", dw_lt: "", in_after: "", out_before: "", role: [], why: [], office: [] }; }
+    function mfCopy(f) {
+      var c = mfEmpty();
+      MF_NUM.concat(MF_TIME).forEach(function (k) { c[k] = f[k]; });
+      MF_SET.forEach(function (k) { c[k] = f[k].slice(); });
+      return c;
+    }
+    // the boxes that count in this view: Days Worked is Month's only
+    function mfBoxes() { return MF_NUM.filter(function (k) { return VIEW === "month" || k.indexOf("dw_") !== 0; }).concat(MF_TIME); }
+    // how many choices are made (the button reads "More Filters · 3")
+    function mfCount(f) {
+      var n = 0;
+      mfBoxes().forEach(function (k) { if (f[k] !== "") n++; });
+      MF_SET.forEach(function (k) { n += f[k].length; });
+      return n;
+    }
+    function roleOf(staffId) { return ROLE[staffId] || "none"; }
+    function roleWord(code) { return code === "none" ? "Not On Staff List" : String(code).split("_").map(capFirst).join(" "); }
+    function mfWord(list, key) { var x = list.filter(function (p) { return p[0] === key; })[0]; return x ? x[1] : key; }
+    // "17:30" -> "05:30 pm", the page's own way of writing a time
+    function hhmmWord(t) {
+      var h = Number(t.slice(0, 2)), m = t.slice(3, 5);
+      return (h % 12 === 0 ? 12 : h % 12 < 10 ? "0" + (h % 12) : h % 12) + ":" + m + (h < 12 ? " am" : " pm");
+    }
+    // one day's answers to the day-level questions
+    function dayWhy(r) { var p = payOf(r); return p.key !== "unpriced" ? "" : (WHY_KEY[p.why] || "other"); }
+    function dayOffice(r) {
+      var o = [];
+      if (r.has_correction) o.push("corrected");
+      if (r.long_accepted) o.push("accepted");
+      if (r.early_accepted) o.push("credited");
+      if (earlyKept(r)) o.push("kept");
+      if (removedCount(r)) o.push("removed");
+      return o;
+    }
+    function klHM(ts) { return ts ? klInputValue(ts).slice(11, 16) : ""; }
+    // the paid times, after any correction; an Out on the next day is never "before"
+    function inAfter(r, t) { var a = effIn(r); return !r.all_removed && !!a && klHM(a) > t; }
+    function outBefore(r, t) {
+      var b = effOut(r);
+      return !r.all_removed && !!b && klInputValue(b).slice(0, 10) === String(r.work_date).slice(0, 10) && klHM(b) < t;
+    }
+    // does one row (a day in Day, a worker in Month) answer every choice? skip: one
+    // tick group left out, so each choice can be counted on its own
+    function mfMatch(x, f, skip) {
+      var month = VIEW === "month", rows = month ? x.rows : [x];
+      // the figures on the row: the day's, or the worker's month total rounded down to the half hour
+      var wm = month ? monthMins(x.wm) : (x.all_removed || x.working_minutes === null || x.working_minutes === undefined ? null : Number(x.working_minutes));
+      var om = month ? monthMins(x.om) : (wm === null ? null : Number(x.ot_minutes) || 0);
+      function num(v) { return v === "" ? null : Number(v); }
+      var g;
+      if ((g = num(f.wh_gt)) !== null && !(wm !== null && wm > g * 60)) return false;
+      if ((g = num(f.wh_lt)) !== null && !(wm !== null && wm < g * 60)) return false;
+      if ((g = num(f.ot_gt)) !== null && !(om !== null && om > g * 60)) return false;
+      if (month && (g = num(f.dw_gt)) !== null && !(x.days > g)) return false;
+      if (month && (g = num(f.dw_lt)) !== null && !(x.days < g)) return false;
+      if (f.in_after && !rows.some(function (r) { return inAfter(r, f.in_after); })) return false;
+      if (f.out_before && !rows.some(function (r) { return outBefore(r, f.out_before); })) return false;
+      if (skip !== "role" && f.role.length && f.role.indexOf(roleOf(x.staff_id)) < 0) return false;
+      if (skip !== "why" && f.why.length && !rows.some(function (r) { return f.why.indexOf(dayWhy(r)) >= 0; })) return false;
+      if (skip !== "office" && f.office.length &&
+          !rows.some(function (r) { return dayOffice(r).some(function (k) { return f.office.indexOf(k) >= 0; }); })) return false;
+      return true;
+    }
+    // the choices in words, for "Showing …" and the printed heading
+    function mfWords(f) {
+      var w = [], month = VIEW === "month";
+      if (f.role.length) w.push(f.role.map(roleWord).join(" or "));
+      if (f.wh_gt !== "") w.push("Working Hours > " + f.wh_gt + " h");
+      if (f.wh_lt !== "") w.push("Working Hours < " + f.wh_lt + " h");
+      if (f.ot_gt !== "") w.push("Over Time > " + f.ot_gt + " h");
+      if (month && f.dw_gt !== "") w.push("Days Worked > " + f.dw_gt);
+      if (month && f.dw_lt !== "") w.push("Days Worked < " + f.dw_lt);
+      if (f.in_after) w.push("In After " + hhmmWord(f.in_after));
+      if (f.out_before) w.push("Out Before " + hhmmWord(f.out_before));
+      if (f.why.length) w.push(f.why.map(function (k) { return mfWord(MF_WHY, k); }).join(" or "));
+      if (f.office.length) w.push(f.office.map(function (k) { return mfWord(MF_OFFICE, k); }).join(" or "));
+      return w;
+    }
+    // the address keeps them, so a link reproduces the screen
+    function mfFromParams(p) {
+      var f = mfEmpty();
+      MF_NUM.forEach(function (k) { var v = p.get(k) || ""; if (/^\d+(\.\d+)?$/.test(v)) f[k] = v; });
+      MF_TIME.forEach(function (k) { var v = p.get(k) || ""; if (/^\d\d:\d\d$/.test(v)) f[k] = v; });
+      f.role = (p.get("role") || "").split(",").filter(function (v) { return /^[a-z_]+$/.test(v); });
+      f.why = (p.get("why") || "").split(",").filter(function (v) { return MF_WHY.some(function (x) { return x[0] === v; }); });
+      f.office = (p.get("office") || "").split(",").filter(function (v) { return MF_OFFICE.some(function (x) { return x[0] === v; }); });
+      return f;
+    }
+    function mfToParams(p, f) {
+      MF_NUM.concat(MF_TIME).forEach(function (k) { if (f[k] !== "") p.set(k, f[k]); else p.delete(k); });
+      MF_SET.forEach(function (k) { if (f[k].length) p.set(k, f[k].join(",")); else p.delete(k); });
+    }
+    // one table row against everything on the page: status, Find, Company, More Filters
+    function rowHit(tr, item, words, company, f) {
+      var key = tr.getAttribute("data-find") || "";
+      var showHit = !SHOW || (" " + (tr.getAttribute("data-st") || "") + " ").indexOf(" " + SHOW + " ") !== -1;
+      return showHit && words.every(function (w) { return key.indexOf(w) !== -1; }) &&
+             (!company || tr.getAttribute("data-company") === company) && (!item || mfMatch(item, f));
+    }
+    function refilterView() { applyFind(VIEW === "month" ? "month-rows" : "rows", VIEW === "month" ? 7 : 9); }
+
+    // ---- the panel ----
+    // the rows each choice is counted in: the site loaded, the Company chosen, the status button pressed
+    function mfBase() {
+      var company = document.getElementById("f-company").value;
+      return ((VIEW === "month" ? MONTH.workers : DAY_SHIFTS) || []).filter(function (x) {
+        if (company && COMPANY[x.staff_id] !== company) return false;
+        return !SHOW || (VIEW === "month" ? monthStatus(x) : dayStatus(x)).indexOf(SHOW) >= 0;
+      });
+    }
+    function mfRender() {
+      var pop = document.getElementById("mf-pop"), f = MF_DRAFT, month = VIEW === "month", base = mfBase();
+      function box(k, step, label) {
+        return '<input type="number" min="0" step="' + step + '" inputmode="decimal" data-mf="' + k + '" value="' + esc(f[k]) + '" aria-label="' + esc(label) + '">';
+      }
+      function time(k, label) { return '<input type="time" data-mf="' + k + '" value="' + esc(f[k]) + '" aria-label="' + esc(label) + '">'; }
+      function tick(set, key, word, n) {
+        var on = f[set].indexOf(key) >= 0;
+        return '<label class="mf-tick' + (n || on ? "" : " is-zero") + '"><input type="checkbox" data-mf-set="' + set + '" value="' + esc(key) + '"' +
+               (on ? " checked" : "") + '><span class="w">' + esc(word) + '</span><span class="n">' + n + "</span></label>";
+      }
+      function anyDay(x, test) { return (month ? x.rows : [x]).some(test); }
+      var roles = {};
+      base.forEach(function (x) { var r = roleOf(x.staff_id); roles[r] = (roles[r] || 0) + 1; });
+      f.role.forEach(function (r) { if (!(r in roles)) roles[r] = 0; });
+      var roleList = Object.keys(roles).sort(function (a, b) {
+        return a === "none" ? 1 : b === "none" ? -1 : roleWord(a) < roleWord(b) ? -1 : 1;
+      });
+      pop.innerHTML = '<div class="mf-body">' +
+        '<div class="mf-group"><div class="mf-h">Hours<span>' + (month ? "The Worker's Month Total" : "This Day") + "</span></div>" +
+          '<div class="mf-line"><span class="mf-k">Working Hours</span>More Than ' + box("wh_gt", "0.5", "Working hours more than") + " h" +
+            '<span class="mf-sep">Less Than</span>' + box("wh_lt", "0.5", "Working hours less than") + " h</div>" +
+          '<div class="mf-line"><span class="mf-k">Over Time</span>More Than ' + box("ot_gt", "0.5", "Over time more than") + " h</div>" +
+          (month ? '<div class="mf-line"><span class="mf-k">Days Worked</span>More Than ' + box("dw_gt", "1", "Days worked more than") +
+                   '<span class="mf-sep">Less Than</span>' + box("dw_lt", "1", "Days worked less than") + "</div>" : "") +
+        "</div>" +
+        '<div class="mf-group"><div class="mf-h">Times' + (month ? "<span>On Any Day</span>" : "") + "</div>" +
+          '<div class="mf-line"><span class="mf-k">Punched In</span>After ' + time("in_after", "Punched in after") + "</div>" +
+          '<div class="mf-line"><span class="mf-k">Punched Out</span>Before ' + time("out_before", "Punched out before") + "</div>" +
+        "</div>" +
+        '<div class="mf-group"><div class="mf-h">Role</div><div class="mf-ticks">' +
+          (roleList.length ? roleList.map(function (r) { return tick("role", r, roleWord(r), roles[r]); }).join("") : '<span class="mf-none">No Workers</span>') +
+        "</div></div>" +
+        '<div class="mf-group"><div class="mf-h">Why Unpriced' + (month ? "<span>On Any Day</span>" : "") + '</div><div class="mf-ticks">' +
+          MF_WHY.map(function (p) { return tick("why", p[0], p[1], base.filter(function (x) { return anyDay(x, function (r) { return dayWhy(r) === p[0]; }); }).length); }).join("") +
+        "</div></div>" +
+        '<div class="mf-group"><div class="mf-h">Office Actions' + (month ? "<span>On Any Day</span>" : "") + '</div><div class="mf-ticks">' +
+          MF_OFFICE.map(function (p) { return tick("office", p[0], p[1], base.filter(function (x) { return anyDay(x, function (r) { return dayOffice(r).indexOf(p[0]) >= 0; }); }).length); }).join("") +
+        "</div></div>" +
+      "</div>" +
+      '<div class="mf-foot"><button type="button" class="mf-clear" data-mf-act="clear">Clear All</button>' +
+        '<button type="button" class="mf-show" data-mf-act="show"></button></div>';
+      mfPaintShow();
+    }
+    // "Show 12 Workers": everything on the page, with the panel's choices as they stand
+    function mfPaintShow() {
+      var month = VIEW === "month", items = month ? MONTH.workers : DAY_SHIFTS;
+      var q = document.getElementById("f-find").value.trim().toLowerCase(), words = q ? q.split(/\s+/) : [];
+      var company = document.getElementById("f-company").value, n = 0;
+      Array.prototype.forEach.call(document.querySelectorAll("#" + (month ? "month-rows" : "rows") + " tr.shift-row"), function (tr) {
+        if (rowHit(tr, items[Number(tr.getAttribute("data-i"))], words, company, MF_DRAFT)) n++;
+      });
+      var b = document.querySelector('#mf-pop [data-mf-act="show"]');
+      if (b) b.textContent = "Show " + n + " Worker" + (n === 1 ? "" : "s");
+    }
+    function mfOpen() {
+      var pop = document.getElementById("mf-pop"), btn = document.getElementById("btn-mf");
+      if (!LOADED || !btn) return;
+      MF_DRAFT = mfCopy(MF);
+      mfRender();
+      pop.hidden = false;
+      // under its button, kept inside the page's width
+      var wrap = pop.parentNode, left = btn.getBoundingClientRect().left - wrap.getBoundingClientRect().left;
+      pop.style.left = Math.max(0, Math.min(left, wrap.clientWidth - pop.offsetWidth)) + "px";
+      btn.setAttribute("aria-expanded", "true");
+      var first = pop.querySelector("input"); if (first) first.focus();
+    }
+    function mfClose(back) {
+      var pop = document.getElementById("mf-pop");
+      if (pop.hidden) return;
+      pop.hidden = true; MF_DRAFT = null;
+      var btn = document.getElementById("btn-mf");
+      if (btn) { btn.setAttribute("aria-expanded", "false"); if (back) btn.focus(); }
+    }
+    function mfApply() {
+      MF = mfCopy(MF_DRAFT);
+      mfClose(false);
+      refilterView();
+      var btn = document.getElementById("btn-mf"); if (btn) btn.focus();
+    }
+    (function wireMoreFilters() {
+      var pop = document.getElementById("mf-pop");
+      function typed(ev) {
+        if (!MF_DRAFT) return;
+        var k = ev.target.getAttribute("data-mf"), set = ev.target.getAttribute("data-mf-set");
+        if (k) MF_DRAFT[k] = String(ev.target.value || "").trim();
+        if (set) {
+          var v = ev.target.value, list = MF_DRAFT[set].filter(function (x) { return x !== v; });
+          if (ev.target.checked) list.push(v);
+          MF_DRAFT[set] = list;
+        }
+        if (k || set) mfPaintShow();
+      }
+      pop.addEventListener("input", typed);
+      pop.addEventListener("change", typed);
+      pop.addEventListener("click", function (ev) {
+        var a = ev.target.closest ? ev.target.closest("[data-mf-act]") : null;
+        if (!a) return;
+        if (a.getAttribute("data-mf-act") === "clear") { MF_DRAFT = mfEmpty(); mfRender(); var f = pop.querySelector("input"); if (f) f.focus(); }
+        else mfApply();
+      });
+      pop.addEventListener("keydown", function (ev) {
+        if (ev.key === "Enter" && ev.target.matches && ev.target.matches('input[type="number"], input[type="time"]')) { ev.preventDefault(); mfApply(); }
+      });
+      document.getElementById("att-status").addEventListener("click", function (ev) {
+        if (!(ev.target.closest && ev.target.closest("#btn-mf"))) return;
+        if (pop.hidden) mfOpen(); else mfClose(true);
+      });
+      // a click elsewhere puts it away; a click on something the panel just redrew
+      // (Clear All) is no longer in the page, and is not "elsewhere"
+      document.addEventListener("click", function (ev) {
+        if (pop.hidden || !document.contains(ev.target) || pop.contains(ev.target) || (ev.target.closest && ev.target.closest("#btn-mf"))) return;
+        mfClose(false);
+      });
+      document.addEventListener("keydown", function (ev) { if (ev.key === "Escape" && !pop.hidden) mfClose(true); });
+    })();
 
     // one delegated handler on the static banner container — survives re-renders
     document.getElementById("geofence-banner").addEventListener("click", async function (ev) {
@@ -2008,6 +2262,7 @@
 
       VIEW = view;
       SHOW = SHOW_WORDS[params.get("show")] ? params.get("show") : "";
+      MF = mfFromParams(params);
       renderStatus();                                 // the buttons at once; the counts follow the rows
 
       // wire the filters
@@ -2114,10 +2369,11 @@
       });
       var sitePick = wireSitePicker(function (v) { setParam("site", v); });
       document.getElementById("btn-clear").addEventListener("click", function () {
-        findEl.value = ""; companyEl.value = ""; SHOW = "";
-        if (siteEl.value) {                               // the site is a reload: all four in one go
+        findEl.value = ""; companyEl.value = ""; SHOW = ""; MF = mfEmpty(); mfClose(false);
+        if (siteEl.value) {                               // the site is a reload: everything in one go
           var p = new URLSearchParams(location.search);
           ["find", "company", "show", "site"].forEach(function (k) { p.delete(k); });
+          mfToParams(p, MF);
           location.search = p.toString();
           return;
         }
@@ -2306,7 +2562,7 @@
           shifts.forEach(function (x, k) { if (x.staff_id === wantOpen) idx = k; });
           if (idx >= 0) {
             var tr = tbody.querySelector('tr.shift-row[data-i="' + idx + '"]');
-            if (tr && tr.hidden) { findEl.value = ""; companyEl.value = ""; SHOW = ""; applyFind("rows", 9); }   // never open a row the filters hide
+            if (tr && tr.hidden) { findEl.value = ""; companyEl.value = ""; SHOW = ""; MF = mfEmpty(); applyFind("rows", 9); }   // never open a row the filters hide
             setOpen(idx, true);
             await loadDrawer(idx);
             if (corrEditable(shifts[idx])) corrOpen(shifts[idx], "day");
@@ -2401,7 +2657,7 @@
     // for itself what it is, of when, of where, and when it was printed.
     function writePrintHead(view, whenText) {
       var find = document.getElementById("f-find").value.trim();
-      var showing = [SHOW ? SHOW_WORDS[SHOW] : "", find ? "\u201C" + find + "\u201D" : ""].filter(Boolean).join(" · ");
+      var showing = [SHOW ? SHOW_WORDS[SHOW] : "", find ? "\u201C" + find + "\u201D" : ""].concat(mfWords(MF)).filter(Boolean).join(" · ");
       document.getElementById("print-head").innerHTML =
         "<h2>Attendance — " + esc(view === "month" ? "Month Of " + whenText : whenText) + "</h2>" +
         "<p>Company: " + esc(document.getElementById("f-company").value ? companyFull(document.getElementById("f-company").value) : "All Companies") +
