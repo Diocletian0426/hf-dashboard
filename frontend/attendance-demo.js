@@ -51,9 +51,11 @@
     return ((h % 1000) / 1000 - 0.5) * spread;
   }
 
+  // hours from the day's midnight, as a real timestamp: minutes that round up
+  // to 60 carry into the hour, and a time past 24:00 lands on the next day (a
+  // night shift) — written as "16:60" or "33:24" they were not dates at all
   function stamp(iso, hours) {
-    var h = Math.floor(hours), m = Math.round((hours - h) * 60);
-    return iso + "T" + (h < 10 ? "0" : "") + h + ":" + (m < 10 ? "0" : "") + m + ":00+08:00";
+    return new Date(Date.parse(iso + "T00:00:00+08:00") + Math.round(hours * 60) * 60000).toISOString();
   }
 
   function dayOf(iso) { return new Date(iso + "T00:00:00+08:00").getDay(); }
