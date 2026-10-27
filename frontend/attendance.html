@@ -2342,9 +2342,10 @@
       } catch (e) {
         tbody.innerHTML = "";
         document.getElementById("month-rows").innerHTML = "";
-        LOADED = false;
-        document.getElementById("att-status").innerHTML = "";
+        LOADED = false;                                  // no buttons, no counts, no "Showing": the error says it
+        document.getElementById("att-status").hidden = true;
         document.getElementById("status-note").hidden = true;
+        document.getElementById("table-bar").hidden = true;
         document.getElementById("error").innerHTML =
           '<div class="banner banner-red">Could not load: ' + (e.message || e) + "</div>";
       }
