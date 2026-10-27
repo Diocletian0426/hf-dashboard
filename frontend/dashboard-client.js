@@ -69,12 +69,20 @@
                                                      shift AND kind — missed / long_open / overlong /
                                                      early_start; both dates null = every unresolved
                                                      shift since the rule's start date; null before 0124
+   await Dash.priceShift(staffId, date, inISO, outISO, realStart?) -> the figure a ruling WOULD give (DB 0127),
+                                                     one row { working_minutes, ot_minutes, … }, or null before 0127
    await Dash.getUnpricedDays(from, to)           -> the payroll-close list: worker days with no figure
                                                      or a request waiting; null before 0124
    await Dash.acceptShiftAsPunched(staffId, date, shiftNo, 'long'|'early'|'early_keep', note)
                                                      (note required for long and early)
                                                   -> { ok, mark, working_minutes } or { ok:false, code, message }
    await Dash.clearShiftAcceptance(staffId, date, shiftNo, 'long'|'early') -> undo the acceptance
+   await Dash.removeShift(staffId, date, shiftNo, reason)  -> one shift out of the day's pay (DB 0128):
+                                                     { ok, working_minutes, ot_minutes } or { ok:false, code, message }
+   await Dash.restoreShift(staffId, date, shiftNo)        -> undo it: { ok, … } or { ok:false, code:'not_removed' }
+   await Dash.previewShiftRemoval(staffId, date, shiftNo, 'remove'|'restore')
+                                                  -> { ok, before, after, sunday } from the real day view
+                                                     (nothing written), or null before 0128
    await Dash.getTests(showAll?)                  -> pile test tracker (hides completed/passed
                                                      unless showAll is true)
    await Dash.getTestTypes()                      -> test type directory (CSL/MLT/PDA/PIT:
@@ -1145,6 +1153,25 @@
     }
   }
 
+  // The figure a ruling WOULD give, before it is saved (DB 0127 price_shift,
+  // attendance.edit): the same hours rule the day view uses, on the pair of
+  // times the office is about to rule. One row, or null when the database
+  // predates 0127 — the Correct Hours panel then shows no preview.
+  // realStart (optional): price as if the early start were credited (true) or
+  // not (false); left out, the shift's own marks decide, as the day view does.
+  async function priceShift(staffId, workDate, inISO, outISO, realStart) {
+    try {
+      var rows = await q(sb.rpc("price_shift", {
+        p_staff_id: staffId, p_work_date: workDate, p_in_at: inISO, p_out_at: outISO,
+        p_real_start: (realStart === undefined || realStart === null) ? null : !!realStart
+      }));
+      return Array.isArray(rows) ? (rows[0] || null) : (rows || null);
+    } catch (e) {
+      if (isMissingFunction(e)) return null;
+      throw e;
+    }
+  }
+
   // kind 'long'  = accept a shift over 16 h as punched (it prices as tapped);
   // kind 'early' = credit a site worker's start before 06:00 from the punch-in;
   // kind 'early_keep' = looked at, kept counted from 08:00 (settled, no pay change).
@@ -1168,6 +1195,34 @@
     return q(sb.rpc("clear_shift_acceptance", {
       p_staff_id: staffId, p_work_date: workDate, p_shift_no: Number(shiftNo) || 1, p_kind: kind
     }));
+  }
+
+  // ---- Remove Shift (DB 0128) ------------------------------------------------
+  // One shift out of a day's pay: zero, still listed, reversible. The punches
+  // stay, and every ruling on the shift is frozen until it is restored.
+  // Refusals come back as DATA { ok:false, code, message }: self_review,
+  // reason_required, work_day_not_finished, no_such_shift, already_removed,
+  // shift_running, shift_open, request_pending, day_has_whole_day_ruling,
+  // not_removed.
+  function removeShift(staffId, workDate, shiftNo, reason) {
+    return q(sb.rpc("remove_shift", {
+      p_staff_id: staffId, p_work_date: workDate, p_shift_no: Number(shiftNo), p_reason: reason
+    }));
+  }
+  function restoreShift(staffId, workDate, shiftNo) {
+    return q(sb.rpc("restore_shift", { p_staff_id: staffId, p_work_date: workDate, p_shift_no: Number(shiftNo) }));
+  }
+  // what removing / restoring WOULD do — the database applies it, reads the
+  // real day view and rolls it back; null before 0128
+  async function previewShiftRemoval(staffId, workDate, shiftNo, action) {
+    try {
+      return await q(sb.rpc("preview_shift_removal", {
+        p_staff_id: staffId, p_work_date: workDate, p_shift_no: Number(shiftNo), p_action: action || "remove"
+      }));
+    } catch (e) {
+      if (isMissingFunction(e)) return null;
+      throw e;
+    }
   }
 
   function getTests(showAll) {
@@ -1981,8 +2036,12 @@
     revokeAttendanceRequest: revokeAttendanceRequest,
     getPunchExceptions: getPunchExceptions,
     getUnpricedDays: getUnpricedDays,
+    priceShift: priceShift,
     acceptShiftAsPunched: acceptShiftAsPunched,
     clearShiftAcceptance: clearShiftAcceptance,
+    removeShift: removeShift,
+    restoreShift: restoreShift,
+    previewShiftRemoval: previewShiftRemoval,
     getTests: getTests,
     getTestTypes: getTestTypes,
     getProjectTestSpecs: getProjectTestSpecs,

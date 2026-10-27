@@ -3648,3 +3648,187 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
 .dl-anyway { margin-right: auto; display: inline-flex; align-items: center; gap: 6px;
              font-size: 13.5px; color: var(--danger-ink); cursor: pointer; }
 .dl-anyway input { width: 16px; height: 16px; margin: 0; }
+
+/* ---- attendance Round 1 (owner's go, 26 Oct 2026): Pay / Location / Facts ----
+   The Attention column became two: PAY (Priced, In Progress, Unpriced · why —
+   only Unpriced is amber) and LOCATION (quiet grey words). Facts about the day
+   sit under the pay word in small type. The shift is one cell; sites are codes;
+   the review line above the table replaces the amber banner. */
+.att-readable .pay { display: inline-block; white-space: nowrap; }
+.att-readable .pay-ok { color: var(--ink); }
+.att-readable .pay-progress { color: var(--ink-2); font-weight: 600; }
+.att-readable .pay-removed { color: var(--ink-2); font-weight: 600; }   /* 0128: settled at 0, not amber */
+.att-readable .pay-no { background: var(--amber-soft); color: #92400e; border-radius: 999px; padding: 3px 11px; font-size: 13px; font-weight: 600; }
+.att-readable .facts { display: block; font-size: 12.5px; color: var(--ink-2); margin-top: 3px; white-space: normal; line-height: 1.35; }
+.att-readable .loc { font-size: 14px; white-space: nowrap; }
+.att-readable .loc-ok { color: var(--ink-2); }
+.att-readable .loc-bad { color: var(--ink); }
+.att-readable .att-table .pay-cell, .att-readable .att-table .loc-cell { white-space: normal; }
+/* fit at 1440 px: every attendance cell may wrap; the short units stay whole */
+.att-readable .att-table th, .att-readable .att-table td { white-space: normal; padding-left: 9px; padding-right: 9px; }
+.att-readable .att-table .emp-code, .att-readable .shift-cell .t, .att-readable .pay, .att-readable .loc,
+.att-readable .att-table .site-cell .sc, .att-readable .att-table td.num { white-space: nowrap; }
+.att-readable .att-table:not(.month-days) > tbody > tr > td:nth-child(2) { max-width: 240px; }
+.att-readable .att-table .site-cell { white-space: normal; }
+.att-readable .shift-cell { white-space: normal; }
+.att-readable .facts-why { color: #92400e; }
+.att-readable .next-day { font-size: 11px; color: var(--ink-2); margin-left: 1px; }
+.att-readable .t-office-tag.t-inline { display: inline-block; margin: 0 0 0 4px; vertical-align: 1px; font-size: 10.5px; padding: 0 6px; }
+.att-readable .att-table:not(.month-days) > tbody > tr > td:nth-child(3) { min-width: 0; }
+.att-readable .att-table:not(.month-days) > tbody > tr > td:last-child { max-width: none; }
+.att-readable .legend-list .pay, .att-readable .legend-list .loc, .att-readable .legend-list .facts { flex: 0 0 auto; display: inline-block; margin: 0; }
+.att-readable .day-link { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--line-strong); }
+.att-readable .day-link:hover { color: var(--brand-ink); }
+.att-review { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 8px; margin: 0 0 var(--sp-3); padding: 0 4px; font-size: 14.5px; color: var(--ink-2); }
+.att-review .rv-label { color: var(--ink); font-weight: 600; }
+.att-review .rv-word { color: var(--ink); text-decoration: none; border-bottom: 1px dotted var(--line-strong); }
+.att-review .rv-word:hover { color: var(--brand-ink); }
+.att-review .rv-word.is-zero { color: var(--ink-3); border-bottom-color: transparent; }
+.att-review .rv-why { color: var(--ink-2); }
+.att-review .rv-queue { margin-left: auto; color: var(--brand-ink); font-weight: 600; text-decoration: none; }
+.att-readable .unpriced-note { color: var(--ink); }
+.dl-progress { color: var(--ink-2); }
+/* the "?" panel (the legend on request) and the legend as the print key only */
+.att-readable .att-help { width: 40px; height: 40px; padding: 0; justify-content: center; border-radius: 50%; font-weight: 700; font-size: 17px; }
+.att-readable .filters.att-narrow { position: relative; }
+.att-words { position: absolute; right: 0; top: calc(100% + 8px); z-index: 40; width: min(640px, 100%); padding: 14px 16px 8px;
+            background: #fff; border: 1px solid var(--line-strong); border-radius: var(--r-lg); box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14); outline: none; }
+.att-words .help-x { position: absolute; right: 10px; top: 8px; }
+.att-words .legend-title { margin: 0 32px 10px 0; }
+.att-words > span { display: flex; align-items: baseline; gap: 10px; margin: 0 0 8px; line-height: 1.5; font-size: 14px; color: var(--ink-2); }
+.att-words > span > .pay, .att-words > span > .loc, .att-words > span > .facts { flex: 0 0 auto; display: inline-block; margin: 0; color: var(--ink); }
+.att-readable .print-only { display: none; }
+/* long names stay in their column: two lines at most, then an ellipsis; the full name on hover and in the drawer */
+.att-readable .att-table .worker-btn, .att-readable .att-table .who-line { white-space: normal; }
+.att-readable .att-table .who-line strong { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; max-width: 230px; line-height: 1.3; }
+/* ---- attendance: the Correct Hours panel (Release 2, 27 Oct 2026) ----------
+   A panel on the right, the page lit behind it (the house style: no curtain).
+   Holds the shared Rule The Times form (correct-form.js, as on Exceptions). */
+.corr-panel { position: fixed; top: 0; right: 0; bottom: 0; z-index: 70; width: 640px; max-width: 100vw; overflow-y: auto;
+              padding: var(--sp-4) var(--sp-5) var(--sp-6); background: #fff; border-left: 1px solid var(--line-strong);
+              box-shadow: -16px 0 40px rgba(15, 23, 42, 0.12); outline: none; font-size: 14.5px; color: var(--ink); }
+.corr-panel[hidden] { display: none; }
+.corr-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.corr-head .dl-x { flex: 0 0 auto; }
+.corr-eyebrow { font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-2); }
+.corr-panel h2 { margin: 2px 0; font-size: 20px; line-height: 1.2; }
+.corr-sub { color: var(--ink-2); font-size: 13.5px; }
+.corr-now { margin: 8px 0 12px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.corr-now .facts-why { font-size: 13px; }
+.corr-fig { font-weight: 600; }
+.corr-note { margin: 8px 0 12px; }
+.corr-panel .detail-head { font-size: 12px; color: var(--ink-2); margin: 14px 0 4px; text-transform: uppercase; letter-spacing: 0.04em; }
+.corr-panel .punch-lines li { font-size: 14px; padding: 7px 0; }
+.corr-panel .amend-note { margin-top: 8px; }
+.corr-panel .cf { margin-top: 6px; }
+.corr-panel .cf-times { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: flex-end; }
+.corr-panel .cf-times label, .corr-panel .cf-why { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
+.corr-panel .cf-times label.cf-next { flex-direction: row; align-items: center; gap: 6px; font-weight: 500; padding-bottom: 8px; }
+.corr-panel .cf input[type="text"], .corr-panel .cf input[type="time"] { font-size: 15px; padding: 9px 12px; border: 1px solid var(--line-strong);
+              border-radius: 10px; background: #fff; color: var(--ink); font-family: var(--font); }
+.corr-panel .cf input[aria-invalid="true"] { border-color: var(--danger); }
+.corr-panel .cf-reasons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.corr-panel .cf-reasons button { font-family: var(--font); font-size: 13px; padding: 7px 12px; border-radius: var(--r-pill);
+              border: 1px solid var(--line-strong); background: #fff; color: var(--ink); cursor: pointer; }
+.corr-panel .cf-reasons button:hover { background: var(--surface-2); }
+.corr-panel .cf-why { margin-top: 8px; }
+.corr-panel .cf-why input { width: 100%; box-sizing: border-box; }
+.corr-panel .cf-err { margin-top: 6px; color: var(--danger-ink); font-size: 13px; white-space: pre-wrap; }
+.corr-panel .cf-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+.corr-panel .cf-actions .muted { flex-basis: 100%; font-size: 12.5px; }
+.corr-preview { margin: 8px 0 0; font-size: 14px; color: var(--ink-2); min-height: 1.4em; }
+.corr-preview b { color: var(--ink); }
+.corr-ask { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface-2);
+            display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.corr-ask .q { flex-basis: 100%; }
+/* the "⋯" on a day row and its small menu (owner, 27 Oct 2026) */
+.att-readable .att-table .more-cell, .att-readable .att-table .more-th { width: 40px; padding-left: 4px; padding-right: 4px; text-align: center; }
+.row-more { width: 34px; height: 34px; padding: 0 0 6px; border-radius: 50%; border: 1px solid transparent; background: transparent;
+            color: var(--ink-2); font-size: 22px; line-height: 1; cursor: pointer; }
+.row-more:hover, .row-more[aria-expanded="true"] { background: rgba(37, 99, 235, 0.08); color: var(--brand-ink); border-color: var(--line-strong); }
+.row-menu { position: fixed; z-index: 80; min-width: 210px; padding: 6px; background: #fff; border: 1px solid var(--line-strong);
+            border-radius: 12px; box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14); display: flex; flex-direction: column; }
+.row-menu[hidden] { display: none; }
+.rm-item { display: block; width: 100%; text-align: left; padding: 9px 12px; border: 0; background: transparent; border-radius: 8px;
+           font-family: var(--font); font-size: 14.5px; color: var(--ink); cursor: pointer; text-decoration: none; box-sizing: border-box; }
+.rm-item:hover, .rm-item:focus-visible { background: var(--surface-2); outline: none; }
+.rm-item.rm-danger { color: var(--danger-ink); }
+.rm-item.is-off { color: var(--ink-3); cursor: default; }
+.rm-item small { display: block; font-size: 12px; color: var(--ink-3); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+/* the panel's layout per the 27 Oct review: Original | Corrected, Current | After, a sticky footer */
+.corr-grid { display: grid; grid-template-columns: 40px 1fr 1fr; gap: 8px 12px; align-items: center; }
+.corr-grid .gh { font-size: 12px; color: var(--ink-2); text-transform: uppercase; letter-spacing: 0.04em; }
+.corr-grid .gk { font-weight: 700; font-size: 13px; color: var(--ink-2); }
+.corr-grid .orig-time { font-weight: 600; }
+.corr-grid .orig-check { display: block; font-size: 12px; color: var(--ink-2); }
+.corr-grid [data-cell] { min-height: 40px; display: flex; flex-direction: column; justify-content: center; border-radius: 10px; padding: 2px 6px; }
+.corr-grid .changed { background: #eff6ff; }
+.corr-grid .changed .orig-time { text-decoration: line-through; color: var(--ink-2); font-weight: 500; }
+.corr-grid .changed input { border-color: var(--brand); }
+/* the Corrected time reads like the Original (same type), still a time box */
+.corr-panel .corr-grid .corr-time { font-family: var(--font); font-size: 15.5px; font-weight: 600; color: var(--ink); background: #f8fafc;
+  border: 1px solid var(--line-strong); border-radius: 8px; padding: 6px 10px; min-height: 40px; width: auto; max-width: 150px; box-sizing: border-box; }
+.corr-panel .corr-grid .corr-time:hover { border-color: var(--brand-border); }
+.corr-panel .corr-grid .corr-time:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
+.corr-panel .corr-grid .corr-time::-webkit-calendar-picker-indicator { opacity: 0.45; width: 14px; height: 14px; margin-left: 4px; cursor: pointer; }
+.corr-panel .corr-grid .corr-time[aria-invalid="true"] { border-color: var(--danger); }
+.corr-grid .changed .corr-time { border-color: var(--brand); background: #fff; }
+.corr-grid .corr-state { margin-top: 3px; }
+/* in the panel only, a location check that is not Confirmed reads amber; the tables keep it grey */
+.corr-grid .orig-check.is-warn { color: var(--warn-ink); }
+.corr-loc { margin: 10px 0 0; }
+.corr-panel .cf-why { display: block; margin-top: 8px; }
+.corr-panel .cf-why input { font-family: var(--font); font-size: 15px; padding: 9px 12px; border: 1px solid var(--line-strong); border-radius: 10px;
+  background: #fff; color: var(--ink); width: 100%; box-sizing: border-box; }
+.corr-panel .cf-why input[aria-invalid="true"] { border-color: var(--danger); }
+.map-link { font-size: 12.5px; color: var(--brand-ink); text-decoration: none; margin-left: 6px; white-space: nowrap; }
+.map-link:hover { text-decoration: underline; }
+.corr-next { grid-column: 2 / -1; display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink); }
+.corr-hours { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.corr-hours > div { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border: 1px solid var(--rule); border-radius: 10px; background: #f6f8fb; }
+.corr-hours > div.is-new { background: #eff6ff; border-color: var(--brand-border); }
+.corr-hours .k { display: block; font-size: 12px; color: var(--ink-2); margin-bottom: 2px; }
+.corr-hours .ch-main { font-size: 22px; line-height: 1.25; font-weight: 700; color: var(--ink); }
+.corr-hours .ch-main.ch-quiet { font-size: 16px; line-height: 1.6; font-weight: 500; color: var(--ink-2); }
+.corr-hours .ch-sub { font-size: 15px; color: var(--ink); }
+.corr-hours .ch-diff { margin-top: 2px; font-size: 13.5px; font-weight: 700; color: var(--brand-ink); }
+.corr-hours .ch-sub:empty, .corr-hours .ch-diff:empty { display: none; }
+.corr-panel .detail-head.corr-hours-head { color: var(--ink); font-weight: 700; }
+.corr-panel .cf-reasons button[aria-pressed="true"] { background: var(--brand); color: #fff; border-color: var(--brand); }
+.corr-seen { margin-top: 6px; }
+.corr-panel { padding-bottom: 0; }
+.corr-foot { position: sticky; bottom: 0; margin: 16px calc(-1 * var(--sp-5)) 0; padding: 12px var(--sp-5) 16px; background: #fff;
+             border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end; }
+.corr-foot .cf-err { flex-basis: 100%; margin: 0; }
+.corr-foot .corr-ask { margin: 0; flex: 1 1 100%; }
+/* Save is off until a time has changed and a reason is given: it must look off */
+.corr-foot .btn:disabled { opacity: 0.4; cursor: default; filter: none; }
+.corr-remove { margin-top: 14px; }
+.corr-remove button { color: var(--danger-ink); border-color: #fecaca; }
+@media (max-width: 760px) { .corr-panel { width: 100vw; border-left: 0; } }
+/* ---- Remove Shift (owner, 27 Oct 2026; DB 0128) -----------------------------
+   The drawer by shift, a removed shift struck through, the panel's shift choices. */
+.shift-cell.is-removed { text-decoration: line-through; color: var(--ink-3); }
+.shift-group { padding: 8px 0 4px; border-top: 1px solid var(--rule); }
+.shift-group:first-child { border-top: 0; }
+.shift-group .sg-head { margin: 0 0 2px; font-size: 13.5px; color: var(--ink); }
+.shift-group .sg-title { font-weight: 700; }
+.shift-group .sg-tag { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; background: #eef1f6; color: var(--ink-2); font-size: 12px; font-weight: 600; }
+.shift-group.is-removed .sg-title, .shift-group.is-removed .pl-time { text-decoration: line-through; color: var(--ink-3); }
+.shift-group .sg-why { margin: 2px 0 0; }
+.sp-list { display: flex; flex-direction: column; gap: 6px; }
+.sp-choice { display: grid; grid-template-columns: 22px 1fr auto; align-items: center; gap: 8px; min-height: 40px; padding: 6px 12px;
+             border: 1px solid var(--line-strong); border-radius: 10px; background: #fff; cursor: pointer; font-size: 14px; }
+.sp-choice.is-on { border-color: var(--brand); background: #eff6ff; }
+.sp-choice.is-off { color: var(--ink-3); cursor: default; }
+.sp-choice .sp-side { font-size: 12.5px; color: var(--ink-2); text-align: right; }
+.sp-choice .sp-side.is-warn { color: var(--warn-ink); }
+.corr-panel .sp-sunday { margin: 8px 0 0; color: var(--ink); font-weight: 600; }
+@media print {
+  .corr-panel, .row-menu, .row-more { display: none !important; }
+  .att-review, .att-words, .att-help { display: none !important; }
+  body.att-readable .print-only { display: block !important; }
+  body.att-readable .pay-no { background: #fff !important; border: 1px solid #000; border-radius: 999px; padding: 1px 6px; font-size: 10.5px; }
+  body.att-readable .facts, body.att-readable .loc { color: #333 !important; }
+}
