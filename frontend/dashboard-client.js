@@ -54,8 +54,10 @@
    await Dash.getMachineActivity()                -> last 14 days of daily machine reports
    await Dash.getShifts(dateYYYYMMDD, projectId?) -> who worked that day (punch data)
    await Dash.getShiftsRange(from, to, projectId?) -> the same rows over a date range (max 62
-                                                     days) in ONE call; resolves to null when the
-                                                     database has no such function yet (pre-0101)
+                                                     days), read a week at a time and paged, checked
+                                                     against the database's count — complete or it
+                                                     throws (code incomplete_read); resolves to null
+                                                     when the database has no such function (pre-0101)
    await Dash.getSitesMissingGeofence()           -> active sites with workers but no GPS set
    await Dash.getRecentPunches(dateYYYYMMDD, projectId?, limit?) -> raw punch list
    await Dash.getLeaveBalances(year)              -> per-worker leave balance rows
@@ -898,20 +900,98 @@
     }));
   }
 
-  // The same rows as getShifts, over a date range, in one round trip (DB 0101).
+  // The same rows as getShifts, over a date range (DB 0101) — COMPLETE, or an
+  // error. Never a short answer.
+  //
+  // Why (27 Oct 2026): the API hands back at most a set number of rows per
+  // request (Supabase "Max Rows", 1,000 today) and drops the rest WITHOUT an
+  // error. October 2026 passed 1,000 worker-days across all sites, and the
+  // Month view and the payroll Excel quietly stopped part-way through the
+  // 21st. So the range is read in pieces of a week, each piece is paged, and
+  // the database's own row count (count=exact) is the test of completeness:
+  //   - each piece is read until its rows reach the count, in a fixed order
+  //     (work day, then worker), so pages cannot overlap or skip;
+  //   - the count changing while a piece is read (a punch landed) re-reads
+  //     that piece, up to three times;
+  //   - no count, a page that stops short, a row outside the piece's dates or
+  //     the same worker-day twice FAILS the whole read (code incomplete_read).
+  // The pages print that error instead of totals, so a short month is never
+  // shown and a short payroll file is never built. The page size is only an
+  // ask: a server that answers fewer rows per request is paged just the same.
+  //
   // Resolves to NULL — not an error — when the database does not have the
-  // function yet, so the caller can fall back to asking day by day and this
-  // frontend can ship before or after the migration. Every other failure
-  // (not authorised, range too long, expired login) still throws as usual.
+  // function yet (pre-0101), so the caller falls back to asking day by day.
+  // Every other failure (not authorised, range too long, expired login)
+  // still throws as usual.
+  var RANGE_PIECE_DAYS = 7;
+  var RANGE_PAGE_ROWS = 1000;
+  function incompleteRead(why) {
+    var e = new Error("The month could not be read in full, so nothing is shown. Try again.");
+    e.code = "incomplete_read";
+    e.details = why;
+    return e;
+  }
+  function rangePieces(from, to) {
+    var out = [], d = new Date(from + "T00:00:00Z"), end = new Date(to + "T00:00:00Z");
+    while (d <= end) {
+      var a = d.toISOString().slice(0, 10);
+      var b = new Date(Math.min(end.getTime(), d.getTime() + (RANGE_PIECE_DAYS - 1) * 86400000)).toISOString().slice(0, 10);
+      out.push([a, b]);
+      d = new Date(b + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + 1);
+    }
+    return out;
+  }
+  async function readRangePiece(from, to, projectId, attempt) {
+    var rows = [], total = null;
+    for (;;) {
+      var res = await sb.rpc("get_shifts_range", { p_from: from, p_to: to, p_project_id: projectId || null }, { count: "exact" })
+        .order("work_date", { ascending: true }).order("staff_id", { ascending: true })
+        .range(rows.length, rows.length + RANGE_PAGE_ROWS - 1);
+      if (res.error) {
+        if (isAuthExpired(res.error)) { await signOutQuiet(); window.location.replace("login.html"); }
+        throw res.error;
+      }
+      if (!Number.isFinite(res.count) || res.count < 0) throw incompleteRead("no row count for " + from + ".." + to);
+      if (total === null) total = res.count;
+      else if (res.count !== total) {              // the range changed between pages: read the piece again
+        if ((attempt || 1) < 3) return readRangePiece(from, to, projectId, (attempt || 1) + 1);
+        throw incompleteRead("still changing after 3 reads: " + from + ".." + to);
+      }
+      var page = res.data || [];
+      rows = rows.concat(page);
+      if (rows.length >= total) break;
+      if (!page.length) throw incompleteRead("stopped at " + rows.length + " of " + total + ": " + from + ".." + to);
+    }
+    if (rows.length !== total) throw incompleteRead(rows.length + " rows for a count of " + total + ": " + from + ".." + to);
+    rows.forEach(function (r) {
+      var day = String(r.work_date || "").slice(0, 10);
+      if (day < from || day > to) throw incompleteRead("a row for " + day + " in " + from + ".." + to);
+    });
+    return rows;
+  }
   async function getShiftsRange(from, to, projectId) {
+    var pieces = rangePieces(from, to), got;
     try {
-      return await q(sb.rpc("get_shifts_range", {
-        p_from: from, p_to: to, p_project_id: projectId || null
-      }));
+      got = await Promise.all(pieces.map(function (p) { return readRangePiece(p[0], p[1], projectId); }));
     } catch (e) {
       if (isMissingFunction(e)) return null;
       throw e;
     }
+    var all = [], seen = {};
+    got.forEach(function (rows) { all = all.concat(rows); });
+    all.forEach(function (r) {
+      var k = r.staff_id + "|" + String(r.work_date).slice(0, 10);
+      if (seen[k]) throw incompleteRead("twice: " + k);
+      seen[k] = true;
+    });
+    // the function's own order: work day, then name (the pages group and sort from here)
+    return all.sort(function (a, b) {
+      var da = String(a.work_date).slice(0, 10), db = String(b.work_date).slice(0, 10);
+      if (da !== db) return da < db ? -1 : 1;
+      var na = String(a.full_name || ""), nb = String(b.full_name || "");
+      if (na !== nb) return na < nb ? -1 : 1;
+      return String(a.staff_id) < String(b.staff_id) ? -1 : 1;
+    });
   }
 
   // ---- forgotten punch-outs (0084) ---------------------------------------
