@@ -113,13 +113,20 @@
            downloads them separately. Short names here (owner, D1, 28 Oct 2026);
            the full legal names stay on the Excel, the Download panel and paper.
            Hidden until the page knows who works for whom. -->
-      <label class="field" id="lbl-company" hidden><span class="k">Company</span>
-        <select id="f-company">
+      <!-- drawn like the Site picker: the browser's own drop-down list is painted by
+           the system in its own font and box, and no stylesheet reaches it -->
+      <div class="site-pick" id="lbl-company" hidden>
+        <button type="button" class="field field-btn field-co" id="company-btn" aria-haspopup="listbox" aria-expanded="false" aria-controls="company-pop">
+          <span class="k">Company</span><span class="v" id="company-word">All</span><span class="chev" aria-hidden="true"></span></button>
+        <div class="site-pop co-pop" id="company-pop" hidden>
+          <ul class="site-list" id="company-list" role="listbox" aria-label="Company" tabindex="-1"></ul>
+        </div>
+        <select id="f-company" hidden tabindex="-1" aria-hidden="true">
           <option value="">All</option>
           <option value="HF-BP">HF Bored Piles</option>
           <option value="Hai Fu">Hai Fu</option>
         </select>
-      </label>
+      </div>
       <button type="button" class="btn att-btn att-clear" id="btn-clear" hidden>
         <span aria-hidden="true">&times;</span> Clear Filters</button>
     </div>
@@ -852,6 +859,8 @@
         none.hidden = true;
       }
       if (tbodyId === "month-rows") updateMonthTotals();
+      var co = document.getElementById("f-company");
+      document.getElementById("company-word").textContent = co.selectedIndex >= 0 ? co.options[co.selectedIndex].text : "All";
       paintShowing(shown, total, q, company);
       renderStatus();                                  // the Company chosen changes the counts
       // keep the search across a date or site change, without a reload
@@ -2359,6 +2368,7 @@
       var companyEl = document.getElementById("f-company");
       companyEl.value = params.get("company") || "";
       companyEl.addEventListener("change", refilter);
+      wireCompanyPicker(refilter);
       document.getElementById("att-status").addEventListener("click", function (ev) {
         var b = ev.target.closest ? ev.target.closest("button[data-show]") : null;
         if (!b || b.disabled) return;
@@ -3026,6 +3036,52 @@
       document.addEventListener("click", function (ev) { if (!pop.hidden && !box.contains(ev.target)) close(false); });
       paintWord();
       return { paintWord: paintWord };
+    }
+
+    /* ---- THE COMPANY PICKER (owner, 28 Oct 2026): the Site picker's look, without
+       the typing box (three choices). ↑ ↓ move, Enter picks, Esc closes. The hidden
+       <select> keeps the choice; applyFind writes the word on the button. */
+    function wireCompanyPicker(onPick) {
+      var sel = document.getElementById("f-company"), box = document.getElementById("lbl-company"),
+          btn = document.getElementById("company-btn"), pop = document.getElementById("company-pop"),
+          list = document.getElementById("company-list"), hi = 0;
+      function paint() {
+        list.innerHTML = Array.prototype.map.call(sel.options, function (o, i) {
+          return '<li role="option" id="company-o' + i + '" data-i="' + i + '" class="site-o' + (i === hi ? " hl" : "") +
+                 (o.value === sel.value ? " is-on" : "") + '" aria-selected="' + (i === hi ? "true" : "false") + '">' + esc(o.text) + "</li>";
+        }).join("");
+        list.setAttribute("aria-activedescendant", "company-o" + hi);
+      }
+      function open() {
+        hi = Math.max(0, sel.selectedIndex);
+        pop.hidden = false; btn.setAttribute("aria-expanded", "true");
+        paint(); list.focus();
+      }
+      function close(back) {
+        if (pop.hidden) return;
+        pop.hidden = true; btn.setAttribute("aria-expanded", "false");
+        if (back) btn.focus();
+      }
+      function pick(i) {
+        close(true);
+        if (i === sel.selectedIndex) return;
+        sel.selectedIndex = i;
+        onPick(sel.value);
+      }
+      btn.addEventListener("click", function () { if (pop.hidden) open(); else close(true); });
+      list.addEventListener("keydown", function (ev) {
+        var n = sel.options.length;
+        if (ev.key === "ArrowDown" || ev.key === "ArrowUp") { ev.preventDefault(); hi = (hi + (ev.key === "ArrowDown" ? 1 : n - 1)) % n; paint(); }
+        else if (ev.key === "Home" || ev.key === "End") { ev.preventDefault(); hi = ev.key === "Home" ? 0 : n - 1; paint(); }
+        else if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); pick(hi); }
+        else if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); close(true); }
+        else if (ev.key === "Tab") close(false);
+      });
+      list.addEventListener("click", function (ev) {
+        var li = ev.target.closest ? ev.target.closest("li[data-i]") : null;
+        if (li) pick(Number(li.getAttribute("data-i")));
+      });
+      document.addEventListener("click", function (ev) { if (!pop.hidden && !box.contains(ev.target)) close(false); });
     }
 
     /* ---- THE "⋯" OF THE DAY BAR (D4, 28 Oct 2026): Download Excel sits under it

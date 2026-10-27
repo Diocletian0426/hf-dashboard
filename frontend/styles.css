@@ -3925,7 +3925,7 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
    filter works: groups, a count beside each tick, a footer that stays in view with
    Clear All and Show N Workers. */
 .att-status-wrap { position: relative; }
-.chip.chip-more { color: var(--ink-2); }
+.chip.chip-more { color: var(--ink); }
 .chip.chip-more .chev { width: 6px; height: 6px; margin: 0 1px 3px 2px; transform: rotate(45deg);
                         border-right: 1.6px solid currentColor; border-bottom: 1.6px solid currentColor; }
 .chip.chip-more.has-mf { border-color: var(--brand); color: var(--brand-ink); background: #fff; }
@@ -3961,3 +3961,36 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
 .mf-show { color: #fff; font-weight: 600; background: var(--charcoal); border: 1px solid var(--charcoal); }
 .mf-show:hover { background: #2c3547; }
 .mf-clear:focus-visible, .mf-show:focus-visible, .mf-tick:has(input:focus-visible) { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+/* ---- attendance: ONE SCALE FOR THE TOP (owner, 28 Oct 2026) ------------------
+   Every control in the three rows and on the table's bar: 34 px high, 13 px type,
+   ink-coloured words, the same pill, border and glass, and one chevron. They used
+   to come in 28, 31, 32, 36 and 37 px, in 12.5 and 14 px type, with three kinds
+   of arrow. */
+.att-readable .att-when .view-switch { height: 34px; box-sizing: border-box; padding: 2px; background: rgba(255, 255, 255, 0.75); }
+.att-readable .att-when .view-switch a { display: inline-flex; align-items: center; height: 28px; box-sizing: border-box; padding: 0 15px; font-size: 13px; }
+.att-readable .att-when .stepper { height: 34px; box-sizing: border-box; padding: 2px; background: rgba(255, 255, 255, 0.75); }
+.att-readable .att-when .step-btn { width: 28px; height: 28px; padding: 0 0 3px; font-size: 20px; }
+.att-readable .att-when .step-label { height: 28px; padding: 0 10px; font-size: 13.5px; }
+.att-readable .att-when .att-btn, .att-readable .filters .att-btn, .att-readable .table-bar .att-btn {
+  height: 34px; box-sizing: border-box; padding: 0 15px; gap: 7px; font-size: 13px; color: var(--ink);
+  background: rgba(255, 255, 255, 0.75); border: 1px solid var(--line-strong); }
+.att-readable .att-when .att-btn:hover, .att-readable .filters .att-btn:hover, .att-readable .table-bar .att-btn:hover { background: #fff; color: var(--ink); }
+.att-readable .att-when .att-btn svg { width: 15px; height: 15px; }
+.att-readable .att-when .att-btn.att-primary, .att-readable .att-when .att-btn.att-primary:hover {
+  color: #fff; background: var(--brand); border-color: var(--brand); }
+.att-readable .att-when .att-btn.att-more { width: 42px; padding: 0 0 7px; justify-content: center; font-size: 18px; letter-spacing: 1px; }
+.att-readable .att-when .att-btn.att-more[aria-expanded="true"] { background: #fff; border-color: var(--brand); }
+.att-readable .filters .att-btn.att-clear { border-style: dashed; color: var(--ink-2); }
+.field { height: 34px; }
+.att-readable .filters .field-find input { height: 32px; }
+.chip { height: 34px; padding: 0 14px; }
+.field-co { width: auto; min-width: 176px; }
+.co-pop { width: 230px; }
+.co-pop .site-list { outline: none; }
+/* one chevron everywhere: the Site, the Company, More Filters and the date */
+.step-caret, .field-btn .chev, .chip.chip-more .chev {
+  width: 6px; height: 6px; margin: 0 2px 3px 2px; flex: 0 0 auto; opacity: 0.75; transform: rotate(45deg);
+  border: 0; border-right: 1.6px solid currentColor; border-bottom: 1.6px solid currentColor; }
+.site-o.is-on::after { content: ""; display: inline-block; width: 4px; height: 8px; margin: 0 0 2px 10px; transform: rotate(45deg);
+                       border-right: 1.8px solid var(--brand); border-bottom: 1.8px solid var(--brand); }
