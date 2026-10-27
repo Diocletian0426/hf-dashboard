@@ -3757,8 +3757,10 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
 .rm-item.rm-danger { color: var(--danger-ink); }
 .rm-item.is-off { color: var(--ink-3); cursor: default; }
 .rm-item small { display: block; font-size: 11.5px; color: var(--ink-3); }
-/* a time the office set: a blue asterisk; a short day: amber words (owner, 27 Oct 2026) */
-.t-set { color: var(--brand); font-weight: 700; font-size: 14px; margin-left: 1px; cursor: help; }
+/* a time the office set: the time in blue (an asterisk on paper); a short day: amber words (owner, 27 Oct 2026) */
+.t-set { color: var(--brand-ink); font-weight: 600; cursor: help; }
+.t-set-print { display: none; }
+@media print { .t-set { color: inherit; } .t-set-print { display: inline; } }
 .short-day { color: var(--warn-ink); font-weight: 600; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 /* the panel's layout per the 27 Oct review: Original | Corrected, Current | After, a sticky footer */

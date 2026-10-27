@@ -145,7 +145,7 @@
       <span><span class="pay pay-ok">Priced</span> The day has its figure</span>
       <span><span class="pay pay-progress">In Progress</span> Punched in today, not out yet</span>
       <span><span class="pay pay-removed">Removed</span> The office removed the day's shifts; it pays nothing, the punches stay</span>
-      <span><span class="t">06:00 pm</span><sup class="t-set">*</sup> A time the office set; the worker tapped a different one</span>
+      <span><span class="t t-set">06:00 pm<sup class="t-set-print">*</sup></span> In blue: a time the office set; the worker tapped a different one</span>
       <span><span class="short-day">6h 45m</span> Working hours under 7h 30m</span>
       <span><span class="pay pay-no">Unpriced</span> <span class="facts facts-why">Overlong</span> Over 16 hours; no figure until accepted or ruled on the Exceptions page</span>
       <span><span class="pay pay-no">Unpriced</span> <span class="facts facts-why">No Punch Out</span> Left without a punch-out; no figure until HR rules the finish</span>
@@ -370,16 +370,20 @@
       // The tag is VISIBLE. It used to be a dotted underline explained only on
       // hover — and the people reading this column do not hover, and a tablet
       // cannot.
-      return correctedTs ? '<span class="t-office">' + t + "</span>" + SET_MARK : t;
+      return correctedTs ? setTimeHtml(ts) : t;
     }
 
-    // A TIME THE OFFICE SET (owner, 27 Oct 2026): a blue asterisk, not the word
-    // "Office" — shorter, and the hover says what it means (0092: a ruling must
-    // never read as a tap). The "?" panel explains it; the tap is in the drawer.
-    var SET_MARK = '<sup class="t-set" title="Set by the office; the worker tapped a different time. Open the row to see both.">*</sup>';
+    // A TIME THE OFFICE SET (owner, 27 Oct 2026): the time itself in blue, the
+    // hover saying what it means (0092: a ruling must never read as a tap). Blue
+    // does not show on a black-and-white printout, so print adds an asterisk.
+    // The "?" panel explains it; the tap is in the drawer.
+    function setTimeHtml(ts) {
+      return '<span class="t t-set" title="Set by the office; the worker tapped a different time. Open the row to see both.">' +
+             esc(Dash.klTime(ts)) + '<sup class="t-set-print">*</sup></span>';
+    }
 
     // THE SHIFT IN ONE CELL (Round 1): "07:52 am – 05:14 pm", a small +1 when the
-    // finish fell on the next day, and the asterisk on the end the office set.
+    // finish fell on the next day, and the end the office set in blue.
     function shiftCell(r) {
       var tin = effIn(r), tout = effOut(r);
       if (!tin && !tout && r.all_removed) {         // 0128: every shift removed — its times, struck through
@@ -389,10 +393,9 @@
       }
       if (!tin && !tout) return "—";
       var day = String(r.work_date || "").slice(0, 10);
-      var a = tin ? '<span class="t">' + esc(Dash.klTime(tin)) + "</span>" + (r.corrected_in_at ? SET_MARK : "") : "—";
-      var b = tout ? '<span class="t">' + esc(Dash.klTime(tout)) + "</span>" +
-                     (day && klInputValue(tout).slice(0, 10) > day ? '<sup class="next-day" title="The next day">+1</sup>' : "") +
-                     (r.corrected_out_at ? SET_MARK : "") : "—";
+      var a = tin ? (r.corrected_in_at ? setTimeHtml(tin) : '<span class="t">' + esc(Dash.klTime(tin)) + "</span>") : "—";
+      var b = tout ? (r.corrected_out_at ? setTimeHtml(tout) : '<span class="t">' + esc(Dash.klTime(tout)) + "</span>") +
+                     (day && klInputValue(tout).slice(0, 10) > day ? '<sup class="next-day" title="The next day">+1</sup>' : "") : "—";
       return '<span class="shift-cell">' + a + ' <span class="muted">–</span> ' + b + "</span>";
     }
 
