@@ -144,7 +144,8 @@
     if (dom === 19 && w.name.indexOf("Thor") === 0) {
       row.last_out_at = stamp(iso, 24 + 9.4);
       row.hours_on_site = Math.round((24 + 9.4 - inAt) * 100) / 100;
-      row.overlong_shift = true;
+      row.long_shift = true;                                  // 0124/0126: over 16 h, waits for Accept As Punched
+      row.overlong_shift = false;                             // 0126 retired the old 22 h flag (always false now)
       row.working_minutes = null; row.ot_minutes = null;      // over the limit = unpriced
     }
     // punched from outside the fence
