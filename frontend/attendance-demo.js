@@ -39,8 +39,8 @@
     { name: "Hulk (demo)",            site: 1, start: 7.75, len: 11.5 },   // heavy overtime
     { name: "Thor (demo)",            site: 1, start: 8.2,  len: 9.0 },
     { name: "Hawkeye (demo)",         site: 1, start: 8.0,  len: 7.4 },    // short days
-    { name: "Falcon (demo)",          site: 2, start: 7.85, len: 9.6 },
-    { name: "Scarlet Witch (demo)",   site: 2, start: 8.05, len: 9.1 }
+    { name: "Falcon (demo)",          site: 2, start: 7.85, len: 9.6, company: "Hai Fu" },
+    { name: "Scarlet Witch (demo)",   site: 2, start: 8.05, len: 9.1, company: "Hai Fu" }
   ];
 
   // A fixed wobble per worker per day — no Math.random, so a reload shows the
@@ -120,7 +120,7 @@
       staff_id: "demo-" + w.name,      // real rows carry a uuid; the page keys on it
       working_minutes: price ? price.working : null,
       ot_minutes: price ? price.ot : null,
-      company_code: "HF-BP",
+      company_code: w.company || "HF-BP",
       day_kind: dayOf(iso) === 6 && dom % 9 === 4 ? "rest" : "normal",   // the odd Saturday stands in for a rest day
       full_name: w.name,
       project_id: siteRow.id,
@@ -271,8 +271,13 @@
     }
     return out;
   };
-  // the codes lookup is a real read too — the demo crew has no codes
+  // the codes lookup is a real read too — the demo crew has no codes (the page
+  // learns each worker's company from the day rows)
   Dash.getManpowerBySite = async function () { return []; };
+  // the site picker's list: the demo's own three sites, not the real directory
+  Dash.getProjectDirectory = async function () {
+    return SITES.map(function (s) { return { project_id: s.id, project_code: s.code, project_name: s.name, status: "active" }; });
+  };
   Dash.getRecentPunches = async function (date, projectId) {
     var out = [];
     shiftsOn(date, projectId || null).forEach(function (r) { out = out.concat(punchesFor(r)); });

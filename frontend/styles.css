@@ -3365,8 +3365,6 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
   position: absolute; left: 0; bottom: 0; width: 1px; height: 1px;
   opacity: 0; pointer-events: none; border: 0; padding: 0; margin: 0;
 }
-.att-narrow select { width: 300px; max-width: 100%; }
-.att-readable .att-narrow .filter-box { width: 300px; }
 
 /* ---- attendance: the month's TOTAL row ---------------------------------- */
 .att-table tfoot .total-row td {
@@ -3495,9 +3493,6 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
 .att-readable .fix-link:hover { text-decoration: underline; }
 @media print { body.att-readable .fix-link { display: none !important; } }
 
-/* the Company filter is a short list - it does not need the Site box's width */
-.att-narrow #f-company { width: 210px; }
-
 /* ---- attendance: the Employee Code column --------------------------------
    Code | Worker | Site read as text, left-aligned; everything after is a fact
    about the day, centred under its heading. The chevron that says "this row
@@ -3609,9 +3604,6 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
   .att-readable .filters label { color: var(--ink-2); }
   .att-readable .filters select,
   .att-readable .filters .filter-box { font-size: 13px; padding: 7px 14px; }
-  .att-readable .att-narrow select { width: 220px; }
-  .att-readable .att-narrow #f-company { width: 190px; }
-  .att-readable .att-narrow .filter-box { width: 260px; }
 
   /* row 1: Day/Month, the stepper and the buttons, at Manpower's pill size */
   .att-when { gap: var(--sp-2); }
@@ -3679,18 +3671,9 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
 .att-readable .legend-list .pay, .att-readable .legend-list .loc, .att-readable .legend-list .facts { flex: 0 0 auto; display: inline-block; margin: 0; }
 .att-readable .day-link { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--line-strong); }
 .att-readable .day-link:hover { color: var(--brand-ink); }
-.att-review { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 8px; margin: 0 0 var(--sp-3); padding: 0 4px; font-size: 14.5px; color: var(--ink-2); }
-.att-review .rv-label { color: var(--ink); font-weight: 600; }
-.att-review .rv-word { color: var(--ink); text-decoration: none; border-bottom: 1px dotted var(--line-strong); }
-.att-review .rv-word:hover { color: var(--brand-ink); }
-.att-review .rv-word.is-zero { color: var(--ink-3); border-bottom-color: transparent; }
-.att-review .rv-why { color: var(--ink-2); }
-.att-review .rv-queue { margin-left: auto; color: var(--brand-ink); font-weight: 600; text-decoration: none; }
 .att-readable .unpriced-note { color: var(--ink); }
 .dl-progress { color: var(--ink-2); }
-/* the "?" panel (the legend on request) and the legend as the print key only */
-.att-readable .att-help { width: 40px; height: 40px; padding: 0; justify-content: center; border-radius: 50%; font-weight: 700; font-size: 17px; }
-.att-readable .filters.att-narrow { position: relative; }
+/* the "What The Words Mean" panel (the legend on request) and the legend as the print key only */
 .att-words { position: absolute; right: 0; top: calc(100% + 8px); z-index: 40; width: min(640px, 100%); padding: 14px 16px 8px;
             background: #fff; border: 1px solid var(--line-strong); border-radius: var(--r-lg); box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14); outline: none; }
 .att-words .help-x { position: absolute; right: 10px; top: 8px; }
@@ -3834,8 +3817,105 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
 .corr-panel .sp-sunday { margin: 8px 0 0; color: var(--ink); font-weight: 600; }
 @media print {
   .corr-panel, .row-menu, .row-more { display: none !important; }
-  .att-review, .att-words, .att-help { display: none !important; }
+  .att-head-side, .att-words, .att-status, .att-status-note, .table-bar { display: none !important; }
   body.att-readable .print-only { display: block !important; }
   body.att-readable .pay-no { background: #fff !important; border: 1px solid #000; border-radius: 999px; padding: 1px 6px; font-size: 10.5px; }
   body.att-readable .facts, body.att-readable .loc { color: #333 !important; }
 }
+
+/* ---- attendance: THE TOP OF THE PAGE (owner's go, 28 Oct 2026) --------------
+   The title with "What The Words Mean" and the Exceptions queue beside it; row 1
+   WHEN (Day / Month, the date — pressed, the calendar — and the actions for the
+   view); row 2 WHICH (Find, Site, Company: pills that carry their own small
+   label); row 3 the status buttons with their counts; then the table's own bar.
+   Laptop-first, 1366–1440 px; below about 1200 px the rows wrap, never squeeze. */
+.att-head { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 0 var(--sp-5); }
+.att-head-main { min-width: 0; }
+.att-head-side { position: relative; display: flex; align-items: center; gap: var(--sp-4); margin: 0 0 var(--sp-5); }
+.att-help { display: inline-flex; align-items: center; gap: 7px; padding: 6px 2px; border: 0; background: none; cursor: pointer;
+            font-family: var(--font); font-size: 13px; color: var(--ink-2); }
+.att-help:hover, .att-help[aria-expanded="true"] { color: var(--ink); }
+.att-help:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 6px; }
+.att-help-q { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%;
+              border: 1px solid var(--line-strong); background: #fff; font-size: 12px; font-weight: 700; color: var(--ink); }
+#exc-link:empty { display: none; }        /* a login that may not correct: no gap where the link would be */
+.exc-link { font-size: 13.5px; font-weight: 600; color: var(--brand-ink); text-decoration: none; white-space: nowrap; }
+.exc-link:hover { text-decoration: underline; }
+.att-head-side .att-words { top: calc(100% + 6px); right: 0; width: min(640px, calc(100vw - 32px)); }
+
+/* row 1: the date is a button now — it opens the calendar */
+.att-readable .step-label { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 30px; margin: 0;
+              border: 0; border-radius: var(--r-pill); background: none; cursor: pointer; font-family: var(--font); }
+.att-readable .step-label:hover, .att-readable .step-label:focus-visible { background: rgba(37, 99, 235, 0.08); color: var(--brand-ink); outline: none; }
+.step-caret { width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid currentColor; opacity: 0.6; }
+.att-actions { margin-left: auto; display: inline-flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); }
+/* Month's Download Excel: the one filled button in the bar, the payroll action */
+.att-readable .att-btn.att-primary, .att-readable .att-btn.att-primary:hover {
+  background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 600; }
+.att-readable .att-btn.att-primary:hover { filter: brightness(0.93); }
+.att-readable .att-btn.att-more { padding: 2px 13px 8px; font-size: 19px; line-height: 1; letter-spacing: 1px; }
+.att-readable .att-btn.att-more[aria-expanded="true"] { background: #fff; color: var(--ink); }
+
+/* row 2: Find, Site, Company */
+.att-readable .filters.att-narrow { gap: var(--sp-2); margin-bottom: var(--sp-3); }
+.field { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 4px 0 14px; box-sizing: border-box; margin: 0;
+         border: 1px solid var(--line-strong); border-radius: var(--r-pill); background: rgba(255, 255, 255, 0.75);
+         font-family: var(--font); font-size: 13px; color: var(--ink); }
+.field:focus-within { border-color: var(--brand); box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.14); }
+.field .k { font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-2); white-space: nowrap; }
+.att-readable .filters .field select { height: 34px; min-height: 0; padding: 0 30px 0 2px; border: 0; background-color: transparent;
+              background-position: right 10px center; font-size: 13px; color: var(--ink); cursor: pointer; }
+.att-readable .filters .field select:focus { outline: none; }
+.field-find { flex: 1 1 260px; max-width: 520px; padding-right: 14px; color: var(--ink-2); }
+.field-find input { flex: 1 1 auto; min-width: 0; height: 34px; padding: 0; border: 0; background: transparent; outline: none;
+                    font-family: var(--font); font-size: 13px; color: var(--ink); }
+.field-find input::placeholder { color: var(--ink-3); }
+.field-btn { width: 300px; padding-right: 14px; cursor: pointer; text-align: left; }
+.field-btn:hover { background: #fff; }
+.field-btn .v { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.field-btn .chev { flex: 0 0 auto; width: 6px; height: 6px; margin: 0 2px 3px 0; transform: rotate(45deg);
+                   border-right: 1.7px solid var(--ink-2); border-bottom: 1.7px solid var(--ink-2); }
+.field-btn[aria-expanded="true"] { border-color: var(--brand); background: #fff; }
+.field-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+.site-pick { position: relative; display: inline-flex; min-width: 0; }
+.site-pop { position: absolute; z-index: 60; top: calc(100% + 6px); left: 0; width: 440px; max-width: calc(100vw - 32px); padding: 6px;
+            box-sizing: border-box; background: #fff; border: 1px solid var(--line-strong); border-radius: 12px;
+            box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14); }
+.site-pop input { display: block; width: 100%; box-sizing: border-box; height: 36px; margin: 0 0 6px; padding: 0 12px;
+                  border: 1px solid var(--brand); border-radius: var(--r-pill); outline: none;
+                  font-family: var(--font); font-size: 13.5px; color: var(--ink); }
+.site-list { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow-y: auto; }
+.site-o { padding: 7px 10px; border-radius: 7px; font-size: 13.5px; line-height: 1.4; color: var(--ink); cursor: pointer;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.site-o.hl { background: #eef4ff; }
+.site-o.is-on { font-weight: 600; }
+.site-o mark { background: var(--amber-soft); color: inherit; border-radius: 2px; }
+.site-none { padding: 8px 10px; font-size: 13px; color: var(--ink-2); }
+.att-readable .att-btn.att-clear { border-style: dashed; }
+
+/* row 3: the status buttons. Pay states, a line, the location state; a count of
+   0 stays pressable, greyed; only Unpriced's count is amber */
+.att-status { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-height: 34px; margin: 0 0 var(--sp-2); }
+.att-status .chips { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 13px; margin: 0;
+        border: 1px solid var(--line-strong); border-radius: var(--r-pill); background: rgba(255, 255, 255, 0.75);
+        font-family: var(--font); font-size: 13px; color: var(--ink); cursor: pointer; white-space: nowrap;
+        transition: background 0.15s ease, border-color 0.15s ease; }
+.chip b { font-weight: 700; font-variant-numeric: tabular-nums; }
+.chip:hover { background: #fff; border-color: rgba(15, 42, 84, 0.28); }
+.chip:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+.chip-amber b { color: var(--warn-ink); }
+.chip.is-zero, .chip.is-zero b { color: var(--ink-3); }
+.chip.on { background: var(--charcoal); border-color: var(--charcoal); color: #fff; }
+.chip.on b { color: #fff; }
+.chip.chip-amber.on b { color: var(--amber-soft); }
+.chip:disabled { cursor: default; opacity: 0.6; }
+.chip-div { width: 1px; height: 20px; margin: 0 4px; background: var(--line-strong); }
+.att-pending { margin-left: auto; font-size: 13px; font-weight: 600; color: var(--brand-ink); text-decoration: none; white-space: nowrap; }
+.att-pending:hover { text-decoration: underline; }
+.att-status-note { margin: 0 0 var(--sp-2); font-size: 12.5px; color: var(--ink-2); }
+
+/* the table's own bar: what is showing, and Show Every Punch */
+.table-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); min-height: 34px;
+             margin: var(--sp-2) 0 6px; font-size: 13px; color: var(--ink-2); }
+.table-bar .muted { color: var(--ink-3); }
