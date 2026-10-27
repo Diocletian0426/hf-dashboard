@@ -1143,6 +1143,23 @@
       var s = CorrectForm.start(CORR.spec), f = CORR.form;
       return f.tIn !== s.tIn || f.tOut !== s.tOut || !!f.next !== !!s.next || !!f.why;
     }
+    // has this end moved from what stands (the tap, or the office's ruling)? An
+    // emptied box keeps what stands, as CorrectForm.read does.
+    function corrEdited(k) {
+      var s = CorrectForm.start(CORR.spec), f = CORR.form;
+      if (k === "tIn") return !!f.tIn && f.tIn !== s.tIn;
+      return !!f.tOut && (f.tOut !== s.tOut || !!f.next !== !!s.next);
+    }
+    // Save is live only when a time has changed AND a reason is given (owner,
+    // 27 Oct 2026). Times that do not read still say why on the click.
+    function corrCanSave() {
+      return !CORR.busy && (corrEdited("tIn") || corrEdited("tOut")) && !!String(CORR.form.why || "").trim();
+    }
+    // the small word under a Corrected time: Changed here, a ruling standing, or the tap
+    function corrStateWord(k) {
+      var st = CorrectForm.standing(CORR.spec);
+      return corrEdited(k) ? "Changed" : (k === "tIn" ? st.ruledIn : st.ruledOut) ? "Set By Office" : "Unchanged";
+    }
     function corrClose(force) {
       if (!CORR.open) return;
       if (!force && corrDirty()) { CORR.askClose = true; corrRender(); return; }
@@ -1183,8 +1200,10 @@
       if (punch && punch.synced_late) extra.push("Synced Late");
       if (punch && punch.wrong_site) extra.push("Wrong Site" + (punch.detected_project_code ? " · " + punch.detected_project_code : ""));
       var note = (punch && punch.punched_by !== "system" && v !== "auto_closed") ? capFirst(punch.entry_note) : "";
+      // a check that is not Confirmed reads amber HERE (owner, 27 Oct 2026); the tables keep it grey
+      var warn = !!punch && words !== "Auto Closed" && words !== "Office" && (v !== "verified" || !!punch.wrong_site);
       return '<span class="orig-time">' + esc(Dash.klTime(ts)) + "</span>" +
-             (words ? '<span class="orig-check" title="' + esc(CHECK_HOVER[v] || "") + '">' +
+             (words ? '<span class="orig-check' + (warn ? " is-warn" : "") + '" title="' + esc(CHECK_HOVER[v] || "") + '">' +
                       esc([words + (d ? " · " + d : "")].concat(extra).join(" · ")) + mapLink(punch) + "</span>" : "") +
              (note ? '<span class="orig-check">Note: ' + esc(note) + "</span>" : "");
     }
@@ -1214,36 +1233,44 @@
       var outChanged = editable && !!f.tOut && (f.tOut !== CorrectForm.klHHMM(tapOut) || !!f.next !== (CorrectForm.klDate(tapOut) > s.workDate));
       var dis = CORR.busy ? " disabled" : "";
       var bad = function (k) { return CORR.invalid === k ? ' aria-invalid="true"' : ""; };
-      // the Corrected column reads like the Original: the time in the same type and
-      // a small line under it saying what it is; the time is still a time box
-      var st0 = CorrectForm.standing(s);
-      function corrCell(k, val, changed, ruled, eff) {
+      // the Corrected column reads like the Original: the time in the same type, in a
+      // quiet box so it reads as editable, and a word under it — Unchanged / Changed /
+      // Set By Office (owner, 27 Oct 2026)
+      function corrCell(k, val, eff) {
         if (!editable) return '<span class="orig-time">' + (eff ? esc(Dash.klTime(eff)) : "—") + "</span>";
         return '<input type="time" class="corr-time" data-cf="' + k + '" step="60" value="' + esc(val) + '"' + bad(k) + dis + ">" +
-               '<span class="orig-check corr-state" data-state="' + k + '">' + (changed ? "Changed" : ruled ? "Set By Office" : "As Tapped") + "</span>";
+               '<span class="orig-check corr-state" data-state="' + k + '">' + corrStateWord(k) + "</span>";
       }
-      var corrIn = corrCell("tIn", f.tIn, inChanged, !!st0.ruledIn, effIn(r));
-      var corrOut = corrCell("tOut", f.tOut, outChanged, !!st0.ruledOut, effOut(r));
+      var corrIn = corrCell("tIn", f.tIn, effIn(r));
+      var corrOut = corrCell("tOut", f.tOut, effOut(r));
+      // a correction rules the times; the location check stays what it was (owner, 27 Oct 2026)
+      var lc = locOf(r);
+      var locLine = editable && lc.key === "bad"
+        ? '<p class="detail-note corr-loc">Location stays ' + esc(lc.word) + ". A correction changes the times only.</p>" : "";
       var times = '<p class="detail-head">Punch Times</p>' +
         '<div class="corr-grid">' +
           '<span></span><span class="gh">Original</span><span class="gh">Corrected</span>' +
           '<span class="gk">In</span><div data-cell="in"' + (inChanged ? ' class="changed"' : "") + ">" + origCell(tapIn, pin) + "</div><div data-cell=\"in-new\"" + (inChanged ? ' class="changed"' : "") + ">" + corrIn + "</div>" +
           '<span class="gk">Out</span><div data-cell="out"' + (outChanged ? ' class="changed"' : "") + ">" + origCell(tapOut, pout) + "</div><div data-cell=\"out-new\"" + (outChanged ? ' class="changed"' : "") + ">" + corrOut + "</div>" +
           (editable ? '<label class="corr-next"><input type="checkbox" data-cf="next"' + (f.next ? " checked" : "") + dis + "> Punch Out Was The Next Day (" + esc(friendlyDate(shiftDay(s.workDate, 1))) + ")</label>" : "") +
-        "</div>";
+        "</div>" + locLine;
 
-      // Hours: the figure now, and the figure the ruling would give (from the database)
-      var cur = h ? hm(h.normal) + " + " + hm(h.ot) + " OT"
-              : (p.key === "unpriced" ? "Unpriced" + (p.why && p.why !== "Unpriced" ? " · " + p.why : "") : p.word);
-      var hours = '<p class="detail-head">Hours</p><div class="corr-hours">' +
-        '<div><span class="k">Current</span><b>' + esc(cur) + "</b></div>" +
-        '<div><span class="k">' + (CORR.mode === "undo" ? "After Undoing" : acting ? "After Accepting" : "After Correction") + '</span><b id="corr-preview">—</b></div></div>';
+      // Hours: the figure now, and the figure the ruling would give (from the database).
+      // The payroll consequence, so the strongest type in the panel; hours over
+      // overtime, each on its own line (owner, 27 Oct 2026)
+      var curMain = h ? hm(h.normal) : (p.key === "unpriced" ? "Unpriced" : p.word);
+      var curSub = h ? "+ " + hm(h.ot) + " OT" : (p.key === "unpriced" && p.why && p.why !== "Unpriced" ? p.why : "");
+      var hours = '<p class="detail-head corr-hours-head">Hours</p><div class="corr-hours">' +
+        '<div><span class="k">Current</span><b class="ch-main' + (h ? "" : " ch-quiet") + '">' + esc(curMain) + "</b>" +
+          '<span class="ch-sub">' + esc(curSub) + "</span></div>" +
+        '<div id="corr-after"><span class="k">' + (CORR.mode === "undo" ? "After Undoing" : acting ? "After Accepting" : "After Correction") + "</span>" +
+          '<b class="ch-main ch-quiet" data-after="main"></b><span class="ch-sub" data-after="sub"></span><span class="ch-diff" data-after="diff"></span></div></div>';
 
       // Reason: a chip fills the box and lights; the office may add to it
       var reason = "";
       if (editable) {
         reason = '<p class="detail-head">Reason</p>' +
-          '<div class="cf-reasons">' + CorrectForm.REASONS.map(function (x) {
+          '<div class="cf-reasons">' + CorrectForm.reasonsFor(s).map(function (x) {
             var on = String(f.why || "").indexOf(x) === 0;
             return '<button type="button" data-cf-reason="' + esc(x) + '" aria-pressed="' + (on ? "true" : "false") + '"' + dis + ">" + esc(x) + "</button>";
           }).join("") + "</div>" +
@@ -1288,32 +1315,66 @@
           : '<div class="corr-foot">' +
             '<div class="cf-err" role="alert">' + esc(CORR.err || "") + "</div>" +
             '<button type="button" class="btn" data-cf-cancel' + dis + ">Cancel</button>" +
-            '<button type="button" class="btn btn-primary" data-cf-save' + (CORR.busy || !corrDirty() ? " disabled" : "") + ">" + (CORR.busy ? "Saving…" : "Save Correction") + "</button>" +
+            '<button type="button" class="btn btn-primary" data-cf-save' + (corrCanSave() ? "" : " disabled") + ">" + (CORR.busy ? "Saving…" : "Save Correction") + "</button>" +
             "</div>";
       }
       el.innerHTML = head + note + times + hours + reason + standing + why + details + foot;
       corrPaintPreview();
     }
+    // the After area, one state at a time and never a dash (owner, 27 Oct 2026):
+    //   null      no time has changed       -> No Changes Yet
+    //   pending   asking the database        -> Pricing…
+    //   none      the database predates 0127 -> Priced After Saving
+    //   check     the times do not read      -> Check The Times
+    //   no-out / no-in / overlong            -> Unpriced, and why
+    //   a row     the figure, and what it changes ("+ 30m OT")
+    var AFTER_WHY = { "no-out": "No Punch Out", "no-in": "No Punch In", overlong: "Overlong" };
     function corrPaintPreview() {
-      var el = document.getElementById("corr-preview");
-      if (!el) return;
-      var p = CORR.preview;
-      el.textContent = p === "pending" ? "Pricing…"
-        : (p && typeof p === "object")
-          ? (p.working_minutes === null || p.working_minutes === undefined
-              ? "Unpriced — check the times"
-              : hm(Number(p.working_minutes) / 60) + " + " + hm(Number(p.ot_minutes || 0) / 60) + " OT")
-          : "—";
+      var box = document.getElementById("corr-after");
+      if (!box) return;
+      var p = CORR.preview, main = "", sub = "", diff = "", figure = false;
+      if (p === null || p === undefined) main = CORR.mode === "correct" ? "No Changes Yet" : "Priced After Saving";
+      else if (p === "pending") main = "Pricing\u2026";
+      else if (p === "none") main = "Priced After Saving";
+      else if (p === "check") main = "Check The Times";
+      else if (AFTER_WHY[p]) { main = "Unpriced"; sub = AFTER_WHY[p]; }
+      else if (typeof p === "object") {
+        if (p.working_minutes === null || p.working_minutes === undefined) { main = "Unpriced"; sub = "Check The Times"; }
+        else {
+          figure = true;
+          main = hm(Number(p.working_minutes) / 60);
+          sub = "+ " + hm(Number(p.ot_minutes || 0) / 60) + " OT";
+          diff = hoursDiff(CORR.row, p);
+        }
+      }
+      var m = box.querySelector('[data-after="main"]');
+      m.textContent = main; m.classList.toggle("ch-quiet", !figure);
+      box.querySelector('[data-after="sub"]').textContent = sub;
+      box.querySelector('[data-after="diff"]').textContent = diff;
+      box.classList.toggle("is-new", figure);
+    }
+    // "+ 30m OT", "− 1h 20m": the new figure against the day's own, both the database's
+    function hoursDiff(r, p) {
+      if (r.working_minutes === null || r.working_minutes === undefined) return "";
+      var dn = Number(p.working_minutes) - Number(r.working_minutes), dot = Number(p.ot_minutes || 0) - Number(r.ot_minutes || 0);
+      var sign = function (n) { return n > 0 ? "+ " : "\u2212 "; }, parts = [];
+      if (dn) parts.push(sign(dn) + hm(Math.abs(dn) / 60));
+      if (dot) parts.push(sign(dot) + hm(Math.abs(dot) / 60) + " OT");
+      return parts.length ? parts.join(" · ") : "No Difference";
     }
     // the figure the ruling WOULD give — asked of the database, never worked out here
     async function corrPreview() {
       if (!CORR.open || !CORR.form || !corrEditable(CORR.row)) return;
-      if (CORR.mode !== "correct") {                      // accept: the taps as they are, priced as accepted
-        var rr = CORR.row;
-        if (CORR.mode === "undo" || !rr.first_in_at || !rr.last_out_at) { CORR.preview = null; corrPaintPreview(); return; }
+      if (CORR.mode !== "correct") {                      // accept / keep / undo: the times as paid, priced as the mark would leave them
+        var rr = CORR.row, aIn = effIn(rr), aOut = effOut(rr);
+        // 0124: a shift over 16 h that is not accepted has no figure
+        if (CORR.mode === "undo" && CORR.kind === "long") { CORR.preview = "overlong"; corrPaintPreview(); return; }
+        if (!aOut || !aIn) { CORR.preview = aOut ? "no-in" : "no-out"; corrPaintPreview(); return; }
+        // the early start credited (true), counted from 8 AM (false), or as the shift's own mark (null)
+        var real = (CORR.mode === "undo" || CORR.kind === "early_keep") ? false : CORR.kind === "early" ? true : null;
         CORR.preview = "pending"; corrPaintPreview();
         try {
-          var pr = await Dash.priceShift(rr.staff_id, CORR.spec.workDate, rr.first_in_at, rr.last_out_at, CORR.kind === "early");
+          var pr = await Dash.priceShift(rr.staff_id, CORR.spec.workDate, aIn, aOut, real);
           if (!CORR.open) return;
           CORR.preview = pr === null ? "none" : pr;
         } catch (e) { CORR.preview = "none"; }
@@ -1323,10 +1384,11 @@
       // read the pair with a stand-in reason: a missing reason stops a save, not the figure
       var got = CorrectForm.read(CORR.spec, Object.assign({}, CORR.form, { why: CORR.form.why || "preview" }));
       var st = CorrectForm.standing(CORR.spec);
-      if (got.error) { CORR.preview = null; CORR.previewKey = ""; corrPaintPreview(); return; }
+      // nothing moved: the figure is the one under Current
+      if (!corrEdited("tIn") && !corrEdited("tOut")) { CORR.preview = null; CORR.previewKey = ""; corrPaintPreview(); return; }
+      if (got.error) { CORR.preview = "check"; CORR.previewKey = ""; corrPaintPreview(); return; }
       var tin = got.inISO || st.inAt, tout = got.outISO || st.outAt;
-      // the pair as it stands is the figure already shown: nothing to preview
-      if (!tin || !tout || (tin === st.inAt && tout === st.outAt)) { CORR.preview = null; CORR.previewKey = ""; corrPaintPreview(); return; }
+      if (!tin || !tout) { CORR.preview = tout ? "no-in" : "no-out"; CORR.previewKey = ""; corrPaintPreview(); return; }
       var key = tin + "|" + tout;
       if (key === CORR.previewKey) return;
       CORR.previewKey = key; CORR.preview = "pending"; corrPaintPreview();
@@ -1344,10 +1406,9 @@
       var outChanged = !!f.tOut && (f.tOut !== CorrectForm.klHHMM(r.last_out_at) || !!f.next !== (CorrectForm.klDate(r.last_out_at) > s.workDate));
       ["in", "in-new"].forEach(function (k) { var c = el.querySelector('[data-cell="' + k + '"]'); if (c) c.classList.toggle("changed", inChanged); });
       ["out", "out-new"].forEach(function (k) { var c = el.querySelector('[data-cell="' + k + '"]'); if (c) c.classList.toggle("changed", outChanged); });
-      var st0 = CorrectForm.standing(s);
-      var si = el.querySelector('[data-state="tIn"]');  if (si) si.textContent = inChanged ? "Changed" : st0.ruledIn ? "Set By Office" : "As Tapped";
-      var so = el.querySelector('[data-state="tOut"]'); if (so) so.textContent = outChanged ? "Changed" : st0.ruledOut ? "Set By Office" : "As Tapped";
-      var save = el.querySelector("[data-cf-save]"); if (save) save.disabled = CORR.busy || !corrDirty();
+      var si = el.querySelector('[data-state="tIn"]');  if (si) si.textContent = corrStateWord("tIn");
+      var so = el.querySelector('[data-state="tOut"]'); if (so) so.textContent = corrStateWord("tOut");
+      var save = el.querySelector("[data-cf-save]"); if (save) save.disabled = !corrCanSave();
       var act = el.querySelector('[data-corr="act"]'); if (act) act.disabled = CORR.busy || (CORR.mode === "accept" && CORR.kind !== "early_keep" && !String(f.why || "").trim());
       Array.prototype.forEach.call(el.querySelectorAll("[data-cf-reason]"), function (b) {
         b.setAttribute("aria-pressed", String(f.why || "").indexOf(b.getAttribute("data-cf-reason")) === 0 ? "true" : "false");
