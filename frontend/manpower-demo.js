@@ -19,8 +19,9 @@
 // MUST load AFTER dashboard-client.js and BEFORE shell.js — the shell asks
 // for the login the moment it runs.
 //
-// TO REMOVE once the page is accepted: delete this file and its <script> tag
-// in manpower.html.
+// KEPT behind ?demo=1 for the October release, like attendance-demo.js (29 Oct
+// 2026). TO REMOVE before the punch pilot starts: delete this file and its
+// <script> tag in manpower.html, together with attendance-demo.js.
 // -----------------------------------------------------------------------------
 (function () {
   "use strict";
@@ -165,7 +166,14 @@
   };
   Dash.getWorkerDevices = async function (id) { await wait(150); return copy(dev(id)); };
   // the last 14 days as v_worker_daily_shifts rows: a working day per weekday up
-  // to each worker's last report, unverified when that report was off the record
+  // to each worker's last report, unverified when that report was off the record.
+  // The 0128 shape too (removed_count, all_removed, shifts[].removed): Hawkeye's
+  // last working day before today is a day the office removed.
+  var GONE_DAY = (function () {
+    var n = 1;
+    while (new Date(day(n) + "T00:00:00Z").getUTCDay() === 0) n++;
+    return day(n);
+  })();
   Dash.getShiftsRange = async function (from, to) {
     await wait(200);
     var out = [];
@@ -188,8 +196,16 @@
           correction_reason: corrected ? "Forgot to punch out" : null, corrected_by_name: corrected ? "Maria Hill (demo)" : null,
           corrected_at: corrected ? ts(day(n - 1), "09:10") : null,
           long_shift: false, long_accepted: false, early_start: false, early_accepted: false, under_name: null, worker_note: null,
+          removed_count: 0, all_removed: false,
           shifts: [{ shift_no: 1, in_at: inAt, out_at: outAt, raw_in_at: inAt, raw_out_at: corrected ? ts(d, "23:59") : outAt,
-                     corrected: corrected, closed_by_system: missed, entered_by_office: false, missed: missed }] });
+                     corrected: corrected, closed_by_system: missed, entered_by_office: false, missed: missed,
+                     removed: false, removed_reason: null, removed_by_name: null }] });
+        if (r.staff_id === "demo-hawkeye" && d === GONE_DAY) {    // 0128: every shift removed, priced 0
+          var x = out[out.length - 1];
+          Object.assign(x, { removed_count: 1, all_removed: true, working_minutes: 0, ot_minutes: 0,
+                             first_in_at: null, last_out_at: null, effective_in_at: null, effective_out_at: null });
+          Object.assign(x.shifts[0], { removed: true, removed_reason: "Test Punch", removed_by_name: "Maria Hill (demo)" });
+        }
       }
     });
     return out;
@@ -216,6 +232,8 @@
     var r = row(id); if (!r) throw new Error("staff_not_found");
     if (!r.is_active) throw new Error("staff_inactive");
     if (toId && !site(toId)) throw new Error("project_not_found");
+    // the same site again: live move_staff writes nothing and says so (DB 0039)
+    if ((r.current_project_id || null) === (toId || null)) return { ok: true, no_change: true, full_name: r.full_name };
     moveRow(r, toId, remarks, date);
     return { ok: true, full_name: r.full_name, to_project_code: r.project_code };
   };

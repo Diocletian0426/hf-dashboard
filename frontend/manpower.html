@@ -198,7 +198,7 @@
            - All Workers: one flat table in name order (Worker, Trade, Site,
              Status), the same search and pickers
            - rows carry the last report as a FACT, not a verdict (25 Oct):
-             "Today" / "3 Days" (seen at this site), "Today · HF-SP-012" (seen
+             "Today" / "3 Days" (placed at this site), "Today · HF-SP-012" (seen
              elsewhere: the record may be wrong), "Today · No Site" (the punch
              matched no pinned site), "No Report" (nothing in 7 days); office
              staff carry none. The full sentence lives in the worker panel.
@@ -226,8 +226,8 @@
            - the office controls show only for a login the database would also
              accept (OFFICE_BASELINE_PROFILES mirrors fn_is_management_or_office)
            - the test site is hidden unless the URL has ?test=1
-         Reads: v_manpower_by_site, v_project_directory, v_project_supervisors,
-         v_machine_fleet (anyone with manpower.view);
+         Reads: v_manpower_by_site, v_project_directory, v_project_supervisors
+         (anyone with manpower.view);
          get_transfer_log, get_staff_detail (manpower.edit); get_worker_devices
          (devices.view); get_shifts_range (attendance.view). Writes re-check the caller in the database every time;
          the buttons only stop the page lying to a viewer. -->
@@ -279,9 +279,9 @@
           <p>Who is on which site, from each worker's record. A verified punch keeps the record up to date; the office corrects it with Move… when a punch could not.</p>
           <h4>Status</h4>
           <dl>
-            <dt><span class="st">Today</span> · <span class="st">3 Days</span></dt><dd>Seen at the site on the record, and how long ago. Nothing to do.</dd>
+            <dt><span class="st">Today</span> · <span class="st">3 Days</span></dt><dd>The last punch or bot line placed the worker at the site on the record, and how long ago. Not always a verified punch: a punch with weak or no GPS is placed at the record site too.</dd>
             <dt><span class="st st-elsewhere">Today · HF-XXX-000</span></dt><dd>Seen at another site, named by its code. The record may be wrong: check, then Move… if so.</dd>
-            <dt><span class="st">Today · No Site</span></dt><dd>Punched, but the punch matched no pinned site.</dd>
+            <dt><span class="st">Today · No Site</span></dt><dd>Punched, but the punch was placed at no site: it matched no pinned site, or its GPS was too weak to place it.</dd>
             <dt><span class="st st-none">No Report</span></dt><dd>Nothing in the last 7 days. Office staff carry no status.</dd>
           </dl>
           <h4>Other Marks</h4>
@@ -318,7 +318,9 @@
   <script src="ui.js"></script>
   <!-- DEV ONLY: does nothing unless the URL has ?demo=1, and never writes.
        Must sit BEFORE shell.js (it stands in for the sign-in the shell asks
-       for). Delete this line + manpower-demo.js once the page is accepted. -->
+       for). Kept behind ?demo=1 for the October release, like
+       attendance-demo.js (29 Oct 2026); delete this line + manpower-demo.js,
+       together with attendance-demo.js, before the punch pilot starts. -->
   <script src="manpower-demo.js"></script>
   <script src="shell.js"></script>
 
@@ -350,7 +352,7 @@
     var params = new URLSearchParams(location.search);
 
     var M = {
-      rows: [], projects: [], dirByPid: {}, supervisorsByPid: {}, machinesBySite: {},
+      rows: [], projects: [], dirByPid: {}, supervisorsByPid: {},
       translog: [], histByStaff: {}, translogErr: "",
       translogLoaded: false, translogLoading: null,   // fetched the first time something needs it
       histAll: {},                                     // staff_id -> true once "All n" was pressed
@@ -407,7 +409,7 @@
 
     // The last report as a fact, not a verdict (the owner's ruling, 25 Oct):
     // when the worker was last seen, and whether that agrees with the record.
-    //   onsite    "Today" / "Yesterday" / "3 Days"  seen at the site on the record
+    //   onsite    "Today" / "Yesterday" / "3 Days"  placed at the site on the record (not always verified)
     //   elsewhere "Today · HF-SP-012"               seen at another site: the record may be wrong
     //   nosite    "Today · No Site"                 the punch matched no pinned site
     //   none      "No Report"                       nothing in REPORT_DAYS, or ever
@@ -420,10 +422,15 @@
       }
       var age = ageWords(days);
       if (!r.last_reported_project_id) {
-        return { k: "nosite", label: age + " · No Site", why: "Reported " + reportWords(r) + ": the punch matched no pinned site. Pin the site, or check where the worker was." };
+        // fix 6 (29 Oct 2026): a weak-GPS punch by a worker with no site on the
+        // record lands here too, so pinning is not always the answer
+        return { k: "nosite", label: age + " · No Site", why: "Reported " + reportWords(r) + ": the punch was placed at no site. It matched no pinned site, or its GPS was too weak to place it. Check where the worker was; pin the site only if it is a real site with no pin." };
       }
       if (String(r.last_reported_project_id) === String(r.current_project_id || "")) {
-        return { k: "onsite", now: days === 0, label: age, why: "Reported " + reportWords(r) + ", the site on the record." };
+        // fix 6 (29 Oct 2026): the view falls back to the record site for a punch
+        // with weak or no GPS, so this is where the last report put the worker,
+        // not proof of a verified punch (no DB change; the view may say so later)
+        return { k: "onsite", now: days === 0, label: age, why: "Reported " + reportWords(r) + ": the last punch or bot line placed the worker at the site on the record. Not always a verified punch: a punch with weak or no GPS is placed at the record site too." };
       }
       return { k: "elsewhere", label: age + " · " + r.last_reported_project_code,
                why: "Reported " + reportWords(r) + "; the record says " + (r.current_project_id ? r.project_code : "no site") +
@@ -438,20 +445,27 @@
       if (M.trade !== "all" && r.role !== M.trade) return false;
       if (M.site !== "all" && groupOf(r) !== M.site) return false;
       if (M.status !== "all" && (groupOf(r) === "__office" || statusOf(r).k !== M.status)) return false;
-      if (M.q) {
-        var hay = ((r.full_name || "") + " " + (r.employee_code || "") + " " + (r.project_code || "") + " " + (r.project_name || "")).toLowerCase();
-        if (hay.indexOf(M.q) === -1) return false;
-      }
-      return true;
+      return qHit(r);
+    }
+    // fix 7 (29 Oct 2026): the search text alone; Inactive Workers filters by
+    // this only, since the Status / Site / Trade pickers describe active workers
+    function qHit(r) {
+      if (!M.q) return true;
+      var hay = ((r.full_name || "") + " " + (r.employee_code || "") + " " + (r.project_code || "") + " " + (r.project_name || "")).toLowerCase();
+      return hay.indexOf(M.q) !== -1;
     }
     function byId(id) { return M.rows.filter(function (r) { return r.staff_id === id; })[0]; }
     function projectById(id) { return M.dirByPid[id]; }
+    // fix 2 (29 Oct 2026): the selected site is always offered, even a test,
+    // cancelled or on-hold one, labelled so. Left out, the browser showed the
+    // first option ("— Not On A Site —") and Reactivate unassigned the worker.
     function siteOptions(selected, withNone, noneLabel) {
       var opts = M.projects.filter(function (p) {
-        return (p.status === "active" || p.status === "completed") && !isTest(p.project_code);
+        return (selected && p.project_id === selected) || ((p.status === "active" || p.status === "completed") && !isTest(p.project_code));
       }).map(function (p) {
         return '<option value="' + p.project_id + '"' + (p.project_id === selected ? " selected" : "") + ">" +
-               escHtml(p.project_code + " — " + (p.project_name || "")) + (p.status === "completed" ? " (completed)" : "") + "</option>";
+               escHtml(p.project_code + " — " + (p.project_name || "")) +
+               (isTest(p.project_code) ? " (test)" : p.status !== "active" ? " (" + escHtml(p.status || "no status") + ")" : "") + "</option>";
       }).join("");
       return (withNone ? '<option value=""' + (!selected ? " selected" : "") + ">" + escHtml(noneLabel || "— Not On A Site —") + "</option>" : "") + opts;
     }
@@ -612,7 +626,8 @@
       if (!sec.open) return;                       // closed: nothing to draw
       if (!M.translogLoaded) { ensureTranslog().then(renderMore); }
       var act = active();
-      var inactive = M.rows.filter(function (r) { return !r.is_active; });
+      // fix 2 (29 Oct 2026): test workers stay out of Inactive Workers too, unless ?test=1
+      var inactive = M.rows.filter(function (r) { return !r.is_active && (M.showTest || !isTest(r.project_code)); });
       var gaps = act.filter(function (r) { return !r.has_date_joined || !r.employee_code || !r.has_contact; }).length;
       var tabs = [
         ["history", "Movement History"],
@@ -644,7 +659,9 @@
       var line = "<b>" + escHtml(UI.dstr(t.effective_date)) + "</b> " + escHtml(t.from_project) + " → " + escHtml(t.to_project) + badge +
         (t.remarks ? ' <span class="muted">' + escHtml(t.remarks) + "</span>" : "") +
         ' <span class="muted">by ' + escHtml(t.moved_by_name || t.source) + "</span>";
-      var form = fixing ? fixForm(t) : "";
+      // fix 1 (29 Oct 2026): one fix form at a time, the panel's while a panel is
+      // open, else the tab's (two would share the ids #fx-date / #fx-remarks)
+      var form = fixing && (inPanel || !M.sel) ? fixForm(t) : "";
       // the panel keeps it terse (the owner's ruling, 25 Oct): the date and the
       // route only; the badge, remarks, who and when-entered stay in the tab
       return inPanel
@@ -692,7 +709,7 @@
     }
     function inactiveTab(inactive) {
       var list = inactive.slice().sort(function (a, b) { return a.updated_at < b.updated_at ? 1 : -1; });
-      if (M.q) list = list.filter(hit);
+      if (M.q) list = list.filter(qHit);
       var rows = list.map(function (r) {
         var c = M.confirm && M.confirm.kind === "reactivate" && M.confirm.id === r.staff_id;
         return "<tr>" + UI.td("Worker", "<b>" + escHtml(r.full_name) + '</b><span class="mp-sub">' + escHtml([r.employee_code, r.company].filter(Boolean).join(" · ")) + "</span>") +
@@ -752,11 +769,37 @@
       if (M.sel === "__new") {
         return ["nw-name", "nw-code", "nw-joined", "nw-contact", "nw-origin"].some(function (id) { return !!val(id); });
       }
-      return M.mode === "edit" || M.mode === "move" || String(M.mode || "").indexOf("fix:") === 0;
+      if (!(M.mode === "edit" || M.mode === "move" || String(M.mode || "").indexOf("fix:") === 0)) return false;
+      // fix 9 (29 Oct 2026): an open form counts as changed only when a field
+      // differs from the value it opened with (the value the form was drawn with)
+      var fields = document.querySelectorAll("#mp-drawer .dr-form input, #mp-drawer .dr-form select");
+      return [].some.call(fields, function (el) {
+        if (el.type === "checkbox") return el.checked !== el.defaultChecked;
+        if (el.tagName === "SELECT") {
+          var first = [].filter.call(el.options, function (o) { return o.defaultSelected; })[0] || el.options[0];
+          return el.value !== (first ? first.value : "");
+        }
+        return el.value !== el.defaultValue;
+      });
     }
     function requestClose(next) {
-      if (dirtyForm()) { M.confirm = { kind: "discard", next: next || null }; renderDrawer(); return; }
+      if (dirtyForm()) { M.confirm = { kind: "discard", next: next || null }; keepTyped(renderDrawer); return; }
       doClose(next);
+    }
+    // fix 9 (29 Oct 2026): the question re-draws the panel, which drew every field
+    // back to the value it opened with; what was typed is put back, so Keep
+    // Editing keeps it (and a second close still asks)
+    function keepTyped(draw) {
+      var typed = {};
+      [].forEach.call(document.querySelectorAll("#mp-drawer input[id], #mp-drawer select[id]"), function (el) {
+        typed[el.id] = el.type === "checkbox" ? el.checked : el.value;
+      });
+      draw();
+      Object.keys(typed).forEach(function (id) {
+        var el = document.querySelector("#mp-drawer #" + id);
+        if (!el) return;
+        if (el.type === "checkbox") el.checked = typed[id]; else el.value = typed[id];
+      });
     }
     function doClose(next) {
       M.confirm = null; M.mode = null;
@@ -808,15 +851,23 @@
       if (!iso) return "";
       return new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kuala_Lumpur" }).format(new Date(iso));
     }
+    // fix 4 (29 Oct 2026): a failed read is not kept. shiftRows goes back to null,
+    // so the next open of the box reads again, and the words name the 14 days
     function ensureShifts() {
       if (M.shiftRows !== null) return Promise.resolve();
       if (M.shiftsLoading) return M.shiftsLoading;
+      M.shiftsErr = "";
       var to = Dash.todayKL();
       var d = new Date(to + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() - (PUNCH_DAYS - 1));
       var from = d.toISOString().slice(0, 10);
       M.shiftsLoading = Dash.getShiftsRange(from, to, null)
         .then(function (rows) { M.shiftRows = rows || []; M.shiftsErr = rows === null ? "Unavailable." : ""; })
-        .catch(function (e) { M.shiftRows = []; M.shiftsErr = (e && e.message) || String(e); })
+        .catch(function (e) {
+          M.shiftRows = null;
+          M.shiftsErr = e && e.code === "incomplete_read"
+            ? "The last " + PUNCH_DAYS + " days could not be read in full, so nothing is shown. Close this box and open Recent Attendance again to retry."
+            : (e && e.message) || String(e);
+        })
         .then(function () { M.shiftsLoading = null; });
       return M.shiftsLoading;
     }
@@ -826,7 +877,10 @@
       return p ? p.project_code + " — " + (p.project_name || "") : (fallback || "No site matched");
     }
     // one pill per day, the first that applies, with the sentence behind it on hover
+    // fix 5 (29 Oct 2026): after DB 0128 a removed day keeps every flag false and
+    // 0 minutes, so it fell through to "Verified"; removal is read first
     function dayStatus(x) {
+      if (x.all_removed) return { label: "Removed", tone: "grey", why: "The office removed this day's shifts. It counts no hours; the punches stay on record." };
       if (x.open_shift) return { label: "In Only", tone: "info", why: "Punched in; no punch-out yet. The shift is still running." };
       if (x.has_correction) return { label: "Corrected", tone: "grey", why: "The office set the times for this day." };
       if (x.missed_out) return { label: "No Punch-Out", tone: "warn", why: "The punch-out never came; the system closed the shift." };
@@ -834,6 +888,10 @@
       if (x.long_shift && !x.long_accepted) return { label: "Long Shift", tone: "warn", why: "Over 16 hours and not yet accepted by the office." };
       if (x.early_start && !x.early_accepted) return { label: "Early Start", tone: "warn", why: "Punched in before 06:00 and not yet accepted by the office." };
       if (x.needs_review) return { label: "To Review", tone: "warn", why: "Waiting for the office's review." };
+      if (Number(x.removed_count) > 0) {          // 0128: part of the day removed; the rest counts
+        return { label: x.removed_count + " Removed", tone: "grey",
+                 why: "The office removed " + x.removed_count + " of this day's " + Math.max(x.removed_count, (x.shifts || []).length) + " shifts; the rest counts." };
+      }
       if (x.has_late_sync) return { label: "Synced Late", tone: "grey", why: "Sent later from the phone's offline queue." };
       return { label: "Verified", tone: "ok", why: "Punches verified at the site." };
     }
@@ -847,8 +905,8 @@
       var r = M.sel && M.sel !== "__new" ? byId(M.sel) : null;
       if (!M.punchesOpen || !r) { el.hidden = true; el.innerHTML = ""; return; }
       var days = [], body = "";
-      if (M.shiftRows === null) body = '<div class="dr-line muted">Loading…</div>';
-      else if (M.shiftsErr) body = '<div class="dr-line muted">' + escHtml(M.shiftsErr) + "</div>";
+      if (M.shiftsErr) body = '<div class="dr-line muted">' + escHtml(M.shiftsErr) + "</div>";   // fix 4: the error first; the rows are null after a failure
+      else if (M.shiftRows === null) body = '<div class="dr-line muted">Loading…</div>';
       else {
         days = M.shiftRows.filter(function (x) { return x.staff_id === r.staff_id; })
           .sort(function (a, b) { return a.work_date < b.work_date ? 1 : a.work_date > b.work_date ? -1 : 0; });
@@ -1026,10 +1084,15 @@
     function renderFilterOptions() {
       var act = active().filter(inCompany);
       var trades = ROLES.filter(function (ro) { return act.some(function (r) { return r.role === ro; }); });
-      document.getElementById("f-trade").innerHTML = '<option value="all">Any Trade</option>' +
-        trades.map(function (ro) { return '<option value="' + ro + '"' + (M.trade === ro ? " selected" : "") + ">" + escHtml(UI.label(ro)) + "</option>"; }).join("");
       var sites = {};
       act.forEach(function (r) { if (r.current_project_id) sites[r.project_code] = r.project_name || ""; });
+      // fix 3 (29 Oct 2026): a Trade or Site the rows no longer offer (another
+      // company picked, the last worker moved off) goes back to "all"; kept, the
+      // picker read "Any Site" while the roster stayed empty
+      if (M.trade !== "all" && trades.indexOf(M.trade) === -1) M.trade = "all";
+      if (M.site !== "all" && M.site !== "__await" && M.site !== "__office" && !sites.hasOwnProperty(M.site)) M.site = "all";
+      document.getElementById("f-trade").innerHTML = '<option value="all">Any Trade</option>' +
+        trades.map(function (ro) { return '<option value="' + ro + '"' + (M.trade === ro ? " selected" : "") + ">" + escHtml(UI.label(ro)) + "</option>"; }).join("");
       document.getElementById("f-site").innerHTML = '<option value="all">Any Site</option>' +
         '<option value="__await"' + (M.site === "__await" ? " selected" : "") + ">Not On A Site</option>" +
         '<option value="__office"' + (M.site === "__office" ? " selected" : "") + ">Office Staff</option>" +
@@ -1111,15 +1174,16 @@
       if (a === "punches" || a === "punches-close") {
         M.punchesOpen = a === "punches" ? !M.punchesOpen : false;
         M.punchesAll = false;
+        var reading = M.punchesOpen ? ensureShifts() : null;   // fix 4: started first, so a retry shows Loading…, not the old error
         renderDrawer();
-        if (M.punchesOpen) ensureShifts().then(renderPunches);
+        if (reading) reading.then(renderPunches);
         return;
       }
       if (a === "punches-more") { M.punchesAll = !M.punchesAll; renderPunches(); return; }
       if (a === "mode-edit") { M.mode = "edit"; M.confirm = null; M.panelOk = ""; M.panelErr = ""; renderDrawer(); return; }
       if (a === "mode-move") { M.mode = "move"; M.confirm = null; M.panelOk = ""; M.panelErr = ""; renderDrawer(); return; }
       if (a === "mode-clear") { M.mode = null; M.confirm = null; renderDrawer(); renderMore(); return; }
-      if (a === "confirm-clear") { M.confirm = null; renderDrawer(); renderMore(); return; }
+      if (a === "confirm-clear") { M.confirm = null; keepTyped(renderDrawer); renderMore(); return; }
       if (a === "past-form") { M.mode = M.mode === "past" ? null : "past"; renderMore(); return; }
 
       // ---- new worker ----
@@ -1144,6 +1208,31 @@
         renderDrawer(); return;
       }
 
+      // ---- history, from the panel or from Administration ----
+      // fix 1 (29 Oct 2026): these need only the row's data-transfer, so they sit
+      // before the "no worker open" stop; in Administration no panel is open
+      if (a.indexOf("history-") === 0) M.msgAt = "history";
+      if (a === "history-fix") { M.mode = "fix:" + btn.getAttribute("data-transfer"); M.confirm = null; renderDrawer(); renderMore(); return; }
+      if (a === "history-fix-save") {
+        var tid = btn.getAttribute("data-transfer");
+        await act(async function () {
+          await Dash.updateTransfer(tid, { effectiveDate: val("fx-date") || null, remarks: val("fx-remarks") || null });
+          M.mode = null; M.panelOk = "History row updated."; M.ok = M.sel ? "" : "History row updated.";
+          await refresh();
+        }, M.sel ? "panel" : "top");
+        renderError(); renderDrawer(); return;
+      }
+      if (a === "history-ask") { M.confirm = { kind: "del-history", id: btn.getAttribute("data-transfer") }; renderDrawer(); renderMore(); return; }
+      if (a === "history-delete") {
+        var tid2 = btn.getAttribute("data-transfer");
+        await act(async function () {
+          await Dash.deleteTransfer(tid2); M.confirm = null;
+          M.panelOk = "History row deleted."; M.ok = M.sel ? "" : "History row deleted.";
+          await refresh();
+        }, M.sel ? "panel" : "top");
+        renderError(); renderDrawer(); return;
+      }
+
       if (!sel) return;
 
       // ---- move ----
@@ -1154,7 +1243,11 @@
         await act(async function () {
           var r = await Dash.moveStaff(sel.staff_id, to === "unassign" ? null : to, val("mv-remarks") || null, val("mv-date") || null);
           var tgt = projectById(to);
-          M.ok = (r.full_name || sel.full_name) + " moved to " + (tgt ? tgt.project_code + " — " + tgt.project_name : "no site") + ".";
+          // fix 8 (29 Oct 2026): move_staff writes nothing for the site the worker is
+          // already on and answers no_change (DB 0039); say so, not "moved"
+          M.ok = r && r.no_change
+            ? "Already on " + (tgt ? tgt.project_code + " — " + tgt.project_name : "no site") + "; nothing changed."
+            : (r.full_name || sel.full_name) + " moved to " + (tgt ? tgt.project_code + " — " + tgt.project_name : "no site") + ".";
           M.panelOk = M.ok; M.mode = null;
           await refresh();
         }, "panel");
@@ -1223,29 +1316,6 @@
         }, "panel");
         renderDrawer(); return;
       }
-
-      // ---- history, from the panel ----
-      if (a.indexOf("history-") === 0) M.msgAt = "history";
-      if (a === "history-fix") { M.mode = "fix:" + btn.getAttribute("data-transfer"); M.confirm = null; renderDrawer(); renderMore(); return; }
-      if (a === "history-fix-save") {
-        var tid = btn.getAttribute("data-transfer");
-        await act(async function () {
-          await Dash.updateTransfer(tid, { effectiveDate: val("fx-date") || null, remarks: val("fx-remarks") || null });
-          M.mode = null; M.panelOk = "History row updated."; M.ok = M.sel ? "" : "History row updated.";
-          await refresh();
-        }, M.sel ? "panel" : "top");
-        renderDrawer(); return;
-      }
-      if (a === "history-ask") { M.confirm = { kind: "del-history", id: btn.getAttribute("data-transfer") }; renderDrawer(); renderMore(); return; }
-      if (a === "history-delete") {
-        var tid2 = btn.getAttribute("data-transfer");
-        await act(async function () {
-          await Dash.deleteTransfer(tid2); M.confirm = null;
-          M.panelOk = "History row deleted."; M.ok = M.sel ? "" : "History row deleted.";
-          await refresh();
-        }, M.sel ? "panel" : "top");
-        renderDrawer(); return;
-      }
     }
 
     // the reactivate / past-move buttons in the tabs
@@ -1298,17 +1368,15 @@
         M.canDev = Dash.can("devices.manage");
         M.canAtt = Dash.can("attendance.view");
 
+        // fix 10 (29 Oct 2026): no machine fleet read; nothing on the page has used
+        // it since the machine warnings went (25 Oct), and a failure there stopped
+        // the whole page
         var res = await Promise.all([
-          Dash.getManpowerBySite(), Dash.getProjectDirectory(), Dash.getProjectSupervisors(),
-          Dash.getMachines()
+          Dash.getManpowerBySite(), Dash.getProjectDirectory(), Dash.getProjectSupervisors()
         ]);
         M.rows = res[0]; M.projects = res[1];
         M.projects.forEach(function (p) { M.dirByPid[p.project_id] = p; });
         res[2].forEach(function (s) { M.supervisorsByPid[s.project_id] = s.supervisors; });
-        res[3].forEach(function (m) {
-          if (!m.current_site) return;
-          (M.machinesBySite[m.current_site] = M.machinesBySite[m.current_site] || []).push({ code: m.machine_code, type: m.machine_type });
-        });
         render();
 
         // a worker named in the URL opens in the panel (?open=<staff_id>)
@@ -1392,6 +1460,11 @@
           if (M.punchesOpen && !ev.target.closest("#mp-punches, button[data-act='punches']")) { M.punchesOpen = false; renderDrawer(); }
           if (ev.target.closest("#mp-drawer, #mp-punches, tr[data-staff], button[data-act='open'], button[data-act='open-edit'], button[data-act='new']")) return;
           requestClose(null);
+          // fix 1 (29 Oct 2026): a button in Administration closes the panel and then
+          // does its own job (the history Edit / Delete need no panel). Only while
+          // the panel still asks "Close without saving?" does the click stop here,
+          // so the Administration action cannot clear the typed changes under it.
+          if (M.sel && ev.target.closest("#mp-more button")) ev.stopPropagation();
         }, true);
         document.getElementById("mp-punches").addEventListener("click", function (ev) {
           var btn = ev.target.closest("button[data-act]");
