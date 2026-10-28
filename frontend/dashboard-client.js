@@ -69,7 +69,7 @@
                                                      shift AND kind — missed / long_open / overlong /
                                                      early_start; both dates null = every unresolved
                                                      shift since the rule's start date; null before 0124
-   await Dash.priceShift(staffId, date, inISO, outISO, realStart?) -> the figure a ruling WOULD give (DB 0127),
+   await Dash.priceShift(staffId, date, inISO, outISO, realStart?, shiftNo?) -> the figure a ruling WOULD give (DB 0127),
                                                      one row { working_minutes, ot_minutes, … }, or null before 0127
    await Dash.getUnpricedDays(from, to)           -> the payroll-close list: worker days with no figure
                                                      or a request waiting; null before 0124
@@ -949,8 +949,18 @@
     }
     return out;
   }
-  async function readRangePiece(from, to, projectId, attempt) {
-    var rows = [], total = null;
+  // A count-neutral change between pages (fix 7, 28 Oct 2026): a row out and
+  // another in keeps the count yet shifts the rows under the pages, so a live
+  // row is skipped and the gone one kept — and nothing above can see it. So a
+  // piece that took more than one page is read a second time (check), and both
+  // reads must name the same worker-days in the same order; a difference reads
+  // the piece again, counted with the re-reads above, and still changing after
+  // three fails closed the same way. One page is one snapshot: no second read.
+  function rangeKeys(rows) {
+    return rows.map(function (r) { return r.staff_id + "|" + String(r.work_date || "").slice(0, 10); }).join(",");
+  }
+  async function readRangePiece(from, to, projectId, attempt, check) {
+    var rows = [], total = null, pages = 0;
     for (;;) {
       var res = await sb.rpc("get_shifts_range", { p_from: from, p_to: to, p_project_id: projectId || null }, { count: "exact" })
         .order("work_date", { ascending: true }).order("staff_id", { ascending: true })
@@ -962,10 +972,11 @@
       if (!Number.isFinite(res.count) || res.count < 0) throw incompleteRead("no row count for " + from + ".." + to);
       if (total === null) total = res.count;
       else if (res.count !== total) {              // the range changed between pages: read the piece again
-        if ((attempt || 1) < 3) return readRangePiece(from, to, projectId, (attempt || 1) + 1);
+        if ((attempt || 1) < 3) return readRangePiece(from, to, projectId, (attempt || 1) + 1, check);
         throw incompleteRead("still changing after 3 reads: " + from + ".." + to);
       }
       var page = res.data || [];
+      pages++;
       rows = rows.concat(page);
       if (rows.length >= total) break;
       if (!page.length) throw incompleteRead("stopped at " + rows.length + " of " + total + ": " + from + ".." + to);
@@ -975,6 +986,13 @@
       var day = String(r.work_date || "").slice(0, 10);
       if (day < from || day > to) throw incompleteRead("a row for " + day + " in " + from + ".." + to);
     });
+    if (pages > 1 && !check) {
+      var again = await readRangePiece(from, to, projectId, attempt, true);
+      if (rangeKeys(again) !== rangeKeys(rows)) {
+        if ((attempt || 1) < 3) return readRangePiece(from, to, projectId, (attempt || 1) + 1);
+        throw incompleteRead("still changing after 3 reads: " + from + ".." + to);
+      }
+    }
     return rows;
   }
   async function getShiftsRange(from, to, projectId) {
@@ -1040,7 +1058,14 @@
 
   // Drops the ruling; the worker's raw punches stand again. Both this and the
   // set above are audit-logged old→new by the database.
-  function clearDayCorrection(staffId, workDate) {
+  // shiftNo (optional, 28 Oct 2026): drop the rulings on ONE shift of a day that
+  // holds several (clear_shift_correction) — the Attendance page names it on a
+  // day whose other shift the office removed, where a whole-day ruling cannot
+  // stand (0128). Left out, the day's whole-day ruling, as before.
+  function clearDayCorrection(staffId, workDate, shiftNo) {
+    if (shiftNo != null && shiftNo !== "") {
+      return q(sb.rpc("clear_shift_correction", { p_staff_id: staffId, p_work_date: workDate, p_shift_no: Number(shiftNo) }));
+    }
     return q(sb.rpc("clear_day_correction", {
       p_staff_id: staffId, p_work_date: workDate
     }));
@@ -1159,12 +1184,17 @@
   // predates 0127 — the Correct Hours panel then shows no preview.
   // realStart (optional): price as if the early start were credited (true) or
   // not (false); left out, the shift's own marks decide, as the day view does.
-  async function priceShift(staffId, workDate, inISO, outISO, realStart) {
+  // shiftNo (optional, 28 Oct 2026): the shift the ruling is on, whose early-start
+  // mark counts (price_shift looked at shift 1 only). Sent only when it is not 1,
+  // so the page still works against a price_shift that predates p_shift_no.
+  async function priceShift(staffId, workDate, inISO, outISO, realStart, shiftNo) {
     try {
-      var rows = await q(sb.rpc("price_shift", {
+      var args = {
         p_staff_id: staffId, p_work_date: workDate, p_in_at: inISO, p_out_at: outISO,
         p_real_start: (realStart === undefined || realStart === null) ? null : !!realStart
-      }));
+      };
+      if (shiftNo != null && shiftNo !== "" && Number(shiftNo) !== 1) args.p_shift_no = Number(shiftNo);
+      var rows = await q(sb.rpc("price_shift", args));
       return Array.isArray(rows) ? (rows[0] || null) : (rows || null);
     } catch (e) {
       if (isMissingFunction(e)) return null;
