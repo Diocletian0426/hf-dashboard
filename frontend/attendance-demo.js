@@ -39,8 +39,8 @@
     { name: "Hulk (demo)",            site: 1, start: 7.75, len: 11.5 },   // heavy overtime
     { name: "Thor (demo)",            site: 1, start: 8.2,  len: 9.0 },
     { name: "Hawkeye (demo)",         site: 1, start: 8.0,  len: 7.4 },    // short days
-    { name: "Falcon (demo)",          site: 2, start: 7.85, len: 9.6 },
-    { name: "Scarlet Witch (demo)",   site: 2, start: 8.05, len: 9.1 }
+    { name: "Falcon (demo)",          site: 2, start: 7.85, len: 9.6, company: "Hai Fu" },
+    { name: "Scarlet Witch (demo)",   site: 2, start: 8.05, len: 9.1, company: "Hai Fu" }
   ];
 
   // A fixed wobble per worker per day — no Math.random, so a reload shows the
@@ -51,9 +51,11 @@
     return ((h % 1000) / 1000 - 0.5) * spread;
   }
 
+  // hours from the day's midnight, as a real timestamp: minutes that round up
+  // to 60 carry into the hour, and a time past 24:00 lands on the next day (a
+  // night shift) — written as "16:60" or "33:24" they were not dates at all
   function stamp(iso, hours) {
-    var h = Math.floor(hours), m = Math.round((hours - h) * 60);
-    return iso + "T" + (h < 10 ? "0" : "") + h + ":" + (m < 10 ? "0" : "") + m + ":00+08:00";
+    return new Date(Date.parse(iso + "T00:00:00+08:00") + Math.round(hours * 60) * 60000).toISOString();
   }
 
   function dayOf(iso) { return new Date(iso + "T00:00:00+08:00").getDay(); }
@@ -73,6 +75,34 @@
     return { working: Math.min(worked, 8 * 60), ot: Math.max(0, worked - 8 * 60) };
   }
 
+  // ---- Remove Shift in the demo (DB 0128) -----------------------------------
+  // Every demo row carries the 0128 shape (shifts[], removed_count, all_removed),
+  // so the Remove Shift menu, drawer and panel can be tried with ?demo=1. Three
+  // cases sit on DEMO_DAY, the last working day before today: a one-minute double
+  // tap (Scarlet Witch), a real second shift in the evening (Captain America),
+  // and a day already removed (Hawkeye). A removal lives in this page's memory
+  // only — a reload brings every shift back.
+  var DEMO_DAY = (function () {
+    var d = new Date(Dash.todayKL() + "T00:00:00Z");
+    do { d.setUTCDate(d.getUTCDate() - 1); } while (d.getUTCDay() === 0);
+    return d.toISOString().slice(0, 10);
+  })();
+  var REMOVED = {};                                   // "staff|date|shift" -> { reason, by, at }
+  REMOVED["demo-Hawkeye (demo)|" + DEMO_DAY + "|1"] = { reason: "Test Punch", by: "Nick Fury (demo)", at: DEMO_DAY + "T18:05:00+08:00" };
+  function priceSpans(spans) {                        // the same demo pricing, over several shifts
+    var total = 0;
+    for (var i = 0; i < spans.length; i++) {
+      if (spans[i][1] === null) return null;
+      total += Math.max(0, Math.round(spans[i][1] * 60) - Math.max(Math.round(spans[i][0] * 60), 8 * 60));
+    }
+    var worked = total > 6 * 60 ? total - 60 : total;
+    return { working: Math.min(worked, 8 * 60), ot: Math.max(0, worked - 8 * 60) };
+  }
+  function hoursOfStamp(ts, iso) {                    // a stamp back to hours of the work day
+    var d = new Date(ts), base = new Date(iso + "T00:00:00+08:00");
+    return (d - base) / 3600000;
+  }
+
   // One worker's day. Sundays off, and a handful of scripted problem days so
   // every badge on the page has something to point at.
   function shiftFor(w, iso) {
@@ -90,7 +120,7 @@
       staff_id: "demo-" + w.name,      // real rows carry a uuid; the page keys on it
       working_minutes: price ? price.working : null,
       ot_minutes: price ? price.ot : null,
-      company_code: "HF-BP",
+      company_code: w.company || "HF-BP",
       day_kind: dayOf(iso) === 6 && dom % 9 === 4 ? "rest" : "normal",   // the odd Saturday stands in for a rest day
       full_name: w.name,
       project_id: siteRow.id,
@@ -114,7 +144,8 @@
     if (dom === 19 && w.name.indexOf("Thor") === 0) {
       row.last_out_at = stamp(iso, 24 + 9.4);
       row.hours_on_site = Math.round((24 + 9.4 - inAt) * 100) / 100;
-      row.overlong_shift = true;
+      row.long_shift = true;                                  // 0124/0126: over 16 h, waits for Accept As Punched
+      row.overlong_shift = false;                             // 0126 retired the old 22 h flag (always false now)
       row.working_minutes = null; row.ot_minutes = null;      // over the limit = unpriced
     }
     // punched from outside the fence
@@ -130,12 +161,58 @@
       row.last_out_at = null; row.out_count = 0; row.hours_on_site = null;
       row.working_minutes = null; row.ot_minutes = null;
     }
+
+    // 0128: the day's shifts — one, or the DEMO_DAY cases
+    var spans = [[hoursOfStamp(row.first_in_at, iso), row.last_out_at ? hoursOfStamp(row.last_out_at, iso) : null]];
+    if (iso === DEMO_DAY && w.name.indexOf("Scarlet") === 0) spans = [[inAt - 2 / 60, inAt - 1 / 60], [inAt, outAt]];   // a one-minute double tap first
+    if (iso === DEMO_DAY && w.name.indexOf("Captain") === 0) spans = [[inAt, outAt], [19.5, 22.0]];                    // a real second shift
+    row.shifts = spans.map(function (s, k) {
+      var a = stamp(iso, s[0]), b = s[1] === null ? null : stamp(iso, s[1]);
+      return { shift_no: k + 1, in_at: a, out_at: b, raw_in_at: a, raw_out_at: b, corrected: false, missed: false,
+               entered_by_office: false, removed: false, removed_reason: null, removed_by_name: null, removed_at: null, _span: s };
+    });
+    row.shift_count = row.shifts.length;
+    if (spans.length > 1) {
+      var pm = priceSpans(spans);
+      row.first_in_at = row.shifts[0].raw_in_at; row.last_out_at = row.shifts[row.shifts.length - 1].raw_out_at;
+      row.in_count = row.out_count = spans.length;
+      row.working_minutes = pm ? pm.working : null; row.ot_minutes = pm ? pm.ot : null;
+    }
+    // the office's removals, as 0128's view would price them
+    var live = [];
+    row.shifts.forEach(function (x) {
+      var rm = REMOVED[row.staff_id + "|" + iso + "|" + x.shift_no];
+      if (rm) { x.removed = true; x.removed_reason = rm.reason; x.removed_by_name = rm.by; x.removed_at = rm.at; }
+      else live.push(x);
+    });
+    row.removed_count = row.shifts.length - live.length;
+    row.all_removed = row.removed_count > 0 && live.length === 0;
+    if (row.all_removed) {
+      row.working_minutes = 0; row.ot_minutes = 0; row.first_in_at = null; row.last_out_at = null;
+      row.in_count = 0; row.out_count = 0; row.has_anomaly = false;
+    } else if (row.removed_count) {
+      var pl = priceSpans(live.map(function (x) { return x._span; }));
+      row.first_in_at = live[0].raw_in_at; row.last_out_at = live[live.length - 1].raw_out_at;
+      row.in_count = row.out_count = live.length;
+      row.working_minutes = pl ? pl.working : null; row.ot_minutes = pl ? pl.ot : null;
+    }
     return row;
   }
 
   function punchesFor(row) {
     var out = [];
     var far = row.has_anomaly;
+    if (row.shifts && (row.shifts.length > 1 || row.removed_count)) {     // 0128: each shift's own taps
+      row.shifts.forEach(function (x) {
+        [["in", x.raw_in_at], ["out", x.raw_out_at]].forEach(function (k) {
+          if (!k[1]) return;
+          out.push({ staff_id: row.staff_id, punched_by: "worker", synced_late: false, wrong_site: false,
+                     punched_at: k[1], full_name: row.full_name, punch_type: k[0], project_name: row.project_name,
+                     gps_lat: 3.3215, gps_lng: 101.5771, distance_m: 20, verification_status: "verified" });
+        });
+      });
+      return out;
+    }
     out.push({
       staff_id: row.staff_id, punched_by: "worker",
       // one late-synced tap and one wrong-site tap, so both badges have a home
@@ -194,8 +271,21 @@
     }
     return out;
   };
-  // the codes lookup is a real read too — the demo crew has no codes
-  Dash.getManpowerBySite = async function () { return []; };
+  // the staff list is a real read too: the demo crew's own, with a role each
+  // (More Filters) and no employee codes
+  var ROLES = { "Iron-Man (demo)": "crane_operator", "Captain America (demo)": "site_supervisor", "Black Widow (demo)": "welder",
+                "Hulk (demo)": "general_worker", "Thor (demo)": "boring_operator", "Hawkeye (demo)": "welder",
+                "Falcon (demo)": "vibro_operator", "Scarlet Witch (demo)": "welder" };
+  Dash.getManpowerBySite = async function () {
+    return CREW.map(function (w) {
+      return { staff_id: "demo-" + w.name, full_name: w.name, role: ROLES[w.name] || "general_worker", company: w.company || "HF-BP",
+               employee_code: null, is_active: true, project_code: SITES[w.site].code, current_project_id: SITES[w.site].id };
+    });
+  };
+  // the site picker's list: the demo's own three sites, not the real directory
+  Dash.getProjectDirectory = async function () {
+    return SITES.map(function (s) { return { project_id: s.id, project_code: s.code, project_name: s.name, status: "active" }; });
+  };
   Dash.getRecentPunches = async function (date, projectId) {
     var out = [];
     shiftsOn(date, projectId || null).forEach(function (r) { out = out.concat(punchesFor(r)); });
@@ -225,6 +315,48 @@
     return [{ project_name: SITES[1].name, active_workers_assigned: 3 }];
   };
 
+  // 0128 in memory: remove, restore, and the before/after — nothing is written
+  function demoRow(staffId, date) {
+    var w = CREW.filter(function (c) { return "demo-" + c.name === staffId; })[0];
+    return w ? shiftFor(w, date) : null;
+  }
+  function demoShift(staffId, date, n) {
+    var r = demoRow(staffId, date);
+    return r ? r.shifts.filter(function (x) { return x.shift_no === Number(n); })[0] || null : null;
+  }
+  Dash.removeShift = async function (staffId, date, n, reason) {
+    var x = demoShift(staffId, date, n);
+    if (!x) return { ok: false, code: "no_such_shift", message: "That shift is not on the record." };
+    if (x.removed) return { ok: false, code: "already_removed", message: "That shift is already removed." };
+    if (!String(reason || "").trim()) return { ok: false, code: "reason_required", message: "Give the reason — the worker sees it." };
+    if (!x.out_at && !x.missed) return { ok: false, code: "shift_open", message: "That shift is still open on the worker's phone." };
+    REMOVED[staffId + "|" + date + "|" + Number(n)] = { reason: String(reason).trim(), by: "You (demo)", at: new Date().toISOString() };
+    var r = demoRow(staffId, date);
+    return { ok: true, work_date: date, shift_no: Number(n), working_minutes: r.working_minutes, ot_minutes: r.ot_minutes };
+  };
+  Dash.restoreShift = async function (staffId, date, n) {
+    var k = staffId + "|" + date + "|" + Number(n);
+    if (!REMOVED[k]) return { ok: false, code: "not_removed", message: "That shift is not removed." };
+    delete REMOVED[k];
+    var r = demoRow(staffId, date);
+    return { ok: true, work_date: date, shift_no: Number(n), working_minutes: r.working_minutes, ot_minutes: r.ot_minutes };
+  };
+  Dash.previewShiftRemoval = async function (staffId, date, n, action) {
+    var k = staffId + "|" + date + "|" + Number(n), had = REMOVED[k];
+    var b = demoRow(staffId, date);
+    if (action === "restore") delete REMOVED[k]; else REMOVED[k] = { reason: "preview", by: "", at: "" };
+    var a = demoRow(staffId, date);
+    if (had) REMOVED[k] = had; else delete REMOVED[k];
+    var pick = function (r) { return { working_minutes: r.working_minutes, ot_minutes: r.ot_minutes, day_kind: r.day_kind, all_removed: r.all_removed }; };
+    return { ok: true, action: action || "remove", work_date: date, shift_no: Number(n), before: pick(b), after: pick(a), sunday: null };
+  };
+  // the demo crew is not in the database: every other office write stops here
+  var DEMO_REFUSED = { ok: false, code: "demo", message: "Demo data — nothing is saved." };
+  ["setDayCorrection", "clearDayCorrection", "acceptShiftAsPunched", "clearShiftAcceptance"].forEach(function (f) {
+    Dash[f] = async function () { return DEMO_REFUSED; };
+  });
+  Dash.priceShift = async function () { return null; };
+
   // a banner, so nobody mistakes this screen for the real one
   window.addEventListener("DOMContentLoaded", function () {
     var main = document.getElementById("main");
@@ -234,7 +366,9 @@
     b.style.cssText = "margin:0 0 16px";
     b.innerHTML = "<strong>Demo data</strong> — this page is showing an invented crew so the " +
       "layout can be reviewed before the punch pilot starts. Nothing here is real and nothing " +
-      "was written to the database. Drop <code>?demo=1</code> from the URL for the real page.";
+      "was written to the database. Drop <code>?demo=1</code> from the URL for the real page." +
+      "<br><strong>Remove Shift</strong> — try it on " + DEMO_DAY + ": Scarlet Witch (a one-minute double tap), " +
+      "Captain America (two real shifts), Hawkeye (already removed). A removal lasts until you reload.";
     main.insertBefore(b, main.querySelector(".att-when, .filters"));
   });
 

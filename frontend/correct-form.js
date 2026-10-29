@@ -61,6 +61,14 @@
     return { ruledIn: rIn, ruledOut: rOut, inAt: rIn || spec.inAt || null, outAt: rOut || spec.outAt || null };
   }
 
+  // the chips in the day's order (owner, 27 Oct 2026): the reason the worker's
+  // own taps point to comes first — no punch-out, no punch-in, or both there
+  // and one of them wrong. spec.inAt / spec.outAt are the taps.
+  function reasonsFor(spec) {
+    var first = !spec.outAt ? "Forgot To Punch Out" : !spec.inAt ? "Forgot To Punch In" : "Punched At The Wrong Time";
+    return [first].concat(REASONS.filter(function (r) { return r !== first; }));
+  }
+
   function start(spec) {
     var s = standing(spec);
     return { tIn: klHHMM(s.inAt), tOut: klHHMM(s.outAt), next: nextDay(s.outAt, spec.workDate), why: "" };
@@ -109,6 +117,6 @@
     return { inISO: inISO, outISO: outISO, why: why };
   }
 
-  window.CorrectForm = { REASONS: REASONS, start: start, html: html, read: read, standing: standing,
+  window.CorrectForm = { REASONS: REASONS, reasonsFor: reasonsFor, start: start, html: html, read: read, standing: standing,
                          klHHMM: klHHMM, klDate: klDate };
 })();
