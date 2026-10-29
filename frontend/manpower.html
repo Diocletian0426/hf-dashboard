@@ -492,9 +492,12 @@
       var sites = {};
       rows.forEach(function (r) { if (r.current_project_id) sites[r.project_code] = true; });
       var ns = Object.keys(sites).length;
+      // 29 Oct 2026 (the reviewer's wording): the headcount includes office staff
+      // and workers not on a site, so the sentence also says how many are on sites
+      var onSite = rows.filter(function (r) { return !!r.current_project_id; }).length;
       var away = rows.filter(function (r) { return groupOf(r) !== "__office" && statusOf(r).k === "elsewhere"; }).length;
       var await_ = rows.filter(function (r) { return groupOf(r) === "__await"; }).length;
-      var s = rows.length + (rows.length === 1 ? " active worker on " : " active workers on ") + ns + (ns === 1 ? " site" : " sites") +
+      var s = rows.length + (rows.length === 1 ? " active worker, " : " active workers, ") + onSite + " on " + ns + (ns === 1 ? " site" : " sites") +
         (M.company === "all" ? ", both companies" : ", " + M.company) +
         (away ? " · " + away + " seen elsewhere" : "") +
         (await_ ? " · " + await_ + " not on a site" : "") + ".";
