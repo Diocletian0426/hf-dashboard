@@ -259,7 +259,7 @@
 
   <script src="vendor/supabase.js"></script>
   <script src="config.js"></script>
-  <script src="dashboard-client.js?v=20261028"></script>
+  <script src="dashboard-client.js?v=20261029"></script>
   <script src="ui.js"></script>
   <!-- DEV ONLY: does nothing unless the URL has ?demo=1, and never writes.
        Delete this line + attendance-demo.js before the pilot starts. -->
@@ -726,6 +726,22 @@
     function shiftsOf(r) { return Array.isArray(r.shifts) ? r.shifts : []; }
     function canRemoveShifts(r) { return r.removed_count !== undefined && r.removed_count !== null; }
     function removedCount(r) { return Number(r.removed_count) || 0; }
+    // the shifts that COUNT (fix 5, 28 Oct 2026): 0128 keeps a removed shift in
+    // shift_count, so a double tap taken out left a one-shift day sent to
+    // Exceptions, which does not list it. A day with one shift still counting is
+    // ruled here, on that shift's own number.
+    function countingShifts(r) { return (Number(r.shift_count) || 0) - removedCount(r); }
+    function liveShiftNo(r) {
+      var x = shiftsOf(r).filter(function (s) { return !s.removed; })[0];
+      return x && x.shift_no ? Number(x.shift_no) : 1;
+    }
+    // the number a correction names: none on a one-shift day (the whole-day ruling,
+    // as before); the shift that counts once another of the day is removed
+    function ruledShiftNo(r) { return removedCount(r) ? liveShiftNo(r) : null; }
+    // the demo stays the demo (fix 8, 28 Oct 2026): a link out to Exceptions or
+    // Requests carries demo=1, so it opens that page's demo, never the live one
+    var DEMO_Q = new URLSearchParams(location.search).get("demo") === "1";
+    function demoHref(href) { return DEMO_Q ? href + (href.indexOf("?") < 0 ? "?" : "&") + "demo=1" : href; }
     // "08:27 am – 08:28 am · 1m": a shift as paid (or as tapped, for a removed one)
     function shiftSpan(x, tapped) {
       var a = tapped ? (x.raw_in_at || x.in_at) : (x.in_at || x.raw_in_at);
@@ -951,7 +967,7 @@
       if (OS.err) html += '<div class="banner banner-red">' + esc(OS.err) + "</div>";
       document.getElementById("open-shifts").innerHTML = html;
       document.getElementById("exc-link").innerHTML = OS.list
-        ? '<a class="exc-link" href="exceptions.html">Exceptions: ' + OS.list.length + " Open ↗</a>" : "";
+        ? '<a class="exc-link" href="' + demoHref("exceptions.html") + '">Exceptions: ' + OS.list.length + " Open ↗</a>" : "";
     }
 
     /* ---- THE STATUS BUTTONS (owner's go, 28 Oct 2026) ----------------------------
@@ -1028,7 +1044,7 @@
                  (open ? "true" : "false") + '"' + (items ? "" : " disabled") + ">More Filters" + (k ? " <b>\u00B7 " + k + "</b>" : "") +
                  '<span class="chev" aria-hidden="true"></span></button>';
         })() +
-        (month && PENDING ? '<a class="att-pending" href="requests.html">' + PENDING + " Request" + (PENDING === 1 ? "" : "s") + " Pending ↗</a>" : "");
+        (month && PENDING ? '<a class="att-pending" href="' + demoHref("requests.html") + '">' + PENDING + " Request" + (PENDING === 1 ? "" : "s") + " Pending ↗</a>" : "");
       var days = by.overlong + by.missed + by.open + by.other;
       note.hidden = !(month && items);
       if (month && items) note.textContent = n.unpriced
@@ -1485,13 +1501,14 @@
               : p.why === "No Punch Out" ? "rule the finish time on the Exceptions page, or here"
               : "no punch-out yet";
       return '<p class="detail-note unpriced-note"><strong>' + esc(p.word) + "</strong> — " + esc(how) +
-             (Dash.can("attendance.edit") && p.why !== "Still Open" ? ' · <a class="fix-link" href="exceptions.html">Exceptions \u2197</a>' : "") + "</p>";
+             (Dash.can("attendance.edit") && p.why !== "Still Open" ? ' · <a class="fix-link" href="' + demoHref("exceptions.html") + '">Exceptions \u2197</a>' : "") + "</p>";
     }
-    // two shifts in one day cannot be ruled from this form (several_shifts): say so
+    // two shifts in one day cannot be ruled from this form (several_shifts): say so —
+    // the shifts that count (fix 5), a removed one is not ruled
     function twoShiftNote(s) {
-      return (Number(s.shift_count) > 1 && Dash.can("attendance.edit"))
-        ? '<p class="detail-note"><strong>' + Number(s.shift_count) + " shifts this day</strong> — rule them one by one on the " +
-          '<a class="fix-link" href="exceptions.html">Exceptions page \u2197</a>.</p>' : "";
+      return (countingShifts(s) > 1 && Dash.can("attendance.edit"))
+        ? '<p class="detail-note"><strong>' + countingShifts(s) + " shifts this day</strong> — rule them one by one on the " +
+          '<a class="fix-link" href="' + demoHref("exceptions.html") + '">Exceptions page \u2197</a>.</p>' : "";
     }
     // one day row of the day table (the detail row under it is added by the caller)
     function dayRowHtml(s, i) {
@@ -1544,6 +1561,14 @@
     }
     async function corrOpen(r, view, opts) {
       if (!r) return;
+      // another row's menu while the panel is open (fix 4, 28 Oct 2026): it swapped
+      // the panel and lost what was typed. A panel with typing in it asks "Close
+      // without saving?" first, and Discard opens the row asked for; a panel that
+      // is still saving is never swapped
+      if (CORR.open && (CORR.busy || corrDirty())) {
+        if (!CORR.busy) { CORR.askClose = true; CORR.next = { r: r, view: view, opts: opts }; corrRender(); }
+        return;
+      }
       var spec = corrSpec(r);
       CORR = { open: true, view: view, row: r, spec: spec, form: CorrectForm.start(spec), punches: null,
                busy: false, err: "", invalid: "", preview: null, previewKey: "", note: "",
@@ -1592,7 +1617,11 @@
     }
     function corrClose(force) {
       if (!CORR.open) return;
-      if (!force && corrDirty()) { CORR.askClose = true; corrRender(); return; }
+      // mid-write (fix 3, 28 Oct 2026): a click outside, Esc or Discard while it
+      // saved closed the panel under the write — the row stayed stale and the
+      // re-read threw. The panel stays until the write and its re-read are done.
+      if (CORR.busy) return;
+      if (!force && corrDirty()) { CORR.askClose = true; CORR.next = null; corrRender(); return; }
       CORR = { open: false };
       document.getElementById("corr-panel").hidden = true;
     }
@@ -1602,7 +1631,7 @@
     function shiftEnded(r) { return !!effOut(r) && !r.open_shift; }
     function corrEditable(r) {
       var day = String(r.work_date).slice(0, 10), today = Dash.todayKL();
-      return Dash.can("attendance.edit") && !r.all_removed && Number(r.shift_count) <= 1 && (day < today || (day === today && shiftEnded(r)));
+      return Dash.can("attendance.edit") && !r.all_removed && countingShifts(r) <= 1 && (day < today || (day === today && shiftEnded(r)));
     }
     var CHECK_HOVER = {
       verified: "Inside the site's circle.", outside_geofence: "Outside the site's circle.",
@@ -1747,7 +1776,7 @@
         if (CORR.askClose) foot = closeAskFoot();
       } else if (!editable && Dash.can("attendance.edit")) {
         why = r.all_removed ? '<p class="detail-note">The day\u2019s shifts are removed. Restore a shift to correct it.</p>'
-            : Number(r.shift_count) > 1 ? twoShiftNote(r) : '<p class="detail-note">A shift can be corrected once it has a punch-out.</p>';
+            : countingShifts(r) > 1 ? twoShiftNote(r) : '<p class="detail-note">A shift can be corrected once it has a punch-out.</p>';
       }
       if (editable) {
         foot = CORR.askClose ? closeAskFoot()
@@ -1806,15 +1835,18 @@
       if (CORR.open && (CORR.mode === "remove" || CORR.mode === "restore")) return shiftPanelPreview();
       if (!CORR.open || !CORR.form || !corrEditable(CORR.row)) return;
       if (CORR.mode !== "correct") {                      // accept / keep / undo: the times as paid, priced as the mark would leave them
-        var rr = CORR.row, aIn = effIn(rr), aOut = effOut(rr);
-        // 0124: a shift over 16 h that is not accepted has no figure
-        if (CORR.mode === "undo" && CORR.kind === "long") { CORR.preview = "overlong"; corrPaintPreview(); return; }
+        var rr = CORR.row, aIn = effIn(rr), aOut = effOut(rr), undoLong = CORR.mode === "undo" && CORR.kind === "long";
+        // 0124: a shift over 16 h that is not accepted has no figure — unless a
+        // correction stands, which settles it by itself (fix 9, 28 Oct 2026: the
+        // preview said Unpriced where the day stays priced, from the corrected times)
+        if (undoLong && !rr.has_correction) { CORR.preview = "overlong"; corrPaintPreview(); return; }
         if (!aOut || !aIn) { CORR.preview = aOut ? "no-in" : "no-out"; corrPaintPreview(); return; }
-        // the early start credited (true), counted from 8 AM (false), or as the shift's own mark (null)
-        var real = (CORR.mode === "undo" || CORR.kind === "early_keep") ? false : CORR.kind === "early" ? true : null;
+        // the early start credited (true), counted from 8 AM (false), or as the shift's own mark (null);
+        // Undo Acceptance leaves the early start as it stands
+        var real = undoLong ? null : (CORR.mode === "undo" || CORR.kind === "early_keep") ? false : CORR.kind === "early" ? true : null;
         CORR.preview = "pending"; corrPaintPreview();
         try {
-          var pr = await Dash.priceShift(rr.staff_id, CORR.spec.workDate, aIn, aOut, real);
+          var pr = await Dash.priceShift(rr.staff_id, CORR.spec.workDate, aIn, aOut, real, liveShiftNo(rr));
           if (!CORR.open) return;
           CORR.preview = pr === null ? "none" : pr;
         } catch (e) { CORR.preview = "none"; }
@@ -1833,7 +1865,7 @@
       if (key === CORR.previewKey) return;
       CORR.previewKey = key; CORR.preview = "pending"; corrPaintPreview();
       try {
-        var priced = await Dash.priceShift(CORR.row.staff_id, CORR.spec.workDate, tin, tout);
+        var priced = await Dash.priceShift(CORR.row.staff_id, CORR.spec.workDate, tin, tout, null, liveShiftNo(CORR.row));
         if (!CORR.open || CORR.previewKey !== key) return;
         CORR.preview = priced === null ? "none" : priced;      // null = the database predates 0127: no preview
       } catch (e) { CORR.preview = "none"; }
@@ -1978,49 +2010,69 @@
     }
     async function shiftPanelGo() {
       if (!shiftCanGo()) return;
-      var r = CORR.row, date = CORR.spec.workDate, n = CORR.shift, restore = CORR.mode === "restore";
+      var r = CORR.row, date = CORR.spec.workDate, n = CORR.shift, restore = CORR.mode === "restore", saved = "";
       CORR.busy = true; CORR.err = ""; shiftPanelRender();
       try {
         var res = restore ? await Dash.restoreShift(r.staff_id, date, n)
                           : await Dash.removeShift(r.staff_id, date, n, String(CORR.form.why || "").trim());
         if (res && res.ok) {
           var when = r.full_name + "\u2019s " + friendlyDate(date) + " shift " + n;
-          var text = restore ? "Restored — " + when + " counts again."
-                             : "Removed — " + when + " pays nothing now. The worker will see the reason in their app.";
-          await corrRefresh();
-          corrClose(true);
-          showNote(text);
-          return;
-        }
-        CORR.err = (res && res.message) || "Could not do that: " + ((res && res.code) || "unknown error");
+          saved = restore ? "Restored — " + when + " counts again."
+                          : "Removed — " + when + " pays nothing now. The worker will see the reason in their app.";
+        } else CORR.err = (res && res.message) || "Could not do that: " + ((res && res.code) || "unknown error");
       } catch (e) { CORR.err = "Could not do that: " + (e.message || e); }
+      if (saved) { await corrDone(r, date, saved); return; }   // the re-read is its own step (fix 2)
       CORR.busy = false; shiftPanelRender();
     }
 
     // the note after a save: above the table, where the row just changed
     var NOTE = "";
-    function showNote(text) {
+    // stay: a note that asks for something (a reload) is not taken away after 10 s
+    function showNote(text, stay) {
       NOTE = text; renderOpenShifts();
-      setTimeout(function () { if (NOTE === text) { NOTE = ""; renderOpenShifts(); } }, 10000);
+      if (!stay) setTimeout(function () { if (NOTE === text) { NOTE = ""; renderOpenShifts(); } }, 10000);
+    }
+    // the Sunday a day's hours can move (0128, fn_worker_day_kind: a Sunday is a
+    // rest day when Mon–Sat of its week are covered) — that week's; a Sunday is its own
+    function weekSunday(day) {
+      var iso = String(day).slice(0, 10);
+      return shiftDay(iso, (7 - new Date(iso + "T00:00:00Z").getUTCDay()) % 7);
     }
     // after a write (fix 6, 28 Oct 2026): what the rest of the page knows about that
     // month is stale — the Exceptions count, the Download panel's workers and its
     // "short by" list, Requests Pending. Read them again.
+    // after a write (fix 1, 28 Oct 2026): a Saturday at a month's end moves the
+    // NEXT month's first Sunday, so that week's Sunday's month is cleared too
     function staleAfterWrite(day) {
       var m = String(day).slice(0, 7);
-      delete DL.unpricedP[m]; delete DL.unpriced[m];
-      Object.keys(DL.cache).forEach(function (k) { if (k.indexOf(m + "|") === 0) delete DL.cache[k]; });
+      [m, weekSunday(day).slice(0, 7)].forEach(function (mm) {
+        delete DL.unpricedP[mm]; delete DL.unpriced[mm];
+        Object.keys(DL.cache).forEach(function (k) { if (k.indexOf(mm + "|") === 0) delete DL.cache[k]; });
+      });
       loadOpenShifts();
       if (VIEW === "month" && MONTH.month === m) readPending(m);
     }
-    // after a write: re-read the one day, let the view patch its rows in
-    async function corrRefresh() {
-      var r = CORR.row, date = CORR.spec.workDate;
-      var rows = dropTest(await Dash.getShifts(date, null));
-      var fresh = rows.filter(function (x) { return x.staff_id === r.staff_id; })[0] || null;
+    // after a write: re-read the one day, let the view patch its rows in. The
+    // worker and the day come from the caller, copied before the write (fix 3);
+    // the caches go first, so a re-read that fails never leaves them stale (fix 2)
+    async function corrRefresh(staffId, date) {
       PUNCH_DAY[date] = null;
       staleAfterWrite(date);
-      if (typeof window.__attRefresh === "function") await window.__attRefresh(date, r.staff_id, fresh);
+      var rows = dropTest(await Dash.getShifts(date, null));
+      var fresh = rows.filter(function (x) { return x.staff_id === staffId; })[0] || null;
+      if (typeof window.__attRefresh === "function") await window.__attRefresh(date, staffId, fresh);
+    }
+    // after a write (fix 2, 28 Oct 2026): the write and the re-read after it are two
+    // steps. A re-read that failed reported a saved change as failed — the office
+    // pressed again ("already removed") or typed it twice. Now the panel closes on
+    // the saved note, and a failed re-read only asks for a reload.
+    async function corrDone(r, date, text) {
+      var warn = "";
+      try { await corrRefresh(r.staff_id, date); }
+      catch (e) { warn = " The page could not refresh after it (" + (e.message || e) + ") — reload the page to see the change."; }
+      CORR.busy = false;
+      corrClose(true);                        // the row behind has changed; the note says so
+      showNote(text + warn, !!warn);
     }
     async function corrSave() {
       var got = CorrectForm.read(CORR.spec, CORR.form);
@@ -2029,25 +2081,24 @@
         var fld = document.querySelector('#corr-panel [data-cf="' + got.field + '"]'); if (fld) fld.focus();
         return;
       }
+      var r = CORR.row, date = CORR.spec.workDate, saved = "";
       CORR.busy = true; CORR.err = ""; CORR.invalid = ""; corrRender();
       try {
-        var res = await Dash.setDayCorrection(CORR.row.staff_id, CORR.spec.workDate, got.inISO, got.outISO, got.why);
+        // a day whose other shift was removed rules the one that counts, by its number (fix 5)
+        var res = await Dash.setDayCorrection(r.staff_id, date, got.inISO, got.outISO, got.why, ruledShiftNo(r));
         if (res && res.ok) {
-          var text = "Saved — " + CORR.row.full_name + "\u2019s hours for " + friendlyDate(CORR.spec.workDate) + " are now " +
-                     String(res.in_at_local || "").slice(11) + " to " + String(res.out_at_local || "").slice(11) +
-                     ". The worker will see the reason in their app.";
-          await corrRefresh();
-          corrClose(true);                        // the row behind has changed; the note says so
-          showNote(text);
-          return;
-        }
-        CORR.err = "Could not save the correction: " + ((res && res.message) || (res && res.code) || "unknown error");
+          saved = "Saved — " + r.full_name + "\u2019s hours for " + friendlyDate(date) + " are now " +
+                  String(res.in_at_local || "").slice(11) + " to " + String(res.out_at_local || "").slice(11) +
+                  ". The worker will see the reason in their app.";
+        } else CORR.err = "Could not save the correction: " + ((res && res.message) || (res && res.code) || "unknown error");
       } catch (e) { CORR.err = "Could not save the correction: " + (e.message || e); }
+      if (saved) { await corrDone(r, date, saved); return; }   // the re-read is its own step (fix 2)
       CORR.busy = false; corrRender();
     }
     // accept a shift as punched / credit or keep an early start / take either back
     async function corrAct() {
       var r = CORR.row, kind = CORR.kind, why = String(CORR.form.why || "").trim(), date = CORR.spec.workDate;
+      var undo = CORR.mode === "undo", n = liveShiftNo(r), saved = "";
       if (CORR.mode === "accept" && kind !== "early_keep" && !why) {
         CORR.err = "Give a reason. It stays on record with your name."; CORR.invalid = "why"; corrRender();
         var fld = document.querySelector('#corr-panel [data-cf="why"]'); if (fld) fld.focus();
@@ -2055,37 +2106,32 @@
       }
       CORR.busy = true; CORR.err = ""; CORR.invalid = ""; corrRender();
       try {
-        var res = CORR.mode === "undo"
-          ? await Dash.clearShiftAcceptance(r.staff_id, date, 1, kind)
-          : await Dash.acceptShiftAsPunched(r.staff_id, date, 1, kind, why || null);
+        // the shift's own number, not shift 1 (fix 5, 28 Oct 2026)
+        var res = undo
+          ? await Dash.clearShiftAcceptance(r.staff_id, date, n, kind)
+          : await Dash.acceptShiftAsPunched(r.staff_id, date, n, kind, why || null);
         if (res && res.ok) {
           var when = r.full_name + "\u2019s " + friendlyDate(date);
-          var text = CORR.mode === "undo" ? "Undone — " + when + " is back as it was."
-                   : kind === "long" ? "Accepted — " + when + " is priced as punched."
-                   : kind === "early" ? "Credited — " + when + " counts from the punch-in."
-                   : "Kept — " + when + " stays counted from 8 AM.";
-          await corrRefresh();
-          corrClose(true);
-          showNote(text);
-          return;
-        }
-        CORR.err = "Could not do that: " + ((res && res.message) || (res && res.code) || "unknown error");
+          saved = undo ? "Undone — " + when + " is back as it was."
+                : kind === "long" ? "Accepted — " + when + " is priced as punched."
+                : kind === "early" ? "Credited — " + when + " counts from the punch-in."
+                : "Kept — " + when + " stays counted from 8 AM.";
+        } else CORR.err = "Could not do that: " + ((res && res.message) || (res && res.code) || "unknown error");
       } catch (e) { CORR.err = "Could not do that: " + (e.message || e); }
+      if (saved) { await corrDone(r, date, saved); return; }   // the re-read is its own step (fix 2)
       CORR.busy = false; corrRender();
     }
     async function corrRemove() {
+      var r = CORR.row, date = CORR.spec.workDate, saved = "";
       CORR.busy = true; CORR.err = ""; corrRender();
       try {
-        var res = await Dash.clearDayCorrection(CORR.row.staff_id, CORR.spec.workDate);
+        // a shift's own ruling once another shift of the day is removed (fix 5)
+        var res = await Dash.clearDayCorrection(r.staff_id, date, ruledShiftNo(r));
         if (res && res.ok) {
-          var text = "Correction removed — " + CORR.row.full_name + "\u2019s own punch times for " + friendlyDate(CORR.spec.workDate) + " stand again.";
-          await corrRefresh();
-          corrClose(true);
-          showNote(text);
-          return;
-        }
-        CORR.err = "Could not remove the correction: " + ((res && res.message) || (res && res.code) || "unknown error");
+          saved = "Correction removed — " + r.full_name + "\u2019s own punch times for " + friendlyDate(date) + " stand again.";
+        } else CORR.err = "Could not remove the correction: " + ((res && res.message) || (res && res.code) || "unknown error");
       } catch (e) { CORR.err = "Could not remove the correction: " + (e.message || e); }
+      if (saved) { await corrDone(r, date, saved); return; }   // the re-read is its own step (fix 2)
       CORR.busy = false; CORR.askRemove = false; corrRender();
     }
     (function wireCorr() {
@@ -2120,8 +2166,11 @@
         ev.preventDefault();
         var a = t.getAttribute("data-corr");
         if (a === "close") corrClose(false);
-        else if (a === "close-discard") corrClose(true);
-        else if (a === "close-keep") { CORR.askClose = false; corrRender(); }
+        else if (a === "close-discard") {                // and the row another menu asked for, if one did (fix 4)
+          var next = CORR.next; corrClose(true);
+          if (next && !CORR.open) corrOpen(next.r, next.view, next.opts);
+        }
+        else if (a === "close-keep") { CORR.askClose = false; CORR.next = null; corrRender(); }
         else if (a === "remove-ask") { CORR.askRemove = true; corrRender(); }
         else if (a === "remove-no") { CORR.askRemove = false; corrRender(); }
         else if (a === "remove-yes") await corrRemove();
@@ -2157,7 +2206,7 @@
       var m = document.getElementById("row-menu");
       if (!r) return;
       var day = String(r.work_date).slice(0, 10), items = [];
-      if (Number(r.shift_count) > 1) items.push('<a class="rm-item" role="menuitem" href="exceptions.html">Rule On Exceptions \u2197</a>');
+      if (countingShifts(r) > 1) items.push('<a class="rm-item" role="menuitem" href="' + demoHref("exceptions.html") + '">Rule On Exceptions \u2197</a>');
       else if (day > Dash.todayKL() || (day === Dash.todayKL() && !shiftEnded(r)))
         items.push('<span class="rm-item is-off" role="menuitem" aria-disabled="true">Edit Hours<small>Once the shift ends</small></span>');
       else if (!r.all_removed) {
@@ -2552,7 +2601,30 @@
           var idx = -1;
           shifts.forEach(function (x, k) { if (x.staff_id === staffId) idx = k; });
           if (idx < 0) return;
-          if (fresh) shifts[idx] = fresh;
+          // the day left the view (fix 6, 28 Oct 2026): a correction-only day whose
+          // correction is removed has no row now, and the old one kept its hours and
+          // "Corrected". The row and its drawer go; the table is drawn again from
+          // what is left, and the drawers that were open stay open.
+          if (!fresh) {
+            var keep = [];
+            shifts.forEach(function (x, k) {
+              var t = tbody.querySelector('tr.shift-row[data-i="' + k + '"]');
+              if (k !== idx && t && t.classList.contains("open")) keep.push(x.staff_id);
+            });
+            shifts.splice(idx, 1);
+            tbody.innerHTML = !shifts.length
+              ? '<tr><td colspan="9" class="empty">No punches on ' + esc(friendlyDate(date)) + ".</td></tr>"
+              : shifts.map(function (s, i) {
+                  return dayRowHtml(s, i) + '<tr class="detail-row" id="d' + i + '" hidden><td colspan="9"></td></tr>';
+                }).join("");
+            punchCache = null;
+            for (var j = 0; j < shifts.length; j++) {
+              if (keep.indexOf(shifts[j].staff_id) >= 0) { setOpen(j, true); await loadDrawer(j); }
+            }
+            applyFind("rows", 9);
+            return;
+          }
+          shifts[idx] = fresh;
           var tr = tbody.querySelector('tr.shift-row[data-i="' + idx + '"]');
           var wasOpen = !!(tr && tr.classList.contains("open"));
           if (tr) tr.outerHTML = dayRowHtml(shifts[idx], idx);
@@ -2876,7 +2948,7 @@
                        by.pending ? by.pending + " Request" + (by.pending === 1 ? "" : "s") + " Pending" : ""].filter(Boolean).join(" · ") +
                       " — the sheet is short by " + (short === 1 ? "that day" : "those " + short + " days") +
                       '. <a href="exceptions.html?from=' + esc(DL.month + "-01") +
-                      "&to=" + esc(monthEndIso(DL.month)) + (DL.company ? "&company=" + esc(DL.company) : "") + '">See Them</a>' +
+                      "&to=" + esc(monthEndIso(DL.month)) + (DL.company ? "&company=" + esc(DL.company) : "") + (DEMO_Q ? "&demo=1" : "") + '">See Them</a>' +
                       (by.progress ? '<span class="dl-progress"> · ' + by.progress + " In Progress Today</span>" : "")
         : by.progress ? '<span class="dl-progress">' + by.progress + " In Progress Today</span>" : "";
     }
@@ -3337,14 +3409,28 @@
       }
       // the panel saved: that day's rows change under the worker, the month is repainted
       window.__attRefresh = async function (day, staffId, fresh) {
-        var open = Array.prototype.map.call(document.querySelectorAll("#month-rows tr.shift-row.open"), function (tr) {
-          return (MONTH.workers[Number(tr.getAttribute("data-i"))] || {}).staff_id;
-        });
+        function openIds() {
+          return Array.prototype.map.call(document.querySelectorAll("#month-rows tr.shift-row.open"), function (tr) {
+            return (MONTH.workers[Number(tr.getAttribute("data-i"))] || {}).staff_id;
+          });
+        }
+        var m = MONTH.month, site = MONTH.site;
         MONTH.rows = MONTH.rows.filter(function (x) { return !(x.staff_id === staffId && String(x.work_date).slice(0, 10) === day); });
         if (fresh) MONTH.rows.push(fresh);
         MONTH.workers = byWorker(MONTH.rows);
-        DL.cache[MONTH.month + "|" + MONTH.site] = MONTH.workers;   // the download reads the same figures
-        paintMonth(open);
+        paintMonth(openIds());
+        // after a write (fix 1, 28 Oct 2026): the day alone is not enough. 0128 can
+        // turn that week's Sunday (Rest Day <-> Normal Day) when a day is removed,
+        // restored or loses its correction, and the month's totals — and the Excel,
+        // which this used to re-seed from the patched rows — kept the old Sunday
+        // until a reload: 7.5 h paid at 1.5x too many. So the whole month is read
+        // again (complete, or the error, as on opening) and the Download panel
+        // reads its own copy (staleAfterWrite cleared it); it is never seeded from
+        // patched rows. A failed read leaves the day patched; the note asks for a reload.
+        var rows = await fetchMonth(m, site);
+        if (MONTH.month !== m || MONTH.site !== site) return;   // the office moved to another month meanwhile
+        MONTH.rows = rows; MONTH.workers = byWorker(rows);
+        paintMonth(openIds());
       };
     }
   </script>
