@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nexus — Attendance</title>
-  <link rel="stylesheet" href="styles.css?v=20261028" />
+  <link rel="stylesheet" href="styles.css?v=20261102" />
 </head>
 <body class="att-readable">
 
@@ -144,7 +144,21 @@
          it is not a filter, so it left the filter row -->
     <div class="table-bar" id="table-bar">
       <span id="showing" aria-live="polite"></span>
-      <a id="punch-toggle" href="#" class="btn att-btn">Show Every Punch</a>
+      <!-- SORT BY (owner's go, 2 Nov 2026): the same rows in another order, either
+           way round. A reorder of what is loaded, never a new read; the choice rides
+           in the address (sort=, dir=) like the status buttons and More Filters do.
+           Drawn like the Company list, so the browser's own drop-down never shows. -->
+      <span class="bar-tools">
+        <div class="site-pick" id="lbl-sort">
+          <button type="button" class="field field-btn field-sort" id="sort-btn" aria-haspopup="listbox" aria-expanded="false" aria-controls="sort-pop">
+            <span class="k">Sort By</span><span class="v" id="sort-word">Name</span><span class="chev" aria-hidden="true"></span></button>
+          <div class="site-pop sort-pop" id="sort-pop" hidden>
+            <ul class="site-list" id="sort-list" role="listbox" aria-label="Sort By" tabindex="-1"></ul>
+          </div>
+        </div>
+        <button type="button" class="btn att-btn sort-dir" id="sort-dir" aria-label="A To Z" title="A To Z">&#8593;</button>
+        <a id="punch-toggle" href="#" class="btn att-btn">Show Every Punch</a>
+      </span>
     </div>
     <div class="table-wrap" id="day-wrap">
       <table class="att-table">
@@ -848,6 +862,7 @@
       var company = document.getElementById("f-company").value;
       var body = document.getElementById(tbodyId), shown = 0, total = 0;
       var items = tbodyId === "month-rows" ? MONTH.workers : DAY_SHIFTS;
+      sortView(tbodyId);                                 // Sort By: the order first, the filters after
       Array.prototype.forEach.call(body.querySelectorAll("tr.shift-row"), function (tr) {
         total++;
         var hit = rowHit(tr, items[Number(tr.getAttribute("data-i"))], words, company, MF);
@@ -885,6 +900,7 @@
       if (company) p.set("company", company); else p.delete("company");
       if (SHOW) p.set("show", SHOW); else p.delete("show");
       mfToParams(p, MF);
+      sortToParams(p);
       history.replaceState(null, "", location.pathname + (p.toString() ? "?" + p : ""));
     }
 
@@ -999,6 +1015,146 @@
       if (w.unconfirmed) st.push("unconfirmed");
       return st;
     }
+    /* ---- SORT BY (owner's go, 2 Nov 2026) ---------------------------------
+       One picker in the table bar and a direction button. A sort only moves the
+       rows already on the page (the day's shifts, the month's workers): nothing
+       is read again and no figure changes. A row with no figure (In Progress,
+       Unpriced, Removed) sits at the bottom when sorting by hours or Over Time,
+       whichever way round, in name order among the others like it. Ties break
+       by name, then employee code, so the order is repeatable. */
+    var SORT = { key: "name", dir: "asc" };
+    // a natural order for employee codes: the letters first, then the number
+    // (BP001 < BP012 < BPS003 < HF083 < HS037); a worker with no code goes last
+    function codeParts(c) { var m = /^([A-Za-z-]*)(\d*)(.*)$/.exec(String(c || "")); return [m[1].toUpperCase(), m[2] === "" ? -1 : Number(m[2]), m[3]]; }
+    function cmpCode(a, b) {
+      if (!a && !b) return 0; if (!a) return 1; if (!b) return -1;
+      var x = codeParts(a), y = codeParts(b);
+      return x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : (x[1] - y[1]) || (x[2] < y[2] ? -1 : x[2] > y[2] ? 1 : 0);
+    }
+    function cmpText(a, b) { return String(a || "").localeCompare(String(b || "")); }
+    function cmpNum(a, b) { return a - b; }
+    // the figure a day row sorts by, or null when the database gave none (not punched out, unpriced, removed)
+    function dayMins(s, ot) { var h = hoursOf(s); return (!h || s.all_removed) ? null : (ot ? Number(s.ot_minutes) || 0 : Number(s.working_minutes)); }
+    // the time the day is paid from (the office's where it ruled), as a number; a removed day has none
+    function dayInTime(s) { var t = s.all_removed ? null : effIn(s); return t ? new Date(t).getTime() : null; }
+    function dayPayRank(s) { var k = payOf(s).key; return k === "unpriced" ? 0 : k === "progress" ? 1 : k === "priced" ? 2 : 3; }
+    function monthPayRank(w) { return monthUnpriced(w) ? 0 : w.progress ? 1 : 2; }
+    // each choice: its word in the list, the direction it opens in, the two direction
+    // words (up, down), the value of a row (null = no figure, always last) and how two compare
+    var SORT_KEYS = {
+      day: [
+        { k: "name", label: "Name",          def: "asc",  words: ["A To Z", "Z To A"],                     val: function (s) { return s.full_name; }, cmp: cmpText },
+        { k: "code", label: "Employee Code", def: "asc",  words: ["A To Z", "Z To A"],                     val: function (s) { return CODES[s.staff_id] || ""; }, cmp: cmpCode },
+        { k: "in",   label: "Punched In",    def: "asc",  words: ["Earliest First", "Latest First"],       val: dayInTime, cmp: cmpNum },
+        { k: "wh",   label: "Working Hours", def: "desc", words: ["Lowest First", "Highest First"],        val: function (s) { return dayMins(s, false); }, cmp: cmpNum },
+        { k: "ot",   label: "Over Time",     def: "desc", words: ["Lowest First", "Highest First"],        val: function (s) { return dayMins(s, true); }, cmp: cmpNum },
+        { k: "site", label: "Site",          def: "asc",  words: ["A To Z", "Z To A"],                     val: function (s) { return siteCode(s.project_id, s.project_name); }, cmp: cmpText },
+        { k: "pay",  label: "Pay",           def: "asc",  words: ["Unpriced First", "Priced First"],       val: dayPayRank, cmp: cmpNum },
+        { k: "loc",  label: "Location",      def: "asc",  words: ["Unconfirmed First", "Confirmed First"], val: function (s) { return locOf(s).key === "bad" ? 0 : 1; }, cmp: cmpNum }
+      ],
+      month: [
+        { k: "name",        label: "Name",          def: "asc",  words: ["A To Z", "Z To A"],              val: function (w) { return w.name; }, cmp: cmpText },
+        { k: "code",        label: "Employee Code", def: "asc",  words: ["A To Z", "Z To A"],              val: function (w) { return CODES[w.staff_id] || ""; }, cmp: cmpCode },
+        { k: "days",        label: "Days Worked",   def: "desc", words: ["Lowest First", "Highest First"], val: function (w) { return w.days; }, cmp: cmpNum },
+        { k: "wh",          label: "Working Hours", def: "desc", words: ["Lowest First", "Highest First"], val: function (w) { return monthMins(w.wm); }, cmp: cmpNum },
+        { k: "ot",          label: "Over Time",     def: "desc", words: ["Lowest First", "Highest First"], val: function (w) { return monthMins(w.om); }, cmp: cmpNum },
+        { k: "unpriced",    label: "Unpriced",      def: "desc", words: ["Fewest First", "Most First"],    val: monthUnpriced, cmp: cmpNum },
+        { k: "unconfirmed", label: "Unconfirmed",   def: "desc", words: ["Fewest First", "Most First"],    val: function (w) { return w.unconfirmed; }, cmp: cmpNum },
+        { k: "pay",         label: "Pay",           def: "asc",  words: ["Unpriced First", "Ready First"], val: monthPayRank, cmp: cmpNum }
+      ]
+    };
+    function sortKeys() { return SORT_KEYS[VIEW === "month" ? "month" : "day"]; }
+    function sortDef(k) { var d = null; sortKeys().forEach(function (x) { if (x.k === k) d = x; }); return d; }
+    function sortIsDefault() { return SORT.key === "name" && SORT.dir === "asc"; }
+    function sortDirWord(d) { d = d || sortDef(SORT.key); return d ? d.words[SORT.dir === "desc" ? 1 : 0] : ""; }
+    // "Sorted By Working Hours, Highest First" for the Showing line and the printed heading; nothing in the default order
+    function sortWords() { var d = sortDef(SORT.key); return !d || sortIsDefault() ? "" : "Sorted By " + d.label + ", " + sortDirWord(d); }
+    // the address keeps the choice, so a link or a reload reproduces the order
+    function sortFromParams(p) {
+      var d = sortDef(p.get("sort") || "");
+      SORT = d ? { key: d.k, dir: p.get("dir") === "desc" ? "desc" : p.get("dir") === "asc" ? "asc" : d.def } : { key: "name", dir: "asc" };
+    }
+    function sortToParams(p) {
+      var d = sortDef(SORT.key);
+      if (!d || sortIsDefault()) { p.delete("sort"); p.delete("dir"); return; }
+      p.set("sort", SORT.key);
+      if (SORT.dir === d.def) p.delete("dir"); else p.set("dir", SORT.dir);
+    }
+    // the rows in the chosen order: the same rows moved, each with its drawer; the "no match" line stays last
+    function sortView(tbodyId) {
+      var body = document.getElementById(tbodyId), items = tbodyId === "month-rows" ? (MONTH && MONTH.workers) : DAY_SHIFTS;
+      var d = sortDef(SORT.key);
+      if (!body || !items || !d) return;
+      var rows = Array.prototype.filter.call(body.children, function (tr) { return tr.classList.contains("shift-row"); });
+      if (rows.length < 2) return;
+      var sign = SORT.dir === "desc" ? -1 : 1;
+      rows.map(function (tr, n) { return { tr: tr, n: n, x: items[Number(tr.getAttribute("data-i"))] || {} }; }).sort(function (a, b) {
+        var va = d.val(a.x), vb = d.val(b.x);
+        var na = va === null || va === undefined, nb = vb === null || vb === undefined;
+        if (na !== nb) return na ? 1 : -1;                                  // no figure: last, either way round
+        var c = na ? 0 : d.cmp(va, vb) * sign;
+        return c || cmpText(a.x.full_name || a.x.name, b.x.full_name || b.x.name) ||
+               cmpCode(CODES[a.x.staff_id], CODES[b.x.staff_id]) || (a.n - b.n);
+      }).forEach(function (r) {
+        var drawer = r.tr.nextElementSibling;
+        body.appendChild(r.tr);
+        if (drawer && drawer.classList.contains("detail-row")) body.appendChild(drawer);
+      });
+      var none = body.querySelector("tr.no-match");
+      if (none) body.appendChild(none);
+    }
+    // the picker and the direction button, drawn and driven like the Company list
+    function wireSortPicker(onChange) {
+      var box = document.getElementById("lbl-sort"), btn = document.getElementById("sort-btn"), pop = document.getElementById("sort-pop"),
+          list = document.getElementById("sort-list"), word = document.getElementById("sort-word"), dirBtn = document.getElementById("sort-dir"), hi = 0;
+      function paintWord() {
+        var d = sortDef(SORT.key) || sortKeys()[0];
+        word.textContent = d.label;
+        dirBtn.innerHTML = SORT.dir === "desc" ? "&#8595;" : "&#8593;";
+        dirBtn.setAttribute("aria-label", sortDirWord(d)); dirBtn.title = sortDirWord(d);
+      }
+      function paint() {
+        list.innerHTML = sortKeys().map(function (d, i) {
+          return '<li role="option" id="sort-o' + i + '" data-i="' + i + '" class="site-o' + (i === hi ? " hl" : "") + (d.k === SORT.key ? " is-on" : "") +
+                 '" aria-selected="' + (i === hi ? "true" : "false") + '">' + esc(d.label) + "</li>";
+        }).join("");
+        list.setAttribute("aria-activedescendant", "sort-o" + hi);
+      }
+      function open() {
+        hi = Math.max(0, sortKeys().map(function (d) { return d.k; }).indexOf(SORT.key));
+        pop.hidden = false; btn.setAttribute("aria-expanded", "true");
+        paint(); list.focus();
+      }
+      function close(back) {
+        if (pop.hidden) return;
+        pop.hidden = true; btn.setAttribute("aria-expanded", "false");
+        if (back) btn.focus();
+      }
+      function pick(i) {
+        var d = sortKeys()[i];
+        close(true);
+        if (!d || d.k === SORT.key) return;
+        SORT = { key: d.k, dir: d.def };                 // each choice opens the way it is usually wanted
+        paintWord(); onChange();
+      }
+      btn.addEventListener("click", function () { if (pop.hidden) open(); else close(true); });
+      list.addEventListener("keydown", function (ev) {
+        var n = sortKeys().length;
+        if (ev.key === "ArrowDown" || ev.key === "ArrowUp") { ev.preventDefault(); hi = (hi + (ev.key === "ArrowDown" ? 1 : n - 1)) % n; paint(); }
+        else if (ev.key === "Home" || ev.key === "End") { ev.preventDefault(); hi = ev.key === "Home" ? 0 : n - 1; paint(); }
+        else if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); pick(hi); }
+        else if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); close(true); }
+        else if (ev.key === "Tab") close(false);
+      });
+      list.addEventListener("click", function (ev) {
+        var li = ev.target.closest ? ev.target.closest("li[data-i]") : null;
+        if (li) pick(Number(li.getAttribute("data-i")));
+      });
+      document.addEventListener("click", function (ev) { if (!pop.hidden && !box.contains(ev.target)) close(false); });
+      dirBtn.addEventListener("click", function () { SORT.dir = SORT.dir === "desc" ? "asc" : "desc"; paintWord(); onChange(); });
+      paintWord();
+      return { paintWord: paintWord };
+    }
     function whyWords(by) {
       return [by.overlong ? by.overlong + " Overlong" : "", by.missed ? by.missed + " No Punch Out" : "",
               by.open ? by.open + " Still Open" : "", by.other ? by.other + " Other" : ""].filter(Boolean).join(" · ");
@@ -1057,9 +1213,11 @@
       var el = document.getElementById("showing"), site = document.getElementById("f-site");
       var what = [SHOW ? SHOW_WORDS[SHOW] : "", q ? "“" + q + "”" : "", company ? companyName(company) : ""].concat(mfWords(MF)).filter(Boolean);
       var siteWord = site.value ? ((DIR[site.value] && DIR[site.value].code) || (site.selectedIndex >= 0 ? site.options[site.selectedIndex].text : "")) : "";
+      var sorted = sortWords();
       el.innerHTML = !LOADED || !total ? "" :
         "Showing " + shown + " of " + total + " worker" + (total === 1 ? "" : "s") +
         (what.length ? " · " + esc(what.join(" · ")) : "") +
+        (sorted ? ' <span class="muted">· ' + esc(sorted) + "</span>" : "") +
         (siteWord ? ' <span class="muted">· ' + esc(siteWord) + " only</span>" : "");
       document.getElementById("btn-clear").hidden = !(q || company || SHOW || site.value || mfCount(MF));
     }
@@ -2321,6 +2479,7 @@
       VIEW = view;
       SHOW = SHOW_WORDS[params.get("show")] ? params.get("show") : "";
       MF = mfFromParams(params);
+      sortFromParams(params);                         // Sort By: the address's choice, for this view
       renderStatus();                                 // the buttons at once; the counts follow the rows
 
       // wire the filters
@@ -2418,6 +2577,7 @@
       companyEl.value = params.get("company") || "";
       companyEl.addEventListener("change", refilter);
       wireCompanyPicker(refilter);
+      wireSortPicker(refilter);                          // a new order: the rows move, the address follows
       document.getElementById("att-status").addEventListener("click", function (ev) {
         var b = ev.target.closest ? ev.target.closest("button[data-show]") : null;
         if (!b || b.disabled) return;
@@ -2745,6 +2905,7 @@
         "<p>Company: " + esc(document.getElementById("f-company").value ? companyFull(document.getElementById("f-company").value) : "All Companies") +
         " · Site: " + esc(siteLabel()) +
         (showing ? " · Showing: " + esc(showing) : "") +
+        (sortWords() ? " · " + esc(sortWords()) : "") +
         " · Printed " + esc(klNow().words) + "</p>";
     }
 
