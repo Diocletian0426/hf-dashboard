@@ -139,7 +139,10 @@
         if (!ok) return false;
       }
       if (DIR.q) {
+        // 0129: the official contract title is searchable too (never shown on
+        // the card — the card keeps the short nickname).
         var hay = ((r.project_code || "") + " " + (r.project_name || "") + " " +
+                   (r.project_full_name || "") + " " +
                    (prog && prog.client_name ? prog.client_name : "")).toLowerCase();
         if (hay.indexOf(DIR.q) === -1) return false;
       }
