@@ -27,6 +27,9 @@
          Reads: existing views + 0032 (supervisors, daily output). -->
     <div class="page-eyebrow">Project</div>
     <h1 id="project-title">Loading…</h1>
+    <!-- 0129: the official contract title, one quiet line under the heading;
+         stays hidden until the office has supplied it (projects.project_full_name). -->
+    <p id="project-full-name" class="page-caption project-full-name" hidden></p>
     <p id="project-sub" class="page-caption"></p>
 
     <div id="kpis" class="cards"></div>
@@ -800,6 +803,11 @@
 
         // ---- header ----
         titleEl.textContent = p.project_code + " — " + (p.project_name || "");
+        var fullEl = document.getElementById("project-full-name");
+        if (p.project_full_name) {
+          fullEl.textContent = p.project_full_name;
+          fullEl.hidden = false;
+        }
         var subBits = [UI.badge(p.project_status,
           "badge-" + (p.project_status === "active" ? "approved" : "gray"))];
         if (p.client_name) subBits.push("Client: " + escHtml(p.client_name));
