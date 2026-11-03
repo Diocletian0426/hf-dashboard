@@ -3929,7 +3929,8 @@ button.switch.exc { box-shadow: 0 0 0 2px var(--amber-soft); border-color: var(-
 .field-sort { width: auto; min-width: 150px; }
 .sort-glyph { flex: 0 0 auto; margin-right: 6px; font-size: 12px; letter-spacing: -2px; color: var(--ink-3); }   /* the reviewer's cue: "this is a sort" */
 .sort-pop { width: 200px; left: auto; right: 0; }
-.sort-dir { height: 34px; padding: 0 12px; font-size: 13px; line-height: 1; justify-content: center; white-space: nowrap; }
+.sort-dirword { flex: 0 0 auto; margin-left: 6px; color: var(--ink-3); white-space: nowrap; }
+.sort-dir { width: 34px; height: 34px; padding: 0; font-size: 16px; line-height: 1; justify-content: center; }   /* icon only: reverses the order */
 
 /* ---- attendance: MORE FILTERS (owner's go, 28 Oct 2026) ------------------------
    A panel under its button at the end of the status buttons, the way the Machines
