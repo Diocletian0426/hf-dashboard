@@ -888,7 +888,7 @@
       if (x.has_correction) return { label: "Corrected", tone: "grey", why: "The office set the times for this day." };
       if (x.missed_out) return { label: "No Punch-Out", tone: "warn", why: "The punch-out never came; the system closed the shift." };
       if (x.has_anomaly) return { label: "Unverified", tone: "warn", why: "A punch did not verify at a site" + (x.has_late_sync ? ", or was sent late from the offline queue" : "") + "." };
-      if (x.long_shift && !x.long_accepted) return { label: "Long Shift", tone: "warn", why: "Over 16 hours and not yet accepted by the office." };
+      if (x.long_shift && !x.long_accepted) return { label: "Long Shift", tone: "warn", why: "Over 20 hours and not yet accepted by the office." };
       if (x.early_start && !x.early_accepted) return { label: "Early Start", tone: "warn", why: "Punched in before 06:00 and not yet accepted by the office." };
       if (x.needs_review) return { label: "To Review", tone: "warn", why: "Waiting for the office's review." };
       if (Number(x.removed_count) > 0) {          // 0128: part of the day removed; the rest counts
