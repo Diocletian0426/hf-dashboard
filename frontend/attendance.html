@@ -151,12 +151,12 @@
       <span class="bar-tools">
         <div class="site-pick" id="lbl-sort">
           <button type="button" class="field field-btn field-sort" id="sort-btn" aria-haspopup="listbox" aria-expanded="false" aria-controls="sort-pop">
-            <span class="k">Sort By</span><span class="v" id="sort-word">Name</span><span class="chev" aria-hidden="true"></span></button>
+            <span class="k">Sort</span><span class="v" id="sort-word">Name</span><span class="chev" aria-hidden="true"></span></button>
           <div class="site-pop sort-pop" id="sort-pop" hidden>
             <ul class="site-list" id="sort-list" role="listbox" aria-label="Sort By" tabindex="-1"></ul>
           </div>
         </div>
-        <button type="button" class="btn att-btn sort-dir" id="sort-dir" aria-label="A To Z" title="A To Z">&#8593;</button>
+        <button type="button" class="btn att-btn sort-dir" id="sort-dir" aria-label="A To Z" title="A To Z">A&#8211;Z</button>
         <a id="punch-toggle" href="#" class="btn att-btn">Show Every Punch</a>
       </span>
     </div>
@@ -1037,30 +1037,27 @@
     function dayMins(s, ot) { var h = hoursOf(s); return (!h || s.all_removed) ? null : (ot ? Number(s.ot_minutes) || 0 : Number(s.working_minutes)); }
     // the time the day is paid from (the office's where it ruled), as a number; a removed day has none
     function dayInTime(s) { var t = s.all_removed ? null : effIn(s); return t ? new Date(t).getTime() : null; }
-    function dayPayRank(s) { var k = payOf(s).key; return k === "unpriced" ? 0 : k === "progress" ? 1 : k === "priced" ? 2 : 3; }
-    function monthPayRank(w) { return monthUnpriced(w) ? 0 : w.progress ? 1 : 2; }
-    // each choice: its word in the list, the direction it opens in, the two direction
-    // words (up, down), the value of a row (null = no figure, always last) and how two compare
+    // each choice: its word in the list, the direction it opens in, the direction words
+    // on the button (up, down) and in full for hover, the value of a row (null = no
+    // figure, always last) and how two compare. Pay and Location are not choices: the
+    // status buttons already pick those rows out (the 2 Nov 2026 review, point 2).
+    var AZ = ["A–Z", "Z–A"], HILO = ["Low–High", "High–Low"], EARLY = ["Early–Late", "Late–Early"];
     var SORT_KEYS = {
       day: [
-        { k: "name", label: "Name",          def: "asc",  words: ["A To Z", "Z To A"],                     val: function (s) { return s.full_name; }, cmp: cmpText },
-        { k: "code", label: "Employee Code", def: "asc",  words: ["A To Z", "Z To A"],                     val: function (s) { return CODES[s.staff_id] || ""; }, cmp: cmpCode },
-        { k: "in",   label: "Punched In",    def: "asc",  words: ["Earliest First", "Latest First"],       val: dayInTime, cmp: cmpNum },
-        { k: "wh",   label: "Working Hours", def: "desc", words: ["Lowest First", "Highest First"],        val: function (s) { return dayMins(s, false); }, cmp: cmpNum },
-        { k: "ot",   label: "Over Time",     def: "desc", words: ["Lowest First", "Highest First"],        val: function (s) { return dayMins(s, true); }, cmp: cmpNum },
-        { k: "site", label: "Site",          def: "asc",  words: ["A To Z", "Z To A"],                     val: function (s) { return siteCode(s.project_id, s.project_name); }, cmp: cmpText },
-        { k: "pay",  label: "Pay",           def: "asc",  words: ["Unpriced First", "Priced First"],       val: dayPayRank, cmp: cmpNum },
-        { k: "loc",  label: "Location",      def: "asc",  words: ["Unconfirmed First", "Confirmed First"], val: function (s) { return locOf(s).key === "bad" ? 0 : 1; }, cmp: cmpNum }
+        { k: "name", label: "Name",          def: "asc",  short: AZ,    words: ["A To Z", "Z To A"],               val: function (s) { return s.full_name; }, cmp: cmpText },
+        { k: "code", label: "Employee Code", def: "asc",  short: AZ,    words: ["A To Z", "Z To A"],               val: function (s) { return CODES[s.staff_id] || ""; }, cmp: cmpCode },
+        { k: "in",   label: "Punched In",    def: "asc",  short: EARLY, words: ["Earliest First", "Latest First"], val: dayInTime, cmp: cmpNum },
+        { k: "wh",   label: "Working Hours", def: "desc", short: HILO,  words: ["Lowest First", "Highest First"],  val: function (s) { return dayMins(s, false); }, cmp: cmpNum },
+        { k: "ot",   label: "Over Time",     def: "desc", short: HILO,  words: ["Lowest First", "Highest First"],  val: function (s) { return dayMins(s, true); }, cmp: cmpNum },
+        { k: "site", label: "Site",          def: "asc",  short: AZ,    words: ["A To Z", "Z To A"],               val: function (s) { return siteCode(s.project_id, s.project_name); }, cmp: cmpText }
       ],
       month: [
-        { k: "name",        label: "Name",          def: "asc",  words: ["A To Z", "Z To A"],              val: function (w) { return w.name; }, cmp: cmpText },
-        { k: "code",        label: "Employee Code", def: "asc",  words: ["A To Z", "Z To A"],              val: function (w) { return CODES[w.staff_id] || ""; }, cmp: cmpCode },
-        { k: "days",        label: "Days Worked",   def: "desc", words: ["Lowest First", "Highest First"], val: function (w) { return w.days; }, cmp: cmpNum },
-        { k: "wh",          label: "Working Hours", def: "desc", words: ["Lowest First", "Highest First"], val: function (w) { return monthMins(w.wm); }, cmp: cmpNum },
-        { k: "ot",          label: "Over Time",     def: "desc", words: ["Lowest First", "Highest First"], val: function (w) { return monthMins(w.om); }, cmp: cmpNum },
-        { k: "unpriced",    label: "Unpriced",      def: "desc", words: ["Fewest First", "Most First"],    val: monthUnpriced, cmp: cmpNum },
-        { k: "unconfirmed", label: "Unconfirmed",   def: "desc", words: ["Fewest First", "Most First"],    val: function (w) { return w.unconfirmed; }, cmp: cmpNum },
-        { k: "pay",         label: "Pay",           def: "asc",  words: ["Unpriced First", "Ready First"], val: monthPayRank, cmp: cmpNum }
+        { k: "name",     label: "Name",          def: "asc",  short: AZ,   words: ["A To Z", "Z To A"],              val: function (w) { return w.name; }, cmp: cmpText },
+        { k: "code",     label: "Employee Code", def: "asc",  short: AZ,   words: ["A To Z", "Z To A"],              val: function (w) { return CODES[w.staff_id] || ""; }, cmp: cmpCode },
+        { k: "days",     label: "Days Worked",   def: "desc", short: HILO, words: ["Lowest First", "Highest First"], val: function (w) { return w.days; }, cmp: cmpNum },
+        { k: "wh",       label: "Working Hours", def: "desc", short: HILO, words: ["Lowest First", "Highest First"], val: function (w) { return monthMins(w.wm); }, cmp: cmpNum },
+        { k: "ot",       label: "Over Time",     def: "desc", short: HILO, words: ["Lowest First", "Highest First"], val: function (w) { return monthMins(w.om); }, cmp: cmpNum },
+        { k: "unpriced", label: "Unpriced",      def: "desc", short: HILO, words: ["Fewest First", "Most First"],    val: monthUnpriced, cmp: cmpNum }
       ]
     };
     function sortKeys() { return SORT_KEYS[VIEW === "month" ? "month" : "day"]; }
@@ -1110,7 +1107,7 @@
       function paintWord() {
         var d = sortDef(SORT.key) || sortKeys()[0];
         word.textContent = d.label;
-        dirBtn.innerHTML = SORT.dir === "desc" ? "&#8595;" : "&#8593;";
+        dirBtn.textContent = d.short[SORT.dir === "desc" ? 1 : 0];    // the direction in words (the 2 Nov review, point 1)
         dirBtn.setAttribute("aria-label", sortDirWord(d)); dirBtn.title = sortDirWord(d);
       }
       function paint() {
