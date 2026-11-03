@@ -186,12 +186,12 @@
       <span><span class="pay pay-removed">Removed</span> The office removed the day's shifts; it pays nothing, the punches stay</span>
       <span><span class="t t-set">06:00 pm<sup class="t-set-print">*</sup></span> In blue: a time the office set; the worker tapped a different one</span>
       <span><span class="short-day">6h 45m</span> Working hours under 7h 30m</span>
-      <span><span class="pay pay-no">Unpriced</span> <span class="facts facts-why">Overlong</span> Over 20 hours; no figure until accepted or ruled on the Exceptions page</span>
+      <span><span class="pay pay-no">Unpriced</span> <span class="facts facts-why">Overlong</span> Over the long-shift line (20 hours to 31 Oct 2026, 24 hours from 1 Nov); no figure until accepted or ruled on the Exceptions page</span>
       <span><span class="pay pay-no">Unpriced</span> <span class="facts facts-why">No Punch Out</span> Left without a punch-out; no figure until HR rules the finish</span>
       <span><span class="pay pay-no">Unpriced</span> <span class="facts facts-why">Still Open</span> An earlier day's shift with no punch-out yet</span>
       <span><span class="loc loc-ok">Confirmed</span> Every punch that day matched the site</span>
       <span><span class="loc loc-bad">Unconfirmed</span> A punch was outside the site, had weak GPS or matched no site; the row opens to show which</span>
-      <span><span class="facts">2 Shifts · 1 Removed · Corrected · Accepted · Early Start · Kept From 8 AM · Rest Day · Public Holiday · No OT</span> Facts about the day; the row opens for the detail</span>
+      <span><span class="facts">2 Shifts · 1 Removed · Corrected · Accepted · Early Start · Kept From Day Start · After 5 PM Not Counted · Rest Day · Public Holiday · No OT</span> Facts about the day; the row opens for the detail</span>
     </div>
 
     <div class="table-wrap" id="month-wrap" hidden>
@@ -781,7 +781,7 @@
       unpriced: "No figure for this day until it is settled on the Exceptions page or ruled here.",
       removed:  "The office removed this day's shifts. It pays nothing; the punches stay on record."
     };
-    // the office looked at an early start and kept it counted from 8 AM (0124)
+    // the office looked at an early start and kept it counted from the day's start (0124)
     function earlyKept(r) { return shiftsOf(r).some(function (x) { return !!x.early_kept; }); }
     function factsOf(r) {
       var f = [], n = shiftsOf(r).length, k = removedCount(r);
@@ -796,7 +796,10 @@
       if (r.has_correction) f.push("Corrected");
       if (r.long_accepted || r.early_accepted) f.push("Accepted");
       if (r.early_start && !r.early_accepted) f.push("Early Start");
-      if (earlyKept(r)) f.push("Kept From 8 AM");
+      if (earlyKept(r)) f.push("Kept From Day Start");
+      // 0131 (from 1 Nov 2026): minutes after 5 PM in a normal shift earn nothing
+      // without an overtime punch-in; the chip says so, the hover says how much
+      if (Number(r.uncounted_minutes) > 0) f.push("After 5 PM Not Counted");
       if (KIND_WORDS[r.day_kind]) f.push(KIND_WORDS[r.day_kind]);
       if (r.ot_eligible === false) f.push("No OT");
       return f;
@@ -810,11 +813,12 @@
       });
       if (r.has_correction) w.push("The office corrected this day" + (r.corrected_by_name ? " (" + r.corrected_by_name + ")" : "") + (r.correction_reason ? " — " + r.correction_reason : "") + ".");
       if (r.long_accepted || r.early_accepted) w.push("The office accepted this shift as punched, or credited its early start.");
-      if (r.early_start && !r.early_accepted) w.push("Started before 6 AM; counted from 8 AM until the office credits it.");
-      if (earlyKept(r)) w.push("Started before 6 AM; the office kept it counted from 8 AM.");
+      if (r.early_start && !r.early_accepted) w.push("Started before 6 AM; counted from the day's start until the office credits it.");
+      if (earlyKept(r)) w.push("Started before 6 AM; the office kept it counted from the day's start.");
+      if (Number(r.uncounted_minutes) > 0) w.push(hm(Number(r.uncounted_minutes) / 60) + " after 5 PM not counted: no overtime punch-in. The worker punches out at 5 PM and in again for overtime.");
       // a no-overtime worker's rest day says so once, below (fix 10: it was said twice)
       if (KIND_WORDS[r.day_kind] && r.ot_eligible !== false) w.push(r.company_code === "Hai Fu" ? "Hai Fu: the whole day counts at 1.5×, so it sits under Over Time."
-        : "HF Bored Piles: paid as an ordinary day; only work beyond 7.5 hours is overtime.");
+        : "HF Bored Piles: paid as an ordinary day.");
       if (r.ot_eligible === false) w.push("Not paid overtime: every worked hour counts as a normal hour.");
       return w.join(" ");
     }
@@ -1250,7 +1254,7 @@
     var MF_NUM = ["wh_gt", "wh_lt", "ot_gt", "dw_gt", "dw_lt"], MF_TIME = ["in_after", "out_before"], MF_SET = ["role", "why", "office"];
     var MF_WHY = [["overlong", "Overlong"], ["missed", "No Punch Out"], ["open", "Still Open"], ["other", "Other"]];
     var MF_OFFICE = [["corrected", "Corrected"], ["accepted", "Accepted As Punched"], ["credited", "Early Start Credited"],
-                     ["kept", "Kept From 8 AM"], ["removed", "Shift Removed"]];
+                     ["kept", "Kept From Day Start"], ["removed", "Shift Removed"]];
     var ROLE = {};                        // staff_id -> role ("boring_operator"), from the staff list
     function mfEmpty() { return { wh_gt: "", wh_lt: "", ot_gt: "", dw_gt: "", dw_lt: "", in_after: "", out_before: "", role: [], why: [], office: [] }; }
     function mfCopy(f) {
@@ -1845,8 +1849,8 @@
       var code = CODES[r.staff_id] || "", co = companyName(COMPANY[r.staff_id]);
       var acting = CORR.mode !== "correct";                 // accept / keep / undo, not a time change
       var editable = corrEditable(r) && !acting;
-      var TITLES = { "accept-long": "Accept As Punched", "accept-early": "Credit Early Start", "accept-early_keep": "Keep From 8 AM",
-                     "undo-long": "Undo Acceptance", "undo-early": "Undo Early Start Credit", "undo-early_keep": "Undo Keep From 8 AM" };
+      var TITLES = { "accept-long": "Accept As Punched", "accept-early": "Credit Early Start", "accept-early_keep": "Keep From Day Start",
+                     "undo-long": "Undo Acceptance", "undo-early": "Undo Early Start Credit", "undo-early_keep": "Undo Keep From Day Start" };
       var eyebrow = acting ? (TITLES[CORR.mode + "-" + CORR.kind] || "Attendance Correction") : "Attendance Correction";
       var foot = "";
       var head = corrHead(eyebrow);
@@ -1999,7 +2003,7 @@
         // preview said Unpriced where the day stays priced, from the corrected times)
         if (undoLong && !rr.has_correction) { CORR.preview = "overlong"; corrPaintPreview(); return; }
         if (!aOut || !aIn) { CORR.preview = aOut ? "no-in" : "no-out"; corrPaintPreview(); return; }
-        // the early start credited (true), counted from 8 AM (false), or as the shift's own mark (null);
+        // the early start credited (true), counted from the day's start (false), or as the shift's own mark (null);
         // Undo Acceptance leaves the early start as it stands
         var real = undoLong ? null : (CORR.mode === "undo" || CORR.kind === "early_keep") ? false : CORR.kind === "early" ? true : null;
         CORR.preview = "pending"; corrPaintPreview();
@@ -2273,7 +2277,7 @@
           saved = undo ? "Undone — " + when + " is back as it was."
                 : kind === "long" ? "Accepted — " + when + " is priced as punched."
                 : kind === "early" ? "Credited — " + when + " counts from the punch-in."
-                : "Kept — " + when + " stays counted from 8 AM.";
+                : "Kept — " + when + " stays counted from the day's start.";
         } else CORR.err = "Could not do that: " + ((res && res.message) || (res && res.code) || "unknown error");
       } catch (e) { CORR.err = "Could not do that: " + (e.message || e); }
       if (saved) { await corrDone(r, date, saved); return; }   // the re-read is its own step (fix 2)
@@ -2376,10 +2380,10 @@
         if (r.long_accepted) items.push('<button type="button" class="rm-item" role="menuitem" data-menu="undo-long">Undo Acceptance</button>');
         if (r.early_start && !r.early_accepted) {
           items.push('<button type="button" class="rm-item" role="menuitem" data-menu="accept-early">Credit Early Start</button>');
-          items.push('<button type="button" class="rm-item" role="menuitem" data-menu="accept-early_keep">Keep From 8 AM</button>');
+          items.push('<button type="button" class="rm-item" role="menuitem" data-menu="accept-early_keep">Keep From Day Start</button>');
         }
         if (r.early_accepted) items.push('<button type="button" class="rm-item" role="menuitem" data-menu="undo-early">Undo Early Start Credit</button>');
-        if (earlyKept(r)) items.push('<button type="button" class="rm-item" role="menuitem" data-menu="undo-early_keep">Undo Keep From 8 AM</button>');
+        if (earlyKept(r)) items.push('<button type="button" class="rm-item" role="menuitem" data-menu="undo-early_keep">Undo Keep From Day Start</button>');
         if (r.has_correction) items.push('<button type="button" class="rm-item rm-danger" role="menuitem" data-menu="remove">Remove Correction</button>');
       }
       // REMOVE SHIFT (owner, 27 Oct 2026; DB 0128): any day up to today with a shift
@@ -2962,7 +2966,8 @@
         [B("Site"), siteName],
         [B("Workers"), list.length],
         [B("Downloaded"), now.words + (who ? " by " + who : "")],
-        ["Over Time Hours = every hour at 1.5× (work beyond 7.5 hours; for Hai Fu the whole of a rest day or public holiday). Month totals on this sheet are rounded down to the half hour; the Daily sheet is to the minute. " +
+        ["Over Time Hours = every hour at 1.5× (for Hai Fu the whole of a rest day or public holiday). Until 31 Oct 2026: work beyond 7.5 hours by the total; each day to the minute, month totals rounded down to the half hour. " +
+         "From 1 Nov 2026: normal hours 8:30 AM to 5:00 PM (10 min grace, 1 h rest); overtime only from a shift punched in at or after 5:00 PM; each day rounded down to the half hour; time after 5:00 PM without an overtime punch-in is not counted (the Daily sheet's After 5 PM Not Counted column). " +
          "Unpriced days are NOT in these totals — settle them on the Exceptions page, then download again."],
         [B("Unresolved When Downloaded"), unresolvedWords()],
         [B("Employee Code"), B("Name"), B("Company"), B("Sites"), B("Days Worked"), B("Working Hours"),
@@ -2991,7 +2996,7 @@
       // Before 0104 the breakdown is absent and Over Time is the whole figure.
       var daily = [[B("Employee Code"), B("Name"), B("Company"), B("Date"), B("Day"), B("Day Kind"), B("Site"),
                     B("In"), B("Out"), B("Working Hours"), B("Over Time Hours"), B("Rest Day Hours"),
-                    B("Public Holiday Hours"), B("Total Hours"),
+                    B("Public Holiday Hours"), B("Total Hours"), B("After 5 PM Not Counted"),
                     B("Counted In Totals"), B("Corrected By Office"), B("Reason"), B("Note")]];
       list.forEach(function (w) {
         w.rows.slice().sort(function (a, b) { return a.work_date < b.work_date ? -1 : 1; }).forEach(function (r) {
@@ -3013,13 +3018,14 @@
             { v: r.work_date, date: true }, DAY_NAMES[new Date(String(r.work_date).slice(0, 10) + "T00:00:00Z").getUTCDay()],
             kindWords(r), siteFull(r), T(effIn(r)), T(effOut(r)),
             counted ? H(wm) : "", counted ? H(wo) : "", counted ? H(rm) : "", counted ? H(hmn) : "", counted ? H(wm + om) : "",
+            counted && Number(r.uncounted_minutes) > 0 ? H(Number(r.uncounted_minutes)) : "",   // 0131: after 5 PM, no overtime punch-in
             counted ? "Yes" : "No", r.has_correction ? "Yes" : "No", r.correction_reason || "", note]);
         });
       });
 
       var blob = XlsxLite.build([
         { name: "Summary", freezeRows: HEAD, widths: [16, 34, 17, 34, 13, 15, 17, 13, 13, 16], rows: sum },
-        { name: "Daily",   freezeRows: 1,    widths: [16, 34, 17, 14, 7, 15, 30, 11, 11, 15, 17, 16, 21, 13, 18, 20, 50, 26], rows: daily }
+        { name: "Daily",   freezeRows: 1,    widths: [16, 34, 17, 14, 7, 15, 30, 11, 11, 15, 17, 16, 21, 13, 22, 18, 20, 50, 26], rows: daily }
       ]);
       XlsxLite.download(blob, fileName("Downloaded", friendlyMonth(month), now, chosen, siteName) + ".xlsx");
     }
@@ -3417,7 +3423,7 @@
           w.wm += Number(r.working_minutes) || 0; w.om += Number(r.ot_minutes) || 0;
         } else if (p.key === "progress") w.progress++;        // today, still at work
         else if (p.why === "No Punch Out") w.missed++;         // 0124: left without a punch-out — unpriced
-        else if (p.why === "Overlong") w.overlong++;            // 0124/0130: over 20 h, unpriced until accepted or ruled
+        else if (p.why === "Overlong") w.overlong++;            // 0124/0130/0131: over the long-shift line, unpriced until accepted or ruled
         else if (p.why === "Still Open") w.open++;              // an earlier day's shift, still open
         else w.other++;                                         // no figure for another reason
         w.rows.push(r);
@@ -3524,9 +3530,9 @@
       note.hidden = false;
       // what the two figures ARE — the one sentence the office needs when a
       // Hai Fu Sunday shows 0 working hours and a full day of Over Time
-      note.innerHTML = '<span class="legend-prose">Over Time is every hour at 1.5×: work beyond 7.5 hours, ' +
+      note.innerHTML = '<span class="legend-prose">Over Time is every hour at 1.5×: until 31 Oct 2026 work beyond 7.5 hours, from 1 Nov 2026 a shift punched in at or after 5 PM, ' +
         "and for Hai Fu the whole of a rest day or public holiday. " +
-        "Month totals are rounded down to the half hour; each day is to the minute. " +
+        "Until October each day is to the minute and the month total is rounded down to the half hour; from November each day is rounded down to the half hour. " +
         "Unpriced days are not in these totals.</span>";
 
       applyFind("month-rows", 7);                     // the filters, the totals, the counts and Showing

@@ -1147,7 +1147,7 @@
   // dates from..to (both inclusive; null = the last 31 days):
   //   missed       left without a punch-out (the worker said so, or 48 h passed)
   //   long_open    still open 20 h or more (0130; was 16 h)
-  //   overlong     closed over 20 h and not accepted: unpriced
+  //   overlong     closed over the long-shift line of its day and not accepted: unpriced (0131: 20 h to 31 Oct 2026, 24 h from 1 Nov)
   //   early_start  a site worker's start before 06:00, not accepted: counts from 08:00
   // A finish time the worker declared rides on the row as request_id /
   // declared_out_at / request_pending (it is a Change Times request). Each row
@@ -1202,7 +1202,7 @@
     }
   }
 
-  // kind 'long'  = accept a shift over 20 h as punched (it prices as tapped; 0130, was 16 h);
+  // kind 'long'  = accept a shift over the long-shift line as punched (it prices as tapped; 0131: 24 h from 1 Nov 2026, 20 h before);
   // kind 'early' = credit a site worker's start before 06:00 from the punch-in;
   // kind 'early_keep' = looked at, kept counted from 08:00 (settled, no pay change).
   // A reason is required for long and early (note_required). Nobody settles
