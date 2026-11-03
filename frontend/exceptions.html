@@ -120,12 +120,12 @@
            missed       left without a punch-out — the worker said so (Start
                         New Shift) or 48 h passed. Unpriced until the office
                         rules a finish time.
-           overlong     closed over 16 h and not accepted: unpriced until the
+           overlong     closed over 20 h (0130; was 16 h) and not accepted: unpriced until the
                         office accepts it as punched or rules a time.
            early_start  a site worker's start before 06:00: counted from 08:00
                         until the office credits the real punch-in (or keeps
                         it at 8 AM — settled, no pay change).
-           long_open    still open 16 h or more. The phone asks the worker at
+           long_open    still open 20 h or more (0130; was 16 h). The phone asks the worker at
                         punch-out; today's is just someone at work (Still
                         Running), an earlier day's can be ruled.
          THE PAGE (15 Oct review, second round):
@@ -230,7 +230,7 @@
       { key: "missed",      label: "Punch Out Missing", icon: "alert", tone: "bad"  },
       { key: "overlong",    label: "Overlong",          icon: "clock", tone: "bad"  },
       { key: "early_start", label: "Early Start",       icon: "play",  tone: "warn" },
-      { key: "long_open",   label: "Open 16 h+",        icon: "clock", tone: "grey" }
+      { key: "long_open",   label: "Open 20 h+",        icon: "clock", tone: "grey" }
     ];
     var KIND_ORDER = {};
     KINDS.forEach(function (k, i) { KIND_ORDER[k.key] = i; });
@@ -357,7 +357,7 @@
           return "Open for " + hoursText(r.hours) + (isToday(r) ? ", still running" : "") +
                  ". The worker is asked when punching out; nothing is priced yet.";
         case "overlong":
-          return "Over 16 hours and not accepted. Unpriced until accepted as punched or a time is ruled.";
+          return "Over 20 hours and not accepted. Unpriced until accepted as punched or a time is ruled.";
         case "early_start":
           return "Started " + Dash.klTime(r.official_in_at || r.in_at) + ". " + minsText(uncreditedMins(r)) +
                  " before 8 AM is not credited until accepted.";

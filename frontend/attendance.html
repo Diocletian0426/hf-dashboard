@@ -186,7 +186,7 @@
       <span><span class="pay pay-removed">Removed</span> The office removed the day's shifts; it pays nothing, the punches stay</span>
       <span><span class="t t-set">06:00 pm<sup class="t-set-print">*</sup></span> In blue: a time the office set; the worker tapped a different one</span>
       <span><span class="short-day">6h 45m</span> Working hours under 7h 30m</span>
-      <span><span class="pay pay-no">Unpriced</span> <span class="facts facts-why">Overlong</span> Over 16 hours; no figure until accepted or ruled on the Exceptions page</span>
+      <span><span class="pay pay-no">Unpriced</span> <span class="facts facts-why">Overlong</span> Over 20 hours; no figure until accepted or ruled on the Exceptions page</span>
       <span><span class="pay pay-no">Unpriced</span> <span class="facts facts-why">No Punch Out</span> Left without a punch-out; no figure until HR rules the finish</span>
       <span><span class="pay pay-no">Unpriced</span> <span class="facts facts-why">Still Open</span> An earlier day's shift with no punch-out yet</span>
       <span><span class="loc loc-ok">Confirmed</span> Every punch that day matched the site</span>
@@ -1994,7 +1994,7 @@
       if (!CORR.open || !CORR.form || !corrEditable(CORR.row)) return;
       if (CORR.mode !== "correct") {                      // accept / keep / undo: the times as paid, priced as the mark would leave them
         var rr = CORR.row, aIn = effIn(rr), aOut = effOut(rr), undoLong = CORR.mode === "undo" && CORR.kind === "long";
-        // 0124: a shift over 16 h that is not accepted has no figure — unless a
+        // 0124/0130: a shift over 20 h (16 h until 0130) that is not accepted has no figure — unless a
         // correction stands, which settles it by itself (fix 9, 28 Oct 2026: the
         // preview said Unpriced where the day stays priced, from the corrected times)
         if (undoLong && !rr.has_correction) { CORR.preview = "overlong"; corrPaintPreview(); return; }
@@ -2369,7 +2369,7 @@
         items.push('<span class="rm-item is-off" role="menuitem" aria-disabled="true">Edit Hours<small>Once the shift ends</small></span>');
       else if (!r.all_removed) {
         items.push('<button type="button" class="rm-item" role="menuitem" data-menu="edit">' + (r.has_correction ? "Change Correction" : "Edit Hours") + "</button>");
-        // the Exceptions page's rulings, here too (0124): a shift over 16 h accepted as
+        // the Exceptions page's rulings, here too (0124): a shift over 20 h (0130) accepted as
         // punched, an early start credited from the punch-in or kept from 8 AM, and
         // either taken back. A correction settles an Overlong shift by itself.
         if (r.long_shift && !r.long_accepted) items.push('<button type="button" class="rm-item" role="menuitem" data-menu="accept-long">Accept As Punched</button>');
@@ -3417,7 +3417,7 @@
           w.wm += Number(r.working_minutes) || 0; w.om += Number(r.ot_minutes) || 0;
         } else if (p.key === "progress") w.progress++;        // today, still at work
         else if (p.why === "No Punch Out") w.missed++;         // 0124: left without a punch-out — unpriced
-        else if (p.why === "Overlong") w.overlong++;            // 0124: over 16 h, unpriced until accepted or ruled
+        else if (p.why === "Overlong") w.overlong++;            // 0124/0130: over 20 h, unpriced until accepted or ruled
         else if (p.why === "Still Open") w.open++;              // an earlier day's shift, still open
         else w.other++;                                         // no figure for another reason
         w.rows.push(r);
