@@ -31,6 +31,7 @@
   // Rail icons: hand-drawn 24x24 strokes. shell.js must stay dependency-free
   // (attendance.html loads it WITHOUT ui.js), so they live here, not in UI.
   var ICONS = {
+    settings:   '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
     overview:   '<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/>' +
                 '<rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>',
     projects:   '<path d="M3.5 6.5A1.5 1.5 0 0 1 5 5h4l2 2.4h8a1.5 1.5 0 0 1 1.5 1.5v9A1.5 1.5 0 0 1 19 19.5H5A1.5 1.5 0 0 1 3.5 18z"/>',
@@ -93,7 +94,10 @@
     { href: "tests.html",           label: "Tests",           icon: "tests"      },
     { href: "bore-logs.html",       label: "Bore Logs",       icon: "borelogs"   },
     // only appears for logins holding users.view (the allowed() filter below)
-    { href: "users.html",           label: "Users",           icon: "users"      }
+    { href: "users.html",           label: "Users",           icon: "users"      },
+    // the work rules and the payroll months (DB 0131/0132): only for logins holding
+    // settings.manage (Administrator, Super Administrator) — the allowed() filter below
+    { href: "settings.html",        label: "Settings",        icon: "settings"   }
   ];
 
   // page -> the permission needed to open it.
@@ -129,7 +133,8 @@
     "claims.html":     "claims.view",     // MONEY — the DB re-checks every call too
     "leave.html":      "leave.view",
     "users.html":      "users.view",      // admin — writes carry their own DB gates
-    "roles.html":      "users.view"       // read-only reference, reached from users.html
+    "roles.html":      "users.view",      // read-only reference, reached from users.html
+    "settings.html":   "settings.manage"  // the work rules and the payroll months (0132); every write is DB-gated the same
   };
 
   // project-scoped pages: they get the context bar and light up "Projects"

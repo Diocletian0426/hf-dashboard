@@ -726,6 +726,7 @@
     // 0131: the rules (get_work_rules) and the words that come from them — the
     // rule in force for a row's company and day; null on an older database
     var RULES = [];
+    var PERIODS = [];   // 0132: the payroll months (get_payroll_periods); a closed month is frozen
     function ruleOf(r) { return Dash.ruleFor(RULES, r && r.company_code, r && r.work_date); }
     function dayEndWord(r) { var u = ruleOf(r); return u && u.day_end ? Dash.clockWord(u.day_end) : "the day's end"; }
     function fullDayMin(r) { var u = ruleOf(r); return u && Number(u.normal_minutes) > 0 ? Number(u.normal_minutes) : FULL_DAY_MIN; }
@@ -3433,6 +3434,7 @@
 
       // one call for the whole month, when the database offers it
       RULES = await Dash.getWorkRules().catch(function () { return []; });   // 0131: the words come from the rule
+      PERIODS = await Dash.getPayrollPeriods().catch(function () { return []; });   // 0132: which months are closed
       var ranged = await Dash.getShiftsRange(dates[0], dates[dates.length - 1], site || null);
       if (ranged) { ranged = dropTest(ranged); learnCompany(ranged); return ranged; }
 
@@ -3589,7 +3591,11 @@
       note.hidden = false;
       // what the two figures ARE — the one sentence the office needs when a
       // Hai Fu Sunday shows 0 working hours and a full day of Over Time
-      note.innerHTML = '<span class="legend-prose">' + esc(ruleNote("", MONTH.month, false)) + "</span>";   // 0131: the rule's own words
+      // 0132: a closed month is read from its snapshot and takes no change — say so first
+      var closedLine = PERIODS.filter(function (p) { return p.status === "closed" && String(p.period_month).slice(0, 7) === String(MONTH.month).slice(0, 7); })
+        .map(function (p) { return companyFull(p.company_code) + ": closed for payroll on " + dateWord(p.closed_at) + (p.closed_by_name ? " by " + p.closed_by_name : "") + "; the figures are frozen."; }).join(" ");
+      note.innerHTML = (closedLine ? '<span class="legend-prose">' + esc(closedLine) + "</span> " : "") +
+        '<span class="legend-prose">' + esc(ruleNote("", MONTH.month, false)) + "</span>";   // 0131: the rule's own words
 
       applyFind("month-rows", 7);                     // the filters, the totals, the counts and Showing
       (openIds || []).forEach(function (id) {            // the drawers that were open stay open

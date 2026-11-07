@@ -1184,7 +1184,8 @@
   // fixed text. Asked once per page load; an older database (no function)
   // answers [] and the pages fall back to generic words.
   var rulesPromise = null;
-  function getWorkRules() {
+  function getWorkRules(fresh) {
+    if (fresh) rulesPromise = null;          // the Settings page re-reads after a write
     if (!rulesPromise) {
       rulesPromise = q(sb.rpc("get_work_rules")).then(function (rows) { return rows || []; }).catch(function (e) {
         rulesPromise = null;
@@ -1217,6 +1218,34 @@
     if (!m) return "";
     var h = Number(m[1]);
     return ((h % 12) || 12) + ":" + m[2] + " " + (h < 12 ? "AM" : "PM");
+  }
+
+  // 0132: the payroll months and the rule writes behind the Settings page.
+  // close / reopen / set / delete answer { ok, code, message, ... } like every
+  // office write; the page shows the message as it is.
+  async function getPayrollPeriods() {
+    try {
+      return (await q(sb.rpc("get_payroll_periods"))) || [];
+    } catch (e) {
+      if (isMissingFunction(e)) return [];
+      throw e;
+    }
+  }
+  function closePayrollMonth(companyCode, monthIso, note) {
+    return q(sb.rpc("close_payroll_month", { p_company_code: companyCode, p_month: monthIso, p_note: note || null }));
+  }
+  function reopenPayrollMonth(companyCode, monthIso, reason) {
+    return q(sb.rpc("reopen_payroll_month", { p_company_code: companyCode, p_month: monthIso, p_reason: reason }));
+  }
+  function setWorkRule(r) {
+    return q(sb.rpc("set_work_rule", {
+      p_company_code: r.company_code, p_effective_from: r.effective_from, p_mode: r.mode,
+      p_day_start: r.day_start, p_day_end: r.day_end, p_rest_minutes: r.rest_minutes, p_grace_minutes: r.grace_minutes,
+      p_round_minutes: r.round_minutes, p_overlong_hours: r.overlong_hours, p_question_hours: r.question_hours,
+      p_normal_minutes: r.normal_minutes, p_rest_gate_minutes: r.rest_gate_minutes, p_note: r.note || null }));
+  }
+  function deleteWorkRule(ruleId) {
+    return q(sb.rpc("delete_work_rule", { p_rule_id: ruleId }));
   }
 
   // The figure a ruling WOULD give, before it is saved (DB 0127 price_shift,
@@ -2108,6 +2137,8 @@
     getPunchExceptions: getPunchExceptions,
     getUnpricedDays: getUnpricedDays,
     getWorkRules: getWorkRules, ruleFor: ruleFor, clockWord: clockWord,   // 0131
+    getPayrollPeriods: getPayrollPeriods, closePayrollMonth: closePayrollMonth, reopenPayrollMonth: reopenPayrollMonth,   // 0132
+    setWorkRule: setWorkRule, deleteWorkRule: deleteWorkRule,
     priceShift: priceShift,
     acceptShiftAsPunched: acceptShiftAsPunched,
     clearShiftAcceptance: clearShiftAcceptance,
