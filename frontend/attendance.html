@@ -185,13 +185,13 @@
       <span><span class="pay pay-progress">In Progress</span> Punched in today, not out yet</span>
       <span><span class="pay pay-removed">Removed</span> The office removed the day's shifts; it pays nothing, the punches stay</span>
       <span><span class="t t-set">06:00 pm<sup class="t-set-print">*</sup></span> In blue: a time the office set; the worker tapped a different one</span>
-      <span><span class="short-day">6h 45m</span> Working hours under 7h 30m</span>
-      <span><span class="pay pay-no">Unpriced</span> <span class="facts facts-why">Overlong</span> Over the long-shift line (20 hours to 31 Oct 2026, 24 hours from 1 Nov); no figure until accepted or ruled on the Exceptions page</span>
+      <span><span class="short-day">6h 45m</span> Working hours under a full day</span>
+      <span><span class="pay pay-no">Unpriced</span> <span class="facts facts-why">Overlong</span> Over the long-shift line; no figure until accepted or ruled on the Exceptions page</span>
       <span><span class="pay pay-no">Unpriced</span> <span class="facts facts-why">No Punch Out</span> Left without a punch-out; no figure until HR rules the finish</span>
       <span><span class="pay pay-no">Unpriced</span> <span class="facts facts-why">Still Open</span> An earlier day's shift with no punch-out yet</span>
       <span><span class="loc loc-ok">Confirmed</span> Every punch that day matched the site</span>
       <span><span class="loc loc-bad">Unconfirmed</span> A punch was outside the site, had weak GPS or matched no site; the row opens to show which</span>
-      <span><span class="facts">2 Shifts · 1 Removed · Corrected · Accepted · Early Start · Kept From Day Start · After 5 PM Not Counted · Rest Day · Public Holiday · No OT</span> Facts about the day; the row opens for the detail</span>
+      <span><span class="facts">2 Shifts · 1 Removed · Corrected · Accepted · Early Start · Kept From Day Start · After-Hours Not Counted · Rest Day · Public Holiday · No OT</span> Facts about the day; the row opens for the detail</span>
     </div>
 
     <div class="table-wrap" id="month-wrap" hidden>
@@ -722,15 +722,73 @@
        is seen without adding anything up. Not a Hai Fu rest day or public holiday
        (0 working there by design: every hour counts as OT), not a removed day
        (0 on purpose). Display only: the figure itself is the database's. */
-    var FULL_DAY_MIN = 450;
+    var FULL_DAY_MIN = 450;                // the fallback when no rule is known
+    // 0131: the rules (get_work_rules) and the words that come from them — the
+    // rule in force for a row's company and day; null on an older database
+    var RULES = [];
+    function ruleOf(r) { return Dash.ruleFor(RULES, r && r.company_code, r && r.work_date); }
+    function dayEndWord(r) { var u = ruleOf(r); return u && u.day_end ? Dash.clockWord(u.day_end) : "the day's end"; }
+    function fullDayMin(r) { var u = ruleOf(r); return u && Number(u.normal_minutes) > 0 ? Number(u.normal_minutes) : FULL_DAY_MIN; }
+    function dateWord(iso) {
+      return new Date(String(iso).slice(0, 10) + "T00:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+    }
+    // one sentence for a rule row, in the rule's own figures
+    function ruleWords(u, who, until) {
+      // "From 1 Nov 2026:" for the rule in force; "until 31 Oct 2026:" for one a later rule replaced
+      var when = until ? "until " + dateWord(until) : "from " + dateWord(u.effective_from);
+      var lead = who ? who + ", " + when + ": " : when.charAt(0).toUpperCase() + when.slice(1) + ": ";
+      var restW = hm(Number(u.rest_minutes) / 60) + " rest";
+      var roundW = Number(u.round_minutes) <= 1 ? "each day to the minute, the month total rounded down to the half hour"
+                 : "each day rounded down to " + (Number(u.round_minutes) === 30 ? "the half hour" : Number(u.round_minutes) + " minutes");
+      var lineW = "a shift over " + Number(u.overlong_hours) + " hours waits for the office";
+      if (u.mode === "clock") {
+        var end = Dash.clockWord(u.day_end);
+        return lead + "normal hours " + Dash.clockWord(u.day_start) + " to " + end + " (" + Number(u.grace_minutes) + " min grace at the start, " + restW + "); " +
+               "overtime only from a shift punched in at or after " + end + " or before 6 AM; time after " + end + " without an overtime punch-in is not counted; " +
+               roundW + "; " + lineW + ".";
+      }
+      return lead + "credited from " + Dash.clockWord(u.day_start) + " (" + restW + "); " + hm(Number(u.normal_minutes) / 60) + " a day, overtime beyond that by the total; " +
+             roundW + "; " + lineW + ".";
+    }
+    // the note for a month: the rules in force during it (two when the rule
+    // changed inside the month), per company only when the companies differ
+    function ruleNote(companyCode, monthIso, excel) {
+      var head = "Over Time Hours = every hour at 1.5× (for Hai Fu the whole of a rest day or public holiday). ";
+      var tail = excel ? "Unpriced days are NOT in these totals — settle them on the Exceptions page, then download again."
+                       : "Unpriced days are not in these totals.";
+      var ym = String(monthIso || "").slice(0, 7);
+      if (!ym || !RULES.length) return head + "Each day follows the rule in force on that day. " + tail;
+      var codes = companyCode ? [companyCode] : ["HF-BP", "Hai Fu"], seen = {}, parts = [];
+      codes.forEach(function (code) {
+        [ym + "-01", monthEndIso(ym)].forEach(function (d) {
+          var u = Dash.ruleFor(RULES, code, d);
+          if (!u) return;
+          var key = [u.mode, u.day_start, u.day_end, u.grace_minutes, u.rest_minutes, u.round_minutes, u.overlong_hours, u.effective_from].join("|");
+          if (seen[key]) { if (seen[key].indexOf(code) < 0) seen[key].push(code); return; }
+          seen[key] = [code]; parts.push({ u: u, codes: seen[key] });
+        });
+      });
+      // the day before the next rule of the same company, if there is one
+      function untilOf(u) {
+        var next = null;
+        RULES.forEach(function (r) {
+          if (r.company_code !== u.company_code || String(r.effective_from) <= String(u.effective_from)) return;
+          if (!next || String(r.effective_from) < String(next)) next = String(r.effective_from).slice(0, 10);
+        });
+        return next ? new Date(new Date(next + "T00:00:00Z").getTime() - 86400000).toISOString().slice(0, 10) : null;
+      }
+      return head + parts.map(function (p) {
+        return ruleWords(p.u, codes.length > 1 && p.codes.length === 1 ? companyFull(p.codes[0]) : "", untilOf(p.u));
+      }).join(" ") + " " + tail;
+    }
     function isShortDay(r) {
       if (r.working_minutes === null || r.working_minutes === undefined || r.all_removed) return false;
       if (r.company_code === "Hai Fu" && (r.day_kind === "rest" || r.day_kind === "holiday")) return false;
-      return Number(r.working_minutes) < FULL_DAY_MIN;
+      return Number(r.working_minutes) < fullDayMin(r);
     }
     function workCell(r, h) {
       if (!h) return "—";
-      return isShortDay(r) ? '<span class="short-day" title="Under 7h 30m">' + hm(h.normal) + "</span>" : hm(h.normal);
+      return isShortDay(r) ? '<span class="short-day" title="Under a full day">' + hm(h.normal) + "</span>" : hm(h.normal);
     }
 
     /* ---- THE SHIFTS OF A DAY (Remove Shift, DB 0128) -------------------------
@@ -799,7 +857,7 @@
       if (earlyKept(r)) f.push("Kept From Day Start");
       // 0131 (from 1 Nov 2026): minutes after 5 PM in a normal shift earn nothing
       // without an overtime punch-in; the chip says so, the hover says how much
-      if (Number(r.uncounted_minutes) > 0) f.push("After 5 PM Not Counted");
+      if (Number(r.uncounted_minutes) > 0) f.push("After-Hours Not Counted");
       if (KIND_WORDS[r.day_kind]) f.push(KIND_WORDS[r.day_kind]);
       if (r.ot_eligible === false) f.push("No OT");
       return f;
@@ -815,7 +873,7 @@
       if (r.long_accepted || r.early_accepted) w.push("The office accepted this shift as punched, or credited its early start.");
       if (r.early_start && !r.early_accepted) w.push("Started before 6 AM; counted from the day's start until the office credits it.");
       if (earlyKept(r)) w.push("Started before 6 AM; the office kept it counted from the day's start.");
-      if (Number(r.uncounted_minutes) > 0) w.push(hm(Number(r.uncounted_minutes) / 60) + " after 5 PM not counted: no overtime punch-in. The worker punches out at 5 PM and in again for overtime.");
+      if (Number(r.uncounted_minutes) > 0) w.push(hm(Number(r.uncounted_minutes) / 60) + " after " + dayEndWord(r) + " not counted: no overtime punch-in. The worker punches out at " + dayEndWord(r) + " and in again for overtime.");
       // a no-overtime worker's rest day says so once, below (fix 10: it was said twice)
       if (KIND_WORDS[r.day_kind] && r.ot_eligible !== false) w.push(r.company_code === "Hai Fu" ? "Hai Fu: the whole day counts at 1.5×, so it sits under Over Time."
         : "HF Bored Piles: paid as an ordinary day.");
@@ -2635,8 +2693,10 @@
             : Promise.resolve([]),
           loadDirectory(),
           showRaw ? Dash.getRecentPunches(date, site || null, 1000) : Promise.resolve(null),
-          loadCodes()
+          loadCodes(),
+          Dash.getWorkRules().catch(function () { return []; })   // 0131: the words come from the rule
         ]);
+        RULES = results[5] || [];
         var shifts = dropTest(results[0]), missing = results[1], punches = results[3];
         learnCompany(shifts);
         // in name order — the day function returns its rows in no fixed order
@@ -2966,9 +3026,7 @@
         [B("Site"), siteName],
         [B("Workers"), list.length],
         [B("Downloaded"), now.words + (who ? " by " + who : "")],
-        ["Over Time Hours = every hour at 1.5× (for Hai Fu the whole of a rest day or public holiday). Until 31 Oct 2026: work beyond 7.5 hours by the total; each day to the minute, month totals rounded down to the half hour. " +
-         "From 1 Nov 2026: normal hours 8:30 AM to 5:00 PM (10 min grace, 1 h rest); overtime only from a shift punched in at or after 5:00 PM; each day rounded down to the half hour; time after 5:00 PM without an overtime punch-in is not counted (the Daily sheet's After 5 PM Not Counted column). " +
-         "Unpriced days are NOT in these totals — settle them on the Exceptions page, then download again."],
+        [ruleNote(chosen, month, true)],   // 0131: the rule's own words for this month
         [B("Unresolved When Downloaded"), unresolvedWords()],
         [B("Employee Code"), B("Name"), B("Company"), B("Sites"), B("Days Worked"), B("Working Hours"),
          B("Over Time Hours"), B("Total Hours"), B("Days Unpriced"), B("Days In Progress")]];
@@ -2996,7 +3054,7 @@
       // Before 0104 the breakdown is absent and Over Time is the whole figure.
       var daily = [[B("Employee Code"), B("Name"), B("Company"), B("Date"), B("Day"), B("Day Kind"), B("Site"),
                     B("In"), B("Out"), B("Working Hours"), B("Over Time Hours"), B("Rest Day Hours"),
-                    B("Public Holiday Hours"), B("Total Hours"), B("After 5 PM Not Counted"),
+                    B("Public Holiday Hours"), B("Total Hours"), B("After-Hours Not Counted"),
                     B("Counted In Totals"), B("Corrected By Office"), B("Reason"), B("Note")]];
       list.forEach(function (w) {
         w.rows.slice().sort(function (a, b) { return a.work_date < b.work_date ? -1 : 1; }).forEach(function (r) {
@@ -3374,6 +3432,7 @@
       if (!dates.length) return all;            // a month that has not started
 
       // one call for the whole month, when the database offers it
+      RULES = await Dash.getWorkRules().catch(function () { return []; });   // 0131: the words come from the rule
       var ranged = await Dash.getShiftsRange(dates[0], dates[dates.length - 1], site || null);
       if (ranged) { ranged = dropTest(ranged); learnCompany(ranged); return ranged; }
 
@@ -3530,10 +3589,7 @@
       note.hidden = false;
       // what the two figures ARE — the one sentence the office needs when a
       // Hai Fu Sunday shows 0 working hours and a full day of Over Time
-      note.innerHTML = '<span class="legend-prose">Over Time is every hour at 1.5×: until 31 Oct 2026 work beyond 7.5 hours, from 1 Nov 2026 a shift punched in at or after 5 PM, ' +
-        "and for Hai Fu the whole of a rest day or public holiday. " +
-        "Until October each day is to the minute and the month total is rounded down to the half hour; from November each day is rounded down to the half hour. " +
-        "Unpriced days are not in these totals.</span>";
+      note.innerHTML = '<span class="legend-prose">' + esc(ruleNote("", MONTH.month, false)) + "</span>";   // 0131: the rule's own words
 
       applyFind("month-rows", 7);                     // the filters, the totals, the counts and Showing
       (openIds || []).forEach(function (id) {            // the drawers that were open stay open

@@ -120,7 +120,7 @@
            missed       left without a punch-out — the worker said so (Start
                         New Shift) or 48 h passed. Unpriced until the office
                         rules a finish time.
-           overlong     closed over the long-shift line of its day (0131: 20 h to 31 Oct 2026, 24 h from 1 Nov) and not accepted: unpriced until the
+           overlong     closed over the long-shift line (0131: the rule's overlong_hours, 20 h) and not accepted: unpriced until the
                         office accepts it as punched or rules a time.
            early_start  a site worker's start before 06:00: counted from 08:00
                         until the office credits the real punch-in (or keeps
@@ -138,7 +138,7 @@
              left (what is wrong, the worker's reason, the punches as tapped
              and as ruled, the worker's request if one waits, Compare With
              Crew), the answer on the right — Accept As Punched / Credit From
-             Punch-In / Keep From 8 AM with a reason, and RULE THE TIMES in
+             Punch-In / Keep From Day Start with a reason, and RULE THE TIMES in
              place (correct-form.js → set_day_correction, per shift), so no
              trip to the Attendance page is needed. A worker's Change Times
              request is answered here too (review_attendance_request); until
@@ -238,6 +238,7 @@
     var KIND_OF = { accept: "long", early: "early", keep: "early_keep" };
     var KIND_LABEL = {};
     KINDS.forEach(function (k) { KIND_LABEL[k.key] = k.label; });
+    var RULES = [];   // 0131: the rules, for the words (get_work_rules)
     var WHY_WORDS = { missed: "Punch Out Missing", open: "Still Open", overlong: "Overlong",
                       unpriced: "Unpriced", pending_request: "Request Pending" };
     var WHY_CLASS = { missed: "ex-kind-missed", open: "ex-kind-long_open", overlong: "ex-kind-overlong",
@@ -284,11 +285,16 @@
     function hoursText(hours) { return minsText((Number(hours) || 0) * 60); }
     function sameTs(a, b) { return !!a && !!b && new Date(a).getTime() === new Date(b).getTime(); }
     // a site worker's start before 06:00: the minutes before 08:00 that are not credited
-    // the day's start: 08:00 to 31 Oct 2026, 08:30 from 1 Nov (DB 0131, company_work_rules —
-    // both companies the same; the figure here is the words beside the row, the pricing is the DB's)
+    // the day's start from the rule in force for the row's company and day (DB 0131,
+    // company_work_rules); the figure here is the words beside the row, the pricing is the DB's
     function dayStartOf(r) {
-      var d = String(r.work_date).slice(0, 10);
-      return d >= "2026-11-01" ? "T08:30:00+08:00" : "T08:00:00+08:00";
+      var u = Dash.ruleFor(RULES, r.company_code, r.work_date);
+      var t = u && u.day_start ? String(u.day_start).slice(0, 5) : (String(r.work_date).slice(0, 10) >= "2026-11-01" ? "08:30" : "08:00");
+      return "T" + t + ":00+08:00";
+    }
+    function lineWord(r) {
+      var u = Dash.ruleFor(RULES, r.company_code, r.work_date);
+      return (u && Number(u.overlong_hours) > 0 ? Number(u.overlong_hours) : 20) + " hours";
     }
     function uncreditedMins(r) {
       var eight = new Date(String(r.work_date).slice(0, 10) + dayStartOf(r)).getTime();
@@ -363,7 +369,7 @@
           return "Open for " + hoursText(r.hours) + (isToday(r) ? ", still running" : "") +
                  ". The worker is asked when punching out; nothing is priced yet.";
         case "overlong":
-          return "Over the long-shift line (" + hoursText(r.hours) + " on site; 20 hours to 31 Oct 2026, 24 hours from 1 Nov) and not accepted. Unpriced until accepted as punched or a time is ruled.";
+          return "Over the long-shift line (" + hoursText(r.hours) + " on site; the line is " + lineWord(r) + ") and not accepted. Unpriced until accepted as punched or a time is ruled.";
         case "early_start":
           return "Started " + Dash.klTime(r.official_in_at || r.in_at) + ". " + minsText(uncreditedMins(r)) +
                  " before the day's start is not credited until accepted (from 1 Nov 2026 an accepted early start counts as overtime).";
@@ -485,7 +491,7 @@
                  '" aria-pressed="' + (a === act) + '">' + label + "</button>";
         }
         if (r.kind === "overlong")    b += btn("accept", "Accept As Punched", "ex-accept");
-        if (r.kind === "early_start") b += btn("early", "Credit From Punch-In", "ex-accept") + btn("keep", "Keep From 8 AM");
+        if (r.kind === "early_start") b += btn("early", "Credit From Punch-In", "ex-accept") + btn("keep", "Keep From Day Start");
         b += btn("rule", "Rule The Times");
         h += '<div class="ex-acts">' + b + "</div>";
         if (a === "accept" || a === "early" || a === "keep") h += confirmHtml(r);
@@ -511,14 +517,14 @@
       } else if (act === "early") {
         what = "Count <b>" + who + "</b>’s shift on " + when + " from the real punch-in, " +
                escHtml(Dash.klTime(r.official_in_at || r.in_at)) + "?";
-        hint = minsText(uncreditedMins(r)) + " more is credited. Site workers normally count from 8 AM; the credit and your " +
+        hint = minsText(uncreditedMins(r)) + " more is credited. Site workers normally count from the day's start; the credit and your " +
                "reason are recorded under your name and can be undone.";
         label = "Reason (required)"; placeholder = "pick one above, or write it"; go = "Credit From Punch-In"; required = true; reasons = ACCEPT_REASONS;
       } else if (act === "keep") {
-        what = "Keep <b>" + who + "</b>’s shift on " + when + " counted from 8 AM?";
-        hint = "The " + minsText(uncreditedMins(r)) + " before 8 AM stay uncredited, as the rule says. The row leaves the queue; " +
+        what = "Keep <b>" + who + "</b>’s shift on " + when + " counted from the day's start?";
+        hint = "The " + minsText(uncreditedMins(r)) + " before the day's start stay uncredited, as the rule says. The row leaves the queue; " +
                "this can be undone.";
-        label = "Note (optional)"; placeholder = "e.g. arrived early by choice"; go = "Keep From 8 AM";
+        label = "Note (optional)"; placeholder = "e.g. arrived early by choice"; go = "Keep From Day Start";
       } else if (act === "approve") {
         what = "Approve <b>" + who + "</b>’s request: finished at " +
                (r.declared_out_at ? escHtml(timeWord(r.declared_out_at, r.work_date)) : "the asked time") + " on " + when + "?";
@@ -760,7 +766,8 @@
       try {
         got = await Promise.all([
           Dash.getPunchExceptions(X.all ? null : X.from, X.all ? null : X.to),
-          Dash.getUnpricedDays(pr[0], pr[1]).catch(function (e) { return { payErr: (e && e.message) || String(e) }; })
+          Dash.getUnpricedDays(pr[0], pr[1]).catch(function (e) { return { payErr: (e && e.message) || String(e) }; }),
+          Dash.getWorkRules().catch(function () { return []; })   // 0131: the words come from the rule
         ]);
       } catch (e) {
         if (my !== loadSeq) return;
@@ -770,6 +777,7 @@
         return;
       }
       if (my !== loadSeq) return;        // a newer filter change already asked
+      RULES = got[2] || [];
       X.loading = false;
       var rows = got[0], pay = got[1];
       if (rows === null) {               // the database predates 0124
@@ -883,7 +891,7 @@
       if (review) {
         X.ok = res.message || (c.act === "approve" ? "Request approved — " + who + "." : "Request rejected — " + who + ".");
       } else {
-        X.ok = (c.act === "accept" ? "Accepted as punched — " : c.act === "early" ? "Credited from the punch-in — " : "Kept from 8 AM — ") + who +
+        X.ok = (c.act === "accept" ? "Accepted as punched — " : c.act === "early" ? "Credited from the punch-in — " : "Kept from the day's start — ") + who +
                (c.act !== "keep" && res.working_minutes != null ? ". The day now prices at " + minsText(res.working_minutes) + "." : ".");
         X.undo = { staffId: r.staff_id, workDate: String(r.work_date).slice(0, 10), shiftNo: r.shift_no, kind: KIND_OF[c.act], who: who };
       }

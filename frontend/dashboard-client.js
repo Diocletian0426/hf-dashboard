@@ -1178,6 +1178,47 @@
     }
   }
 
+  // 0131: the work rules (company_work_rules) — every time word on the pages
+  // (the chip's hover, the legend's prose, the Excel note, the Exceptions
+  // helper) comes from the rule in force for a company and a date, never from
+  // fixed text. Asked once per page load; an older database (no function)
+  // answers [] and the pages fall back to generic words.
+  var rulesPromise = null;
+  function getWorkRules() {
+    if (!rulesPromise) {
+      rulesPromise = q(sb.rpc("get_work_rules")).then(function (rows) { return rows || []; }).catch(function (e) {
+        rulesPromise = null;
+        if (isMissingFunction(e)) return [];
+        throw e;
+      });
+    }
+    return rulesPromise;
+  }
+  // the rule in force on a date for a company: the newest start date at or
+  // before it; a company with no rows follows HF-BP; a date before every row
+  // takes the oldest; nothing known = null
+  function ruleFor(rules, companyCode, dateIso) {
+    if (!rules || !rules.length) return null;
+    var d = String(dateIso || "").slice(0, 10), code = companyCode;
+    if (!rules.some(function (r) { return r.company_code === code; })) code = "HF-BP";
+    var best = null;
+    rules.forEach(function (r) {
+      if (r.company_code !== code || (d && String(r.effective_from) > d)) return;
+      if (!best || String(r.effective_from) > String(best.effective_from)) best = r;
+    });
+    if (!best) rules.forEach(function (r) {
+      if (r.company_code === code && (!best || String(r.effective_from) < String(best.effective_from))) best = r;
+    });
+    return best;
+  }
+  // "17:00:00" -> "5:00 PM"
+  function clockWord(t) {
+    var m = /^(\d{1,2}):(\d{2})/.exec(String(t || ""));
+    if (!m) return "";
+    var h = Number(m[1]);
+    return ((h % 12) || 12) + ":" + m[2] + " " + (h < 12 ? "AM" : "PM");
+  }
+
   // The figure a ruling WOULD give, before it is saved (DB 0127 price_shift,
   // attendance.edit): the same hours rule the day view uses, on the pair of
   // times the office is about to rule. One row, or null when the database
@@ -2066,6 +2107,7 @@
     revokeAttendanceRequest: revokeAttendanceRequest,
     getPunchExceptions: getPunchExceptions,
     getUnpricedDays: getUnpricedDays,
+    getWorkRules: getWorkRules, ruleFor: ruleFor, clockWord: clockWord,   // 0131
     priceShift: priceShift,
     acceptShiftAsPunched: acceptShiftAsPunched,
     clearShiftAcceptance: clearShiftAcceptance,
