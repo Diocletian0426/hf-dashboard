@@ -10,12 +10,13 @@
        One hub for every area's company-wide settings (owner, 9 Nov 2026); the
        first area is Attendance & Payroll. Each thing the office sets follows
        the same shape: added from a coming day, never rewritten once in force
-       (the past keeps its rows). Work Rules per company (dated rows, with the
-       rates for the words and the Excel), Payroll Months (a closed month takes
-       no change and keeps its figures; a close is undone within 24 hours only),
-       the Public Holidays the pricing reads, and the History of every write.
-       Quiet by design: small tables, an inline confirm, the database's own
-       message when it says no. */
+       (the past keeps its rows). Work Rules: one table for both companies
+       (Company, From, Until, Status, Enforced By) and the figures behind View in
+       a side panel (owner, 9 Nov). Payroll Months (a closed month takes no change
+       and keeps its figures; a close is undone within 24 hours only), the Public
+       Holidays the pricing reads, and the History of every write. Quiet by
+       design: small tables, an inline confirm, the database's own message when
+       it says no. */
     .st-area { font-size: 1.3rem; margin: 4px 0 16px; padding-bottom: 6px; border-bottom: 1px solid var(--line, #d9e0ea); color: var(--ink-2, #22304a); }
     .st-section { margin: 0 0 28px; }
     .st-section h3.st-h { font-size: 1.12rem; margin: 0 0 10px; }
@@ -26,11 +27,11 @@
     .st-table th, .st-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line, #e3e8ef); vertical-align: top; }
     .st-table th { font-weight: 700; color: var(--ink-3, #5a6578); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
     .st-table td.n { white-space: nowrap; }
-    .st-table td.w { max-width: 380px; overflow: hidden; text-overflow: ellipsis; }   /* the note on one line, the whole of it on hover */
+    .st-table td.w { white-space: normal; min-width: 220px; }
     .st-table tr.st-year td { background: var(--card-2, #f6f8fb); font-weight: 700; color: var(--ink-3, #5a6578); font-size: 0.8rem; letter-spacing: 0.04em; }
     .st-table tr.st-past td { color: var(--ink-3, #5a6578); }
     .st-inforce td { font-weight: 700; }
-    .st-tag { display: inline-block; border-radius: 999px; padding: 1px 9px; font-size: 0.78rem; background: var(--brand-soft, #e8eef7); color: var(--brand-ink, #0f2a54); margin-left: 6px; font-weight: 700; }
+    .st-tag { display: inline-block; border-radius: 999px; padding: 1px 9px; font-size: 0.78rem; background: var(--brand-soft, #e8eef7); color: var(--brand-ink, #0f2a54); font-weight: 700; }
     .st-tag.grey { background: #eceff3; color: #5a6578; }
     .st-tag.ok { background: #e4f3e8; color: #1f6b3a; }
     .st-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
@@ -48,6 +49,19 @@
     .st-status.ok { color: #1f6b3a; }
     .st-note { color: var(--ink-3, #5a6578); font-size: 0.85rem; }
     .btn.small { min-height: 36px; padding: 4px 12px; font-size: 0.9rem; }
+    /* the rule's side panel: the Manpower drawer's shape — a round ×, Escape or a click outside closes it */
+    .st-drawer { position: fixed; top: 0; right: 0; bottom: 0; z-index: 70; width: min(460px, 96vw); overflow-y: auto; background: #fff;
+                 box-shadow: var(--shadow-2, 0 12px 40px rgba(15, 42, 84, 0.18)); border-radius: 14px 0 0 14px; padding: 18px 22px 28px; }
+    .st-drawer[hidden] { display: none; }
+    .st-drawer .dr-top { display: flex; align-items: flex-start; gap: 8px; }
+    .st-drawer .dr-top h2 { margin: 0; font-size: 1.2rem; line-height: 1.25; flex: 1; }
+    .st-drawer .dr-close { flex: none; width: 40px; height: 40px; padding: 0; border-radius: 999px; font-size: 1.2rem; line-height: 1; }
+    .st-drawer .dr-sub { margin: 4px 0 10px; }
+    .st-drawer h4 { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-3, #5a6578); margin: 16px 0 4px; }
+    .st-drawer .dr-row { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--line, #e3e8ef); font-size: 0.92rem; }
+    .st-drawer .dr-row span:first-child { color: var(--ink-3, #5a6578); }
+    .st-drawer .dr-row span:last-child { text-align: right; }
+    .st-drawer .dr-note { margin: 4px 0 0; font-size: 0.92rem; white-space: normal; }
   </style>
 </head>
 <body>
@@ -86,6 +100,8 @@
 
   </main>
 
+  <aside id="st-drawer" class="st-drawer" hidden aria-label="Work rule"></aside>
+
   <script src="vendor/supabase.js"></script>
   <script src="config.js"></script>
   <script src="dashboard-client.js"></script>
@@ -97,7 +113,7 @@
   <script>
     var esc = UI.esc;
 
-    var S = { rules: [], periods: [], holidays: [], history: null, showHistory: false,
+    var S = { rules: [], periods: [], holidays: [], history: null, showHistory: false, view: null,
               manage: false, canClose: false, canReopen: false, open: {}, today: "", tomorrow: "", firstMonth: "2026-10-01" };
     var COMPANY_NAMES = { "HF-BP": "HF Bored Piles", "Hai Fu": "Hai Fu" };
     var COMPANY_ORDER = ["HF-BP", "Hai Fu"];
@@ -121,7 +137,6 @@
     function modeWord(m) { return m === "clock" ? "By the clock" : "By the total"; }
     function roundWord(n) { n = Number(n); return n <= 1 ? "To the minute" : n + " min"; }
     function rateWord(x) { var n = Number(x); if (!(n > 0)) n = 1.5; return String(Math.round(n * 100) / 100) + "×"; }   // 1.5× when a row predates the rates
-    function ratesWord(r) { return rateWord(r.ot_rate) + " · " + rateWord(r.rest_day_rate) + " · " + rateWord(r.holiday_rate); }
     function timeVal(t) { return String(t || "").slice(0, 5); }           // "08:30:00" -> "08:30"
     function toMins(t) { var p = String(t || "").split(":"); return Number(p[0]) * 60 + Number(p[1] || 0); }
     function ymd(d) { return d.toISOString().slice(0, 10); }
@@ -135,32 +150,56 @@
     }
 
     // ---------------------------------------------------------------- rules
-    function ruleRow(r, inForce) {
-      var future = String(r.effective_from) > S.today;
-      return '<tr class="' + (inForce ? "st-inforce" : "") + '" data-rule="' + esc(r.rule_id) + '">' +
-        '<td class="n">' + esc(dateWord(r.effective_from)) + (inForce ? '<span class="st-tag">In Force</span>' : future ? '<span class="st-tag grey">From Then</span>' : "") + "</td>" +
-        "<td>" + esc(modeWord(r.mode)) + "</td>" +
-        '<td class="n">' + esc(Dash.clockWord(r.day_start)) + " – " + esc(Dash.clockWord(r.day_end)) + "</td>" +
-        '<td class="n">' + esc(Number(r.grace_minutes) + " min") + "</td>" +
-        '<td class="n">' + esc(hm(r.rest_minutes) + " after " + hm(r.rest_gate_minutes)) + "</td>" +
-        '<td class="n">' + esc(hm(r.normal_minutes)) + "</td>" +
-        '<td class="n">' + esc(roundWord(r.round_minutes)) + "</td>" +
-        '<td class="n">' + esc(Number(r.overlong_hours) + " h") + "</td>" +
-        '<td class="n">' + esc(Number(r.question_hours) + " h") + "</td>" +
-        '<td class="n" title="Overtime · rest day · public holiday">' + esc(ratesWord(r)) + "</td>" +
-        '<td class="w" title="' + esc(r.note || "") + '">' + esc(r.note || "") + "</td>" +
-        '<td class="n">' + (future && S.manage ? '<button type="button" class="btn small btn-danger" data-act="withdraw" data-rule="' + esc(r.rule_id) + '">Withdraw</button>' : "") + "</td>" +
+    // One table for both companies (owner, 9 Nov 2026): Company, From, Until,
+    // Status, Enforced By, View. The figures sit behind View in the side panel.
+    function ruleById(id) { return S.rules.filter(function (r) { return r.rule_id === id; })[0] || null; }
+    function rulesSorted() {
+      return S.rules.slice().sort(function (a, b) {
+        return String(b.effective_from).localeCompare(String(a.effective_from))            // newest first
+            || (COMPANY_ORDER.indexOf(a.company_code) - COMPANY_ORDER.indexOf(b.company_code));
+      });
+    }
+    function nextRuleOf(r) {                     // the company's next row after this one, if any
+      var next = null;
+      S.rules.forEach(function (x) {
+        if (x.company_code !== r.company_code || String(x.effective_from) <= String(r.effective_from)) return;
+        if (!next || String(x.effective_from) < String(next.effective_from)) next = x;
+      });
+      return next;
+    }
+    function untilOf(r) { var n = nextRuleOf(r); return n ? addDays(n.effective_from, -1) : null; }
+    function statusOf(r) {
+      if (String(r.effective_from) > S.today) return "Scheduled";
+      var u = Dash.ruleFor(S.rules, r.company_code, S.today);
+      return u && u.rule_id === r.rule_id ? "In Force" : "Ended";
+    }
+    function statusWord(st) {
+      return st === "In Force" ? '<span class="st-tag">In Force</span>' : st === "Scheduled" ? '<span class="st-tag grey">Scheduled</span>' : '<span class="st-note">Ended</span>';
+    }
+    function enforcedBy(r) { return r.created_by_name || "System"; }   // a migration's row has no name
+    function ruleRow(r) {
+      var st = statusOf(r), until = untilOf(r);
+      return '<tr class="' + (st === "In Force" ? "st-inforce" : st === "Ended" ? "st-past" : "") + '" data-rule="' + esc(r.rule_id) + '">' +
+        '<td class="n">' + esc(r.company_code) + "</td>" +
+        '<td class="n">' + esc(dateWord(r.effective_from)) + "</td>" +
+        '<td class="n">' + (until ? esc(dateWord(until)) : "—") + "</td>" +
+        '<td class="n">' + statusWord(st) + "</td>" +
+        '<td class="n">' + esc(enforcedBy(r)) + "</td>" +
+        '<td class="n"><button type="button" class="btn small" data-act="view-rule" data-rule="' + esc(r.rule_id) + '">View</button></td>' +
       "</tr>";
     }
-    function ruleForm(code) {
-      var u = Dash.ruleFor(S.rules, code, S.today) || {};
+    // the form: one for both companies, prefilled from the company's rule in force
+    // or from the row "New Rule From This" was pressed on
+    function ruleForm(o) {
+      var code = o.company || COMPANY_ORDER[0];
+      var u = o.from || Dash.ruleFor(S.rules, code, S.today) || {};
       var next = addMonths(S.today, 1);
       if (next < S.tomorrow) next = S.tomorrow;
-      var id = "f-" + code.replace(/[^A-Za-z0-9]/g, "");
       var mode = u.mode || "clock";
       function opt(v, label, cur) { return '<option value="' + v + '"' + (String(cur) === String(v) ? " selected" : "") + ">" + label + "</option>"; }
       function num(x, dflt) { return esc(x !== undefined && x !== null ? Number(x) : dflt); }
-      return '<form class="st-form" id="' + id + '" data-company="' + esc(code) + '" autocomplete="off">' +
+      return '<form class="st-form" id="f-rule" autocomplete="off">' +
+        '<label>Company <select name="company_code">' + COMPANY_ORDER.map(function (c) { return opt(c, companyName(c), code); }).join("") + "</select></label>" +
         '<label>From <input type="date" name="effective_from" value="' + next + '" min="' + S.tomorrow + '" required></label>' +
         '<label>Rule <select name="mode">' + opt("clock", "By the clock", mode) + opt("total", "By the total", mode) + "</select></label>" +
         '<label>Day starts <input type="time" name="day_start" value="' + esc(timeVal(u.day_start) || "08:30") + '" required></label>' +
@@ -179,12 +218,13 @@
         '<label class="wide">Note <input type="text" name="note" maxlength="500" placeholder="Why this rule, in a line"></label>' +
         '<div class="wide st-actions"><button type="submit" class="btn">Add Rule</button><button type="button" class="btn small" data-act="cancel-rule">Cancel</button>' +
         '<span class="st-note">A rule starts tomorrow or later and is never rewritten once in force; a rule that has not started yet may be changed or withdrawn. The rates are words for the pages and the Excel; the figures stay hours by kind.</span></div>' +
-        '<p class="st-status wide" id="' + id + '-status"></p>' +
+        '<p class="st-status wide" id="f-rule-status"></p>' +
       "</form>";
     }
     // the day length: read-only and worked out from the window by the clock, typed by the total
     function syncDayLength(form) {
       var f = form.elements, lbl = form.querySelector('[data-role="normal-label"]');
+      if (!f.mode || !f.normal_minutes) return;
       if (f.mode.value === "clock") {
         var n = toMins(f.day_end.value) - toMins(f.day_start.value) - (Number(f.rest_minutes.value) || 0);
         f.normal_minutes.value = n > 0 ? n : "";
@@ -197,21 +237,44 @@
     }
     function renderRules() {
       var host = document.getElementById("rules");
-      if (!S.rules.length) { host.innerHTML = UI.empty("No rule rows yet. The database prices every day by the rule in force; add the first rule here."); return; }
-      host.innerHTML = companies().map(function (code) {
-        var rows = S.rules.filter(function (r) { return r.company_code === code; })
-                          .sort(function (a, b) { return String(b.effective_from).localeCompare(String(a.effective_from)); });
-        var u = Dash.ruleFor(S.rules, code, S.today);
-        return '<div class="st-card" data-company="' + esc(code) + '">' +
-          "<h3>" + esc(companyName(code)) + (u ? '<span class="muted">in force: ' + esc(modeWord(u.mode)) + ", " + esc(Dash.clockWord(u.day_start)) + " – " + esc(Dash.clockWord(u.day_end)) + ", " + esc(Number(u.grace_minutes)) + " min grace, " + esc(hm(u.rest_minutes)) + " rest, rounded to " + esc(roundWord(u.round_minutes).toLowerCase()) + ", line " + esc(Number(u.overlong_hours)) + " h, overtime " + esc(rateWord(u.ot_rate)) + "</span>" : "") + "</h3>" +
-          '<div class="table-wrap"><table class="st-table"><thead><tr><th>From</th><th>Rule</th><th>Day</th><th>Grace</th><th>Rest</th><th>Day length</th><th>Round</th><th>Line</th><th>Phone asks</th><th>Rates</th><th>Note</th><th></th></tr></thead><tbody>' +
-          rows.map(function (r) { return ruleRow(r, u && r.rule_id === u.rule_id); }).join("") +
-          "</tbody></table></div>" +
-          (S.manage ? (S.open["rule:" + code] ? ruleForm(code) : '<div class="st-actions"><button type="button" class="btn small" data-act="new-rule" data-company="' + esc(code) + '">New Rule From…</button></div>') : "") +
-        "</div>";
-      }).join("");
+      var rows = rulesSorted();
+      host.innerHTML = '<div class="st-card">' +
+        (rows.length ? '<div class="table-wrap"><table class="st-table"><thead><tr><th>Company</th><th>From</th><th>Until</th><th>Status</th><th>Enforced By</th><th></th></tr></thead><tbody>' +
+                       rows.map(ruleRow).join("") + "</tbody></table></div>"
+                     : UI.empty("No rule rows yet. The database prices every day by the rule in force; add the first rule here.")) +
+        (S.manage ? (S.open.rule ? ruleForm(S.open.rule) : '<div class="st-actions"><button type="button" class="btn small" data-act="new-rule">New Rule From…</button></div>') : "") +
+      "</div>";
       Array.prototype.forEach.call(host.querySelectorAll("form.st-form"), syncDayLength);
     }
+
+    // ---------------------------------------------------------------- the rule's side panel
+    function drawerRow(label, value) { return '<div class="dr-row"><span>' + esc(label) + "</span><span>" + esc(value) + "</span></div>"; }
+    function renderDrawer() {
+      var el = document.getElementById("st-drawer");
+      var r = S.view ? ruleById(S.view) : null;
+      if (!r) { el.hidden = true; el.innerHTML = ""; return; }
+      var st = statusOf(r), until = untilOf(r);
+      el.innerHTML = '<div class="dr-top"><h2>' + esc(companyName(r.company_code)) + " · from " + esc(dateWord(r.effective_from)) + "</h2>" +
+          '<button type="button" class="btn dr-close" data-act="close-drawer" aria-label="Close">×</button></div>' +
+        '<p class="dr-sub">' + statusWord(st) + (until ? ' <span class="st-note">· until ' + esc(dateWord(until)) + "</span>" : "") + ' <span class="st-note">· enforced by ' + esc(enforcedBy(r)) + "</span></p>" +
+        "<h4>Working Schedule</h4>" +
+        drawerRow("Rule", modeWord(r.mode)) + drawerRow("Day Starts", Dash.clockWord(r.day_start)) + drawerRow("Day Ends", Dash.clockWord(r.day_end)) +
+        drawerRow("Grace At The Start", Number(r.grace_minutes) + " min") + drawerRow("Day Length", hm(r.normal_minutes) + (r.mode === "clock" ? " (from the window)" : "")) +
+        "<h4>Hours Calculation</h4>" +
+        drawerRow("Rest", hm(r.rest_minutes)) + drawerRow("Rest Comes Off After", hm(r.rest_gate_minutes)) + drawerRow("Round Each Day Down To", roundWord(r.round_minutes)) +
+        drawerRow("Overtime Rate", rateWord(r.ot_rate)) + drawerRow("Rest Day Rate", rateWord(r.rest_day_rate)) + drawerRow("Public Holiday Rate", rateWord(r.holiday_rate)) +
+        "<h4>Exceptions And Phone</h4>" +
+        drawerRow("Long-Shift Line", Number(r.overlong_hours) + " h") + drawerRow("Phone Asks After", Number(r.question_hours) + " h") +
+        (r.note ? "<h4>Note</h4>" + '<p class="dr-note">' + esc(r.note) + "</p>" : "") +
+        "<h4>Added</h4>" + drawerRow("By", enforcedBy(r)) + drawerRow("On", stampWord(r.created_at)) +
+        (S.manage ? '<div class="st-actions">' +
+            (st === "Scheduled" ? '<button type="button" class="btn small btn-danger" data-act="withdraw" data-rule="' + esc(r.rule_id) + '">Withdraw</button>' : "") +
+            '<button type="button" class="btn small" data-act="rule-from" data-rule="' + esc(r.rule_id) + '">New Rule From This</button></div>' : "") +
+        '<p class="st-status" id="dr-status"></p>';
+      el.hidden = false;
+    }
+    function openRule(id) { S.view = id; renderDrawer(); }
+    function closeDrawer() { S.view = null; renderDrawer(); }
 
     // ---------------------------------------------------------------- periods
     function monthsFor() {
@@ -302,7 +365,7 @@
           "</tbody></table></div>" : UI.empty("Nothing changed yet.")) +
         '<div class="st-actions"><button type="button" class="btn small" data-act="hide-history">Hide History</button></div></div>';
     }
-    function render() { renderRules(); renderPeriods(); renderHolidays(); renderHistory(); }
+    function render() { renderRules(); renderPeriods(); renderHolidays(); renderHistory(); renderDrawer(); }
 
     // ---------------------------------------------------------------- the writes
     function statusEl(id) { return document.getElementById(id); }
@@ -343,9 +406,8 @@
       } catch (e) { sayStatus(st, false, (e && e.message) || String(e)); }
     }
     async function doAddRule(form) {
-      var f = form.elements, code = form.getAttribute("data-company");
-      var st = statusEl(form.id + "-status");
-      var r = { company_code: code, effective_from: f.effective_from.value, mode: f.mode.value,
+      var f = form.elements, st = statusEl("f-rule-status");
+      var r = { company_code: f.company_code.value, effective_from: f.effective_from.value, mode: f.mode.value,
                 day_start: f.day_start.value, day_end: f.day_end.value,
                 rest_minutes: Number(f.rest_minutes.value), grace_minutes: Number(f.grace_minutes.value),
                 round_minutes: Number(f.round_minutes.value), overlong_hours: Number(f.overlong_hours.value),
@@ -358,18 +420,19 @@
       sayStatus(st, true, "Saving…");
       try {
         var v = await Dash.setWorkRule(r);
-        if (v && v.ok) { delete S.open["rule:" + code]; await reload(); return; }
+        if (v && v.ok) { delete S.open.rule; await reload(); return; }
         sayStatus(st, false, (v && v.message) || ("Not saved (" + (v && v.code) + ")."));
       } catch (e) { sayStatus(st, false, (e && e.message) || String(e)); }
     }
     async function doWithdraw(ruleId, btn) {
       if (!btn.getAttribute("data-sure")) { btn.setAttribute("data-sure", "1"); btn.textContent = "Withdraw — sure?"; return; }
       btn.disabled = true;
+      var st = statusEl("dr-status");
       try {
         var v = await Dash.deleteWorkRule(ruleId);
-        if (v && v.ok) { await reload(); return; }
-        document.getElementById("error").innerHTML = UI.errorBanner((v && v.message) || ("Not withdrawn (" + (v && v.code) + ")."));
-      } catch (e) { document.getElementById("error").innerHTML = UI.errorBanner((e && e.message) || String(e)); }
+        if (v && v.ok) { S.view = null; await reload(); return; }
+        sayStatus(st, false, (v && v.message) || ("Not withdrawn (" + (v && v.code) + ")."));
+      } catch (e) { sayStatus(st, false, (e && e.message) || String(e)); }
       btn.disabled = false;
     }
     async function doAddHoliday(form) {
@@ -405,14 +468,21 @@
 
     document.addEventListener("click", function (ev) {
       var b = ev.target.closest("[data-act]");
-      if (!b) return;
+      if (!b) {
+        // a click outside the open panel closes it (the Manpower rule)
+        if (S.view && !ev.target.closest("#st-drawer")) closeDrawer();
+        return;
+      }
       var act = b.getAttribute("data-act"), code = b.getAttribute("data-company"), month = b.getAttribute("data-month");
       if (act === "close" || act === "reopen") { S.open[code + "|" + month] = true; renderPeriods(); }
       else if (act === "cancel") { delete S.open[b.getAttribute("data-key")]; renderPeriods(); }
       else if (act === "close-go") doClose(code, month);
       else if (act === "reopen-go") doReopen(code, month);
-      else if (act === "new-rule") { S.open["rule:" + code] = true; renderRules(); }
-      else if (act === "cancel-rule") { delete S.open["rule:" + b.closest("form").getAttribute("data-company")]; renderRules(); }
+      else if (act === "new-rule") { S.open.rule = { company: COMPANY_ORDER[0], from: null }; renderRules(); }
+      else if (act === "cancel-rule") { delete S.open.rule; renderRules(); }
+      else if (act === "view-rule") openRule(b.getAttribute("data-rule"));
+      else if (act === "close-drawer") closeDrawer();
+      else if (act === "rule-from") { var r = ruleById(b.getAttribute("data-rule")); S.open.rule = { company: r ? r.company_code : COMPANY_ORDER[0], from: r }; closeDrawer(); renderRules(); var f = document.getElementById("f-rule"); if (f) f.scrollIntoView({ block: "nearest" }); }
       else if (act === "withdraw") doWithdraw(b.getAttribute("data-rule"), b);
       else if (act === "new-holiday") { S.open["holiday"] = true; renderHolidays(); }
       else if (act === "cancel-holiday") { delete S.open["holiday"]; renderHolidays(); }
@@ -420,6 +490,7 @@
       else if (act === "show-history") showHistory(true);
       else if (act === "hide-history") showHistory(false);
     });
+    document.addEventListener("keydown", function (ev) { if (ev.key === "Escape" && S.view) closeDrawer(); });
     document.addEventListener("submit", function (ev) {
       var form = ev.target.closest("form.st-form");
       if (!form) return;
@@ -429,12 +500,12 @@
     // the day length follows the window while the rule is by the clock
     document.addEventListener("input", function (ev) {
       var form = ev.target.closest("form.st-form");
-      if (!form || form.id === "f-holiday") return;
+      if (!form || form.id !== "f-rule") return;
       if (["mode", "day_start", "day_end", "rest_minutes"].indexOf(ev.target.name) >= 0) syncDayLength(form);
     });
     document.addEventListener("change", function (ev) {
       var form = ev.target.closest("form.st-form");
-      if (form && form.id !== "f-holiday" && ev.target.name === "mode") syncDayLength(form);
+      if (form && form.id === "f-rule" && ev.target.name === "mode") syncDayLength(form);
     });
 
     window.onShellReady = async function () {

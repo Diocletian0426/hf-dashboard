@@ -57,8 +57,8 @@
   function rule(id, code, from, mode, start, end, rest, grace, round, note) {
     return { rule_id: id, company_code: code, effective_from: from, mode: mode, day_start: start, day_end: end,
              normal_minutes: 450, rest_minutes: rest, rest_gate_minutes: 360, grace_minutes: grace, round_minutes: round,
-             overlong_hours: 20, question_hours: 16, note: note, created_at: "2026-11-07T04:00:00Z", created_by: null,
-             ot_rate: 1.5, rest_day_rate: 1.5, holiday_rate: 1.5 };
+             overlong_hours: 20, question_hours: 16, note: note, created_at: "2026-11-07T04:00:00Z", created_by: null, created_by_name: null,
+             ot_rate: 1.5, rest_day_rate: 1.5, holiday_rate: 1.5 };   // created_by_name null = a migration wrote it (the page says System)
   }
   var OLD_NOTE = "The rule as live until 31 Oct 2026 (0103 … 0130): credited from 08:00, {rest} rest, OT beyond 7.5 h by the total, to the minute, Overlong over 20 h";
   var NEW_NOTE = "Chapter 2 (owner, 3 and 7 Nov 2026): 08:30-17:00 window, 10 min grace at the start only, 1 h rest, overtime only from a shift punched in at or after 17:00 (a start before 06:00 counts as overtime by itself), half-hour round-down per day, Overlong over 20 h; a man not paid overtime keeps his evening as normal hours";
@@ -189,7 +189,7 @@
     Object.assign(row, { mode: r.mode, day_start: r.day_start + ":00", day_end: r.day_end + ":00", normal_minutes: normal,
                          rest_minutes: Number(r.rest_minutes), rest_gate_minutes: Number(r.rest_gate_minutes), grace_minutes: Number(r.grace_minutes),
                          round_minutes: Number(r.round_minutes), overlong_hours: Number(r.overlong_hours), question_hours: Number(r.question_hours),
-                         note: String(r.note || "").trim() || null, created_at: new Date().toISOString(), created_by: null,
+                         note: String(r.note || "").trim() || null, created_at: new Date().toISOString(), created_by: null, created_by_name: ME,
                          ot_rate: rates[0], rest_day_rate: rates[1], holiday_rate: rates[2] });
     if (!same) RULES.push(row);                                   // a future row may be rewritten until its day comes
     remember("work_rule_set", (same ? "Future work rule rewritten for " : "New work rule for ") + r.company_code + " from " + dayWord(r.effective_from) + ": " + r.mode + ", " + r.day_start + "-" + r.day_end +
@@ -335,7 +335,7 @@
     b.innerHTML = page === "settings.html"
       ? "<strong>Demo data</strong> — the rule rows are the ones migration 0131 seeds (with 1.5× rates), the holidays are 0103's Penang list, " +
         "the months and the history are invented, so the page can be reviewed before the database change is applied. Nothing is saved; a reload brings everything back. " +
-        "Try: <em>New Rule From…</em> (tomorrow or later; the day length follows the window by the clock), <em>Close</em> October for Hai Fu (the first try is refused the way " +
+        "Try: <em>View</em> on a rule (its figures in a side panel; Withdraw on a scheduled one), <em>New Rule From…</em> (tomorrow or later; the day length follows the window by the clock), <em>Close</em> October for Hai Fu (the first try is refused the way " +
         "the database refuses it, the second closes it), <em>Reopen</em> October for HF Bored Piles (closed two hours ago, so the 24-hour undo is still open; a reason is required), " +
         "<em>Add Holiday</em> and <em>Remove</em> a coming one, <em>Show History</em>. " +
         "<code>&role=admin</code> on the URL shows the Administrator's view (Close, no Reopen). Drop <code>?demo=1</code> for the real page."
