@@ -26,7 +26,7 @@
     .st-table th, .st-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line, #e3e8ef); vertical-align: top; }
     .st-table th { font-weight: 700; color: var(--ink-3, #5a6578); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
     .st-table td.n { white-space: nowrap; }
-    .st-table td.w { white-space: normal; min-width: 320px; max-width: 460px; }   /* the note wraps, but not into a sliver */
+    .st-table td.w { max-width: 380px; overflow: hidden; text-overflow: ellipsis; }   /* the note on one line, the whole of it on hover */
     .st-table tr.st-year td { background: var(--card-2, #f6f8fb); font-weight: 700; color: var(--ink-3, #5a6578); font-size: 0.8rem; letter-spacing: 0.04em; }
     .st-table tr.st-past td { color: var(--ink-3, #5a6578); }
     .st-inforce td { font-weight: 700; }
@@ -148,7 +148,7 @@
         '<td class="n">' + esc(Number(r.overlong_hours) + " h") + "</td>" +
         '<td class="n">' + esc(Number(r.question_hours) + " h") + "</td>" +
         '<td class="n" title="Overtime · rest day · public holiday">' + esc(ratesWord(r)) + "</td>" +
-        '<td class="w">' + esc(r.note || "") + "</td>" +
+        '<td class="w" title="' + esc(r.note || "") + '">' + esc(r.note || "") + "</td>" +
         '<td class="n">' + (future && S.manage ? '<button type="button" class="btn small btn-danger" data-act="withdraw" data-rule="' + esc(r.rule_id) + '">Withdraw</button>' : "") + "</td>" +
       "</tr>";
     }
