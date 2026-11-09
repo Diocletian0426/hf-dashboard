@@ -755,8 +755,17 @@
     }
     // the note for a month: the rules in force during it (two when the rule
     // changed inside the month), per company only when the companies differ
+    // 0132 (9 Nov): the rates live on the rule row (overtime, rest day, public
+    // holiday); 1.5× when a row predates them. Words only — payroll multiplies.
+    function rateWord(x) { var n = Number(x); if (!(n > 0)) n = 1.5; return String(Math.round(n * 100) / 100) + "×"; }
+    function rateHead(u) {
+      var ot = rateWord(u && u.ot_rate), rd = rateWord(u && u.rest_day_rate), hol = rateWord(u && u.holiday_rate);
+      if (ot === rd && rd === hol) return "Over Time Hours = every hour at " + ot + " (for Hai Fu the whole of a rest day or public holiday). ";
+      return "Over Time Hours = every hour at " + ot + "; for Hai Fu a rest day worked counts the whole day at " + rd + " and a public holiday at " + hol + " (the Daily sheet keeps them apart). ";
+    }
     function ruleNote(companyCode, monthIso, excel) {
-      var head = "Over Time Hours = every hour at 1.5× (for Hai Fu the whole of a rest day or public holiday). ";
+      var ym0 = String(monthIso || "").slice(0, 7);
+      var head = rateHead(RULES.length ? Dash.ruleFor(RULES, companyCode || "HF-BP", ym0 ? monthEndIso(ym0) : Dash.todayKL()) : null);
       var tail = excel ? "Unpriced days are NOT in these totals — settle them on the Exceptions page, then download again."
                        : "Unpriced days are not in these totals.";
       var ym = String(monthIso || "").slice(0, 7);
@@ -3594,9 +3603,24 @@
       // what the two figures ARE — the one sentence the office needs when a
       // Hai Fu Sunday shows 0 working hours and a full day of Over Time
       // 0132: a closed month is read from its snapshot and takes no change — say so first
-      var closedLine = PERIODS.filter(function (p) { return p.status === "closed" && String(p.period_month).slice(0, 7) === String(MONTH.month).slice(0, 7); })
+      var ym = String(MONTH.month).slice(0, 7);
+      var closedLine = PERIODS.filter(function (p) { return p.status === "closed" && String(p.period_month).slice(0, 7) === ym; })
         .map(function (p) { return companyFull(p.company_code) + ": closed for payroll on " + dateWord(p.closed_at) + (p.closed_by_name ? " by " + p.closed_by_name : "") + "; the figures are frozen."; }).join(" ");
+      // 0132 (9 Nov): a month that is over and still open says so, per company with
+      // days in it, so the close is not forgotten; the unpriced count says what stands in the way
+      var openLine = "";
+      if (ym && monthEndIso(ym) < Dash.todayKL()) {
+        var pick = (document.getElementById("f-company") || {}).value;
+        openLine = (pick ? [pick] : ["HF-BP", "Hai Fu"]).filter(function (code) {
+          return MONTH.rows.some(function (r) { return r.company_code === code; })
+              && !PERIODS.some(function (p) { return p.company_code === code && p.status === "closed" && String(p.period_month).slice(0, 7) === ym; });
+        }).map(function (code) {
+          var n = MONTH.rows.filter(function (r) { return r.company_code === code && (r.working_minutes === null || r.working_minutes === undefined); }).length;
+          return companyFull(code) + ": not closed for payroll yet" + (n ? " (" + n + " day" + (n === 1 ? "" : "s") + " without a figure)" : "") + ".";
+        }).join(" ");
+      }
       note.innerHTML = (closedLine ? '<span class="legend-prose">' + esc(closedLine) + "</span> " : "") +
+        (openLine ? '<span class="legend-prose">' + esc(openLine) + "</span> " : "") +
         '<span class="legend-prose">' + esc(ruleNote("", MONTH.month, false)) + "</span>";   // 0131: the rule's own words
 
       applyFind("month-rows", 7);                     // the filters, the totals, the counts and Showing

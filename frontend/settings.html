@@ -7,14 +7,18 @@
   <link rel="stylesheet" href="styles.css" />
   <style>
     /* ============== SETTINGS (DB 0131 / 0132) ==============
-       Two things the office sets, per company: the working-hours RULE, as
-       dated rows (a rule is added from a date and never rewritten once in
-       force — the past keeps its rows), and the PAYROLL MONTHS (a closed
-       month takes no change and is read from its snapshot until a Super
-       Administrator reopens it). Quiet by design: small tables, an inline
-       confirm, the database's own message when it says no. */
+       One hub for every area's company-wide settings (owner, 9 Nov 2026); the
+       first area is Attendance & Payroll. Each thing the office sets follows
+       the same shape: added from a coming day, never rewritten once in force
+       (the past keeps its rows). Work Rules per company (dated rows, with the
+       rates for the words and the Excel), Payroll Months (a closed month takes
+       no change and keeps its figures; a close is undone within 24 hours only),
+       the Public Holidays the pricing reads, and the History of every write.
+       Quiet by design: small tables, an inline confirm, the database's own
+       message when it says no. */
+    .st-area { font-size: 1.3rem; margin: 4px 0 16px; padding-bottom: 6px; border-bottom: 1px solid var(--line, #d9e0ea); color: var(--ink-2, #22304a); }
     .st-section { margin: 0 0 28px; }
-    .st-section h2 { font-size: 1.15rem; margin: 0 0 10px; }
+    .st-section h3.st-h { font-size: 1.12rem; margin: 0 0 10px; }
     .st-card { background: var(--card, #fff); border: 1px solid var(--line, #d9e0ea); border-radius: 12px; padding: 14px 16px; margin: 0 0 14px; }
     .st-card h3 { font-size: 1rem; margin: 0 0 8px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .st-card h3 .muted { font-weight: 400; color: var(--ink-3, #5a6578); font-size: 0.9rem; }
@@ -22,17 +26,22 @@
     .st-table th, .st-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line, #e3e8ef); vertical-align: top; }
     .st-table th { font-weight: 700; color: var(--ink-3, #5a6578); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
     .st-table td.n { white-space: nowrap; }
+    .st-table td.w { white-space: normal; min-width: 220px; }
+    .st-table tr.st-year td { background: var(--card-2, #f6f8fb); font-weight: 700; color: var(--ink-3, #5a6578); font-size: 0.8rem; letter-spacing: 0.04em; }
+    .st-table tr.st-past td { color: var(--ink-3, #5a6578); }
     .st-inforce td { font-weight: 700; }
     .st-tag { display: inline-block; border-radius: 999px; padding: 1px 9px; font-size: 0.78rem; background: var(--brand-soft, #e8eef7); color: var(--brand-ink, #0f2a54); margin-left: 6px; font-weight: 700; }
     .st-tag.grey { background: #eceff3; color: #5a6578; }
     .st-tag.ok { background: #e4f3e8; color: #1f6b3a; }
     .st-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
-    .st-confirm { border: 1px solid var(--line, #d9e0ea); border-radius: 10px; padding: 10px 12px; margin: 8px 0 0; background: var(--card-2, #f6f8fb); }
-    .st-confirm p { margin: 0 0 8px; }
+    .st-confirm { border: 1px solid var(--line, #d9e0ea); border-radius: 10px; padding: 10px 12px; margin: 8px 0 0; background: var(--card-2, #f6f8fb); white-space: normal; }
+    .st-confirm p { margin: 0 0 8px; white-space: normal; }
     .st-confirm input[type=text] { width: min(420px, 100%); min-height: 40px; padding: 6px 10px; border: 1px solid var(--line, #c9d1de); border-radius: 8px; font: inherit; }
     .st-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px 14px; margin: 10px 0 6px; }
     .st-form label { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; color: var(--ink-3, #5a6578); }
+    .st-form label.chk { flex-direction: row; align-items: center; gap: 8px; min-height: 40px; }
     .st-form input, .st-form select { min-height: 40px; padding: 6px 8px; border: 1px solid var(--line, #c9d1de); border-radius: 8px; font: inherit; background: #fff; }
+    .st-form input[readonly] { background: var(--card-2, #f3f5f9); color: var(--ink-3, #5a6578); }
     .st-form .wide { grid-column: 1 / -1; }
     .st-status { margin: 8px 0 0; font-size: 0.92rem; }
     .st-status.bad { color: var(--danger-ink, #9b1c1c); }
@@ -49,18 +58,30 @@
 
     <div class="page-eyebrow">Administration</div>
     <h1>Settings</h1>
-    <p class="page-caption">The working-hours rule and the payroll months, per company. A rule is added from a date and is never rewritten once in force. A closed month takes no change and keeps its figures until a Super Administrator reopens it.</p>
+    <p class="page-caption">The company-wide settings behind the dashboard and the punch app, by area. A setting is added from a coming day and the past is never rewritten; a closed payroll month keeps its figures.</p>
 
     <div id="error"></div>
 
+    <h2 class="st-area" id="area-attendance">Attendance &amp; Payroll</h2>
+
     <section class="st-section" id="rules-section">
-      <h2>Work Rules</h2>
+      <h3 class="st-h">Work Rules</h3>
       <div id="rules"></div>
     </section>
 
     <section class="st-section" id="periods-section">
-      <h2>Payroll Months</h2>
+      <h3 class="st-h">Payroll Months</h3>
       <div id="periods"></div>
+    </section>
+
+    <section class="st-section" id="holidays-section">
+      <h3 class="st-h">Public Holidays</h3>
+      <div id="holidays"></div>
+    </section>
+
+    <section class="st-section" id="history-section">
+      <h3 class="st-h">History</h3>
+      <div id="history"></div>
     </section>
 
   </main>
@@ -76,7 +97,8 @@
   <script>
     var esc = UI.esc;
 
-    var S = { rules: [], periods: [], manage: false, superAdmin: false, open: {}, today: "", firstMonth: "2026-10-01" };
+    var S = { rules: [], periods: [], holidays: [], history: null, showHistory: false,
+              manage: false, canClose: false, canReopen: false, open: {}, today: "", tomorrow: "", firstMonth: "2026-10-01" };
     var COMPANY_NAMES = { "HF-BP": "HF Bored Piles", "Hai Fu": "Hai Fu" };
     var COMPANY_ORDER = ["HF-BP", "Hai Fu"];
 
@@ -85,6 +107,7 @@
       if (!iso) return "";
       return new Date(String(iso).slice(0, 10) + "T00:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
     }
+    function dayWord(iso) { return new Date(String(iso).slice(0, 10) + "T00:00:00Z").toLocaleDateString("en-GB", { weekday: "short", timeZone: "UTC" }); }
     function stampWord(iso) {
       if (!iso) return "";
       var d = new Date(iso);
@@ -97,8 +120,12 @@
     function hm(mins) { var m = Number(mins) || 0, h = Math.floor(m / 60), r = m % 60; return (h ? h + "h" : "") + (h && r ? " " : "") + (r ? r + "m" : "") || "0h"; }
     function modeWord(m) { return m === "clock" ? "By the clock" : "By the total"; }
     function roundWord(n) { n = Number(n); return n <= 1 ? "To the minute" : n + " min"; }
+    function rateWord(x) { var n = Number(x); if (!(n > 0)) n = 1.5; return String(Math.round(n * 100) / 100) + "×"; }   // 1.5× when a row predates the rates
+    function ratesWord(r) { return rateWord(r.ot_rate) + " · " + rateWord(r.rest_day_rate) + " · " + rateWord(r.holiday_rate); }
     function timeVal(t) { return String(t || "").slice(0, 5); }           // "08:30:00" -> "08:30"
+    function toMins(t) { var p = String(t || "").split(":"); return Number(p[0]) * 60 + Number(p[1] || 0); }
     function ymd(d) { return d.toISOString().slice(0, 10); }
+    function addDays(iso, n) { var d = new Date(String(iso).slice(0, 10) + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return ymd(d); }
     function addMonths(iso, n) { var d = new Date(String(iso).slice(0, 7) + "-01T00:00:00Z"); d.setUTCMonth(d.getUTCMonth() + n); return ymd(d); }
     function companies() {
       var seen = {}; S.rules.forEach(function (r) { seen[r.company_code] = true; }); S.periods.forEach(function (p) { seen[p.company_code] = true; });
@@ -120,32 +147,53 @@
         '<td class="n">' + esc(roundWord(r.round_minutes)) + "</td>" +
         '<td class="n">' + esc(Number(r.overlong_hours) + " h") + "</td>" +
         '<td class="n">' + esc(Number(r.question_hours) + " h") + "</td>" +
-        "<td>" + esc(r.note || "") + "</td>" +
+        '<td class="n" title="Overtime · rest day · public holiday">' + esc(ratesWord(r)) + "</td>" +
+        '<td class="w">' + esc(r.note || "") + "</td>" +
         '<td class="n">' + (future && S.manage ? '<button type="button" class="btn small btn-danger" data-act="withdraw" data-rule="' + esc(r.rule_id) + '">Withdraw</button>' : "") + "</td>" +
       "</tr>";
     }
     function ruleForm(code) {
       var u = Dash.ruleFor(S.rules, code, S.today) || {};
       var next = addMonths(S.today, 1);
+      if (next < S.tomorrow) next = S.tomorrow;
       var id = "f-" + code.replace(/[^A-Za-z0-9]/g, "");
+      var mode = u.mode || "clock";
       function opt(v, label, cur) { return '<option value="' + v + '"' + (String(cur) === String(v) ? " selected" : "") + ">" + label + "</option>"; }
+      function num(x, dflt) { return esc(x !== undefined && x !== null ? Number(x) : dflt); }
       return '<form class="st-form" id="' + id + '" data-company="' + esc(code) + '" autocomplete="off">' +
-        '<label>From <input type="date" name="effective_from" value="' + next + '" min="' + String(S.today).slice(0, 7) + '-01" required></label>' +
-        '<label>Rule <select name="mode">' + opt("clock", "By the clock", u.mode || "clock") + opt("total", "By the total", u.mode || "clock") + "</select></label>" +
+        '<label>From <input type="date" name="effective_from" value="' + next + '" min="' + S.tomorrow + '" required></label>' +
+        '<label>Rule <select name="mode">' + opt("clock", "By the clock", mode) + opt("total", "By the total", mode) + "</select></label>" +
         '<label>Day starts <input type="time" name="day_start" value="' + esc(timeVal(u.day_start) || "08:30") + '" required></label>' +
         '<label>Day ends <input type="time" name="day_end" value="' + esc(timeVal(u.day_end) || "17:00") + '" required></label>' +
-        '<label>Grace at the start (min) <input type="number" name="grace_minutes" min="0" max="120" value="' + esc(u.grace_minutes !== undefined ? u.grace_minutes : 10) + '" required></label>' +
-        '<label>Rest (min) <input type="number" name="rest_minutes" min="0" max="600" value="' + esc(u.rest_minutes !== undefined ? u.rest_minutes : 60) + '" required></label>' +
-        '<label>Rest comes off after (min) <input type="number" name="rest_gate_minutes" min="0" max="1440" value="' + esc(u.rest_gate_minutes !== undefined ? u.rest_gate_minutes : 360) + '" required></label>' +
-        '<label>Day length, by the total (min) <input type="number" name="normal_minutes" min="1" max="1440" value="' + esc(u.normal_minutes !== undefined ? u.normal_minutes : 450) + '" required></label>' +
+        '<label>Grace at the start (min) <input type="number" name="grace_minutes" min="0" max="120" value="' + num(u.grace_minutes, 10) + '" required></label>' +
+        '<label>Rest (min) <input type="number" name="rest_minutes" min="0" max="600" value="' + num(u.rest_minutes, 60) + '" required></label>' +
+        '<label>Rest comes off after (min) <input type="number" name="rest_gate_minutes" min="0" max="1440" value="' + num(u.rest_gate_minutes, 360) + '" required></label>' +
+        // by the clock the day's length follows the window less the rest (the database works it out); by the total it is typed
+        '<label><span data-role="normal-label">Day length (min)</span> <input type="number" name="normal_minutes" min="1" max="1440" value="' + num(u.normal_minutes, 450) + '" required></label>' +
         '<label>Round each day down to <select name="round_minutes">' + [1, 5, 10, 15, 30, 60].map(function (v) { return opt(v, v === 1 ? "The minute" : v + " min", u.round_minutes !== undefined ? u.round_minutes : 30); }).join("") + "</select></label>" +
-        '<label>Long-shift line (h) <input type="number" name="overlong_hours" min="8" max="72" step="0.5" value="' + esc(u.overlong_hours !== undefined ? Number(u.overlong_hours) : 20) + '" required></label>' +
-        '<label>Phone asks after (h) <input type="number" name="question_hours" min="1" max="72" step="0.5" value="' + esc(u.question_hours !== undefined ? Number(u.question_hours) : 16) + '" required></label>' +
+        '<label>Long-shift line (h) <input type="number" name="overlong_hours" min="8" max="72" step="0.5" value="' + num(u.overlong_hours, 20) + '" required></label>' +
+        '<label>Phone asks after (h) <input type="number" name="question_hours" min="1" max="72" step="0.5" value="' + num(u.question_hours, 16) + '" required></label>' +
+        '<label>Overtime rate (×) <input type="number" name="ot_rate" min="1" max="5" step="0.05" value="' + num(u.ot_rate, 1.5) + '" required></label>' +
+        '<label>Rest day rate (×) <input type="number" name="rest_day_rate" min="1" max="5" step="0.05" value="' + num(u.rest_day_rate, 1.5) + '" required></label>' +
+        '<label>Public holiday rate (×) <input type="number" name="holiday_rate" min="1" max="5" step="0.05" value="' + num(u.holiday_rate, 1.5) + '" required></label>' +
         '<label class="wide">Note <input type="text" name="note" maxlength="500" placeholder="Why this rule, in a line"></label>' +
         '<div class="wide st-actions"><button type="submit" class="btn">Add Rule</button><button type="button" class="btn small" data-act="cancel-rule">Cancel</button>' +
-        '<span class="st-note">A rule starts on a day of the current month or later and is never rewritten once in force; a rule that has not started yet may be changed or withdrawn.</span></div>' +
+        '<span class="st-note">A rule starts tomorrow or later and is never rewritten once in force; a rule that has not started yet may be changed or withdrawn. The rates are words for the pages and the Excel; the figures stay hours by kind.</span></div>' +
         '<p class="st-status wide" id="' + id + '-status"></p>' +
       "</form>";
+    }
+    // the day length: read-only and worked out from the window by the clock, typed by the total
+    function syncDayLength(form) {
+      var f = form.elements, lbl = form.querySelector('[data-role="normal-label"]');
+      if (f.mode.value === "clock") {
+        var n = toMins(f.day_end.value) - toMins(f.day_start.value) - (Number(f.rest_minutes.value) || 0);
+        f.normal_minutes.value = n > 0 ? n : "";
+        f.normal_minutes.readOnly = true;
+        if (lbl) lbl.textContent = "Day length (from the window, min)";
+      } else {
+        f.normal_minutes.readOnly = false;
+        if (lbl) lbl.textContent = "Day length, by the total (min)";
+      }
     }
     function renderRules() {
       var host = document.getElementById("rules");
@@ -155,13 +203,14 @@
                           .sort(function (a, b) { return String(b.effective_from).localeCompare(String(a.effective_from)); });
         var u = Dash.ruleFor(S.rules, code, S.today);
         return '<div class="st-card" data-company="' + esc(code) + '">' +
-          "<h3>" + esc(companyName(code)) + (u ? '<span class="muted">in force: ' + esc(modeWord(u.mode)) + ", " + esc(Dash.clockWord(u.day_start)) + " – " + esc(Dash.clockWord(u.day_end)) + ", " + esc(Number(u.grace_minutes)) + " min grace, " + esc(hm(u.rest_minutes)) + " rest, rounded to " + esc(roundWord(u.round_minutes).toLowerCase()) + ", line " + esc(Number(u.overlong_hours)) + " h</span>" : "") + "</h3>" +
-          '<div class="table-wrap"><table class="st-table"><thead><tr><th>From</th><th>Rule</th><th>Day</th><th>Grace</th><th>Rest</th><th>Day length</th><th>Round</th><th>Line</th><th>Phone asks</th><th>Note</th><th></th></tr></thead><tbody>' +
+          "<h3>" + esc(companyName(code)) + (u ? '<span class="muted">in force: ' + esc(modeWord(u.mode)) + ", " + esc(Dash.clockWord(u.day_start)) + " – " + esc(Dash.clockWord(u.day_end)) + ", " + esc(Number(u.grace_minutes)) + " min grace, " + esc(hm(u.rest_minutes)) + " rest, rounded to " + esc(roundWord(u.round_minutes).toLowerCase()) + ", line " + esc(Number(u.overlong_hours)) + " h, overtime " + esc(rateWord(u.ot_rate)) + "</span>" : "") + "</h3>" +
+          '<div class="table-wrap"><table class="st-table"><thead><tr><th>From</th><th>Rule</th><th>Day</th><th>Grace</th><th>Rest</th><th>Day length</th><th>Round</th><th>Line</th><th>Phone asks</th><th>Rates</th><th>Note</th><th></th></tr></thead><tbody>' +
           rows.map(function (r) { return ruleRow(r, u && r.rule_id === u.rule_id); }).join("") +
           "</tbody></table></div>" +
           (S.manage ? (S.open["rule:" + code] ? ruleForm(code) : '<div class="st-actions"><button type="button" class="btn small" data-act="new-rule" data-company="' + esc(code) + '">New Rule From…</button></div>') : "") +
         "</div>";
       }).join("");
+      Array.prototype.forEach.call(host.querySelectorAll("form.st-form"), syncDayLength);
     }
 
     // ---------------------------------------------------------------- periods
@@ -173,16 +222,19 @@
     function periodOf(code, month) {
       return S.periods.filter(function (p) { return p.company_code === code && String(p.period_month).slice(0, 10) === month; })[0] || null;
     }
+    // the 24-hour undo window (owner 9 Nov 2026, Option 3): after it a month stays closed
+    function undoOpen(p) { return !!(p && p.status === "closed" && p.reopen_until && new Date(p.reopen_until).getTime() > Date.now()); }
     function periodRow(code, month) {
       var p = periodOf(code, month), cur = month === String(S.today).slice(0, 7) + "-01", key = code + "|" + month;
       var closed = !!(p && p.status === "closed");
       var status = closed ? '<span class="st-tag">Closed</span> on ' + esc(stampWord(p.closed_at)) + (p.closed_by_name ? " by " + esc(p.closed_by_name) : "") + (p.note ? ' <span class="st-note">— ' + esc(p.note) + "</span>" : "")
+                            + (undoOpen(p) && S.canReopen ? ' <span class="st-note">· undo until ' + esc(stampWord(p.reopen_until)) + "</span>" : "")
                  : p && p.status === "open" ? '<span class="st-tag ok">Open</span> reopened ' + esc(stampWord(p.reopened_at)) + (p.reopened_by_name ? " by " + esc(p.reopened_by_name) : "") + (p.note ? ' <span class="st-note">— ' + esc(p.note) + "</span>" : "")
                  : cur ? '<span class="st-tag ok">Open</span> <span class="st-note">not over yet</span>' : '<span class="st-tag ok">Open</span>';
       var figures = closed ? esc(p.days + " day" + (p.days === 1 ? "" : "s") + " · " + hm(p.working_minutes) + " normal · " + hm(p.ot_minutes) + " overtime") : "";
       var act = "";
-      if (closed && S.superAdmin) act = '<button type="button" class="btn small" data-act="reopen" data-company="' + esc(code) + '" data-month="' + month + '">Reopen</button>';
-      else if (!closed && !cur && S.manage) act = '<button type="button" class="btn small" data-act="close" data-company="' + esc(code) + '" data-month="' + month + '">Close</button>';
+      if (closed && S.canReopen && undoOpen(p)) act = '<button type="button" class="btn small" data-act="reopen" data-company="' + esc(code) + '" data-month="' + month + '">Reopen</button>';
+      else if (!closed && !cur && S.canClose) act = '<button type="button" class="btn small" data-act="close" data-company="' + esc(code) + '" data-month="' + month + '">Close</button>';
       var confirm = S.open[key] ? confirmBox(code, month, closed) : "";
       return '<tr data-period="' + esc(key) + '"><td class="n">' + esc(monthWord(month)) + "</td><td>" + status + "</td><td>" + figures + '</td><td class="n">' + act + "</td></tr>" +
              (confirm ? '<tr><td colspan="4">' + confirm + "</td></tr>" : "");
@@ -190,11 +242,11 @@
     function confirmBox(code, month, closed) {
       var key = code + "|" + month, id = "c-" + key.replace(/[^A-Za-z0-9]/g, "");
       if (closed) {
-        return '<div class="st-confirm" id="' + id + '"><p>Reopen <b>' + esc(monthWord(month)) + "</b> for " + esc(companyName(code)) + "? Its figures move again until it is closed. Say why.</p>" +
+        return '<div class="st-confirm" id="' + id + '"><p>Undo the close of <b>' + esc(monthWord(month)) + "</b> for " + esc(companyName(code)) + "? Its figures move again until it is closed; the frozen copy is dropped. Say why.</p>" +
           '<div class="st-actions"><input type="text" id="' + id + '-why" maxlength="500" placeholder="Reason"> <button type="button" class="btn" data-act="reopen-go" data-company="' + esc(code) + '" data-month="' + month + '">Reopen ' + esc(monthWord(month)) + '</button> <button type="button" class="btn small" data-act="cancel" data-key="' + esc(key) + '">Cancel</button></div>' +
           '<p class="st-status" id="' + id + '-status"></p></div>';
       }
-      return '<div class="st-confirm" id="' + id + '"><p>Close <b>' + esc(monthWord(month)) + "</b> for " + esc(companyName(code)) + "? Every day must have its figure; after the close no hours or shifts of this month can be changed until a Super Administrator reopens it.</p>" +
+      return '<div class="st-confirm" id="' + id + '"><p>Close <b>' + esc(monthWord(month)) + "</b> for " + esc(companyName(code)) + "? Every day must have its figure. After the close no hours or shifts of this month can be changed; a Super Administrator may undo the close within 24 hours, after that a correction is paid as an adjustment in the next month.</p>" +
         '<div class="st-actions"><input type="text" id="' + id + '-note" maxlength="500" placeholder="Note (optional)"> <button type="button" class="btn" data-act="close-go" data-company="' + esc(code) + '" data-month="' + month + '">Close ' + esc(monthWord(month)) + '</button> <button type="button" class="btn small" data-act="cancel" data-key="' + esc(key) + '">Cancel</button></div>' +
         '<p class="st-status" id="' + id + '-status"></p></div>';
     }
@@ -207,7 +259,50 @@
           "</tbody></table></div></div>";
       }).join("");
     }
-    function render() { renderRules(); renderPeriods(); }
+
+    // ---------------------------------------------------------------- holidays
+    function holidayForm() {
+      return '<form class="st-form" id="f-holiday" autocomplete="off">' +
+        '<label>Date <input type="date" name="holiday_date" min="' + S.tomorrow + '" required></label>' +
+        '<label>Name <input type="text" name="name" maxlength="120" placeholder="e.g. Hari Raya Haji" required></label>' +
+        '<label class="chk"><input type="checkbox" name="in_lieu"> In lieu</label>' +
+        '<div class="wide st-actions"><button type="submit" class="btn">Add Holiday</button><button type="button" class="btn small" data-act="cancel-holiday">Cancel</button>' +
+        '<span class="st-note">A holiday is added for a coming day and prices that day as a public holiday; days already punched are never re-priced. A holiday that has passed stays on record.</span></div>' +
+        '<p class="st-status wide" id="f-holiday-status"></p>' +
+      "</form>";
+    }
+    function renderHolidays() {
+      var host = document.getElementById("holidays");
+      var rows = S.holidays.slice().sort(function (a, b) { return String(a.holiday_date).localeCompare(String(b.holiday_date)); });
+      var body = "", year = "";
+      rows.forEach(function (h) {
+        var d = String(h.holiday_date).slice(0, 10), y = d.slice(0, 4), past = d <= S.today;
+        if (y !== year) { year = y; body += '<tr class="st-year"><td colspan="5">' + esc(y) + "</td></tr>"; }
+        body += '<tr class="' + (past ? "st-past" : "") + '" data-holiday="' + esc(d) + '">' +
+          '<td class="n">' + esc(dateWord(d)) + '</td><td class="n">' + esc(dayWord(d)) + "</td><td>" + esc(h.name) + "</td>" +
+          "<td>" + (h.in_lieu ? "In lieu" : "") + "</td>" +
+          '<td class="n">' + (!past && S.manage ? '<button type="button" class="btn small btn-danger" data-act="remove-holiday" data-date="' + esc(d) + '">Remove</button>' : "") + "</td></tr>";
+      });
+      host.innerHTML = '<div class="st-card">' +
+        '<h3>Penang calendar <span class="muted">the days the pricing counts as a public holiday, for every site</span></h3>' +
+        (rows.length ? '<div class="table-wrap"><table class="st-table"><thead><tr><th>Date</th><th>Day</th><th>Holiday</th><th></th><th></th></tr></thead><tbody>' + body + "</tbody></table></div>"
+                     : UI.empty("No holidays listed from this year on.")) +
+        (S.manage ? (S.open["holiday"] ? holidayForm() : '<div class="st-actions"><button type="button" class="btn small" data-act="new-holiday">Add Holiday</button></div>') : "") +
+      "</div>";
+    }
+
+    // ---------------------------------------------------------------- history
+    function renderHistory() {
+      var host = document.getElementById("history");
+      if (!S.showHistory) { host.innerHTML = '<div class="st-actions"><button type="button" class="btn small" data-act="show-history">Show History</button></div>'; return; }
+      var rows = S.history || [];
+      host.innerHTML = '<div class="st-card">' +
+        (rows.length ? '<div class="table-wrap"><table class="st-table"><thead><tr><th>When</th><th>Who</th><th>What</th></tr></thead><tbody>' +
+          rows.map(function (h) { return '<tr><td class="n">' + esc(stampWord(h.occurred_at)) + '</td><td class="n">' + esc(h.actor_label || "") + '</td><td class="w">' + esc(h.summary || "") + "</td></tr>"; }).join("") +
+          "</tbody></table></div>" : UI.empty("Nothing changed yet.")) +
+        '<div class="st-actions"><button type="button" class="btn small" data-act="hide-history">Hide History</button></div></div>';
+    }
+    function render() { renderRules(); renderPeriods(); renderHolidays(); renderHistory(); }
 
     // ---------------------------------------------------------------- the writes
     function statusEl(id) { return document.getElementById(id); }
@@ -217,8 +312,9 @@
       el.innerHTML = esc(text) + (link ? ' <a href="' + esc(link.href) + '" class="section-link">' + esc(link.label) + "</a>" : "");
     }
     async function reload() {
-      var got = await Promise.all([Dash.getWorkRules(true), Dash.getPayrollPeriods()]);
-      S.rules = got[0] || []; S.periods = got[1] || [];
+      var got = await Promise.all([Dash.getWorkRules(true), Dash.getPayrollPeriods(), Dash.getPublicHolidays()]);
+      S.rules = got[0] || []; S.periods = got[1] || []; S.holidays = got[2] || [];
+      if (S.showHistory) S.history = await Dash.getSettingsHistory(100);
       render();
     }
     async function doClose(code, month) {
@@ -253,9 +349,11 @@
                 day_start: f.day_start.value, day_end: f.day_end.value,
                 rest_minutes: Number(f.rest_minutes.value), grace_minutes: Number(f.grace_minutes.value),
                 round_minutes: Number(f.round_minutes.value), overlong_hours: Number(f.overlong_hours.value),
-                question_hours: Number(f.question_hours.value), normal_minutes: Number(f.normal_minutes.value),
-                rest_gate_minutes: Number(f.rest_gate_minutes.value), note: f.note.value.trim() };
+                question_hours: Number(f.question_hours.value), normal_minutes: Number(f.normal_minutes.value) || 450,
+                rest_gate_minutes: Number(f.rest_gate_minutes.value), note: f.note.value.trim(),
+                ot_rate: Number(f.ot_rate.value), rest_day_rate: Number(f.rest_day_rate.value), holiday_rate: Number(f.holiday_rate.value) };
       if (!r.effective_from || !r.day_start || !r.day_end) { sayStatus(st, false, "Give the date and both times."); return; }
+      if (r.effective_from <= S.today) { sayStatus(st, false, "A rule starts tomorrow or later."); return; }
       if (r.day_end <= r.day_start) { sayStatus(st, false, "The day must end after it starts."); return; }
       sayStatus(st, true, "Saving…");
       try {
@@ -265,7 +363,6 @@
       } catch (e) { sayStatus(st, false, (e && e.message) || String(e)); }
     }
     async function doWithdraw(ruleId, btn) {
-      var row = btn.closest("tr");
       if (!btn.getAttribute("data-sure")) { btn.setAttribute("data-sure", "1"); btn.textContent = "Withdraw — sure?"; return; }
       btn.disabled = true;
       try {
@@ -274,6 +371,36 @@
         document.getElementById("error").innerHTML = UI.errorBanner((v && v.message) || ("Not withdrawn (" + (v && v.code) + ")."));
       } catch (e) { document.getElementById("error").innerHTML = UI.errorBanner((e && e.message) || String(e)); }
       btn.disabled = false;
+    }
+    async function doAddHoliday(form) {
+      var f = form.elements, st = statusEl("f-holiday-status");
+      var d = f.holiday_date.value, name = f.name.value.trim();
+      if (!d || !name) { sayStatus(st, false, "Give the date and the name."); return; }
+      if (d <= S.today) { sayStatus(st, false, "A holiday is added for a coming day."); return; }
+      sayStatus(st, true, "Saving…");
+      try {
+        var v = await Dash.addPublicHoliday(d, name, f.in_lieu.checked);
+        if (v && v.ok) { delete S.open["holiday"]; await reload(); return; }
+        sayStatus(st, false, (v && v.message) || ("Not saved (" + (v && v.code) + ")."));
+      } catch (e) { sayStatus(st, false, (e && e.message) || String(e)); }
+    }
+    async function doRemoveHoliday(dateIso, btn) {
+      if (!btn.getAttribute("data-sure")) { btn.setAttribute("data-sure", "1"); btn.textContent = "Remove — sure?"; return; }
+      btn.disabled = true;
+      try {
+        var v = await Dash.deletePublicHoliday(dateIso);
+        if (v && v.ok) { await reload(); return; }
+        document.getElementById("error").innerHTML = UI.errorBanner((v && v.message) || ("Not removed (" + (v && v.code) + ")."));
+      } catch (e) { document.getElementById("error").innerHTML = UI.errorBanner((e && e.message) || String(e)); }
+      btn.disabled = false;
+    }
+    async function showHistory(on) {
+      S.showHistory = on;
+      if (on) {
+        try { S.history = await Dash.getSettingsHistory(100); }
+        catch (e) { document.getElementById("error").innerHTML = UI.errorBanner((e && e.message) || String(e)); S.history = []; }
+      }
+      renderHistory();
     }
 
     document.addEventListener("click", function (ev) {
@@ -287,28 +414,43 @@
       else if (act === "new-rule") { S.open["rule:" + code] = true; renderRules(); }
       else if (act === "cancel-rule") { delete S.open["rule:" + b.closest("form").getAttribute("data-company")]; renderRules(); }
       else if (act === "withdraw") doWithdraw(b.getAttribute("data-rule"), b);
+      else if (act === "new-holiday") { S.open["holiday"] = true; renderHolidays(); }
+      else if (act === "cancel-holiday") { delete S.open["holiday"]; renderHolidays(); }
+      else if (act === "remove-holiday") doRemoveHoliday(b.getAttribute("data-date"), b);
+      else if (act === "show-history") showHistory(true);
+      else if (act === "hide-history") showHistory(false);
     });
     document.addEventListener("submit", function (ev) {
       var form = ev.target.closest("form.st-form");
       if (!form) return;
       ev.preventDefault();
-      doAddRule(form);
+      if (form.id === "f-holiday") doAddHoliday(form); else doAddRule(form);
+    });
+    // the day length follows the window while the rule is by the clock
+    document.addEventListener("input", function (ev) {
+      var form = ev.target.closest("form.st-form");
+      if (!form || form.id === "f-holiday") return;
+      if (["mode", "day_start", "day_end", "rest_minutes"].indexOf(ev.target.name) >= 0) syncDayLength(form);
+    });
+    document.addEventListener("change", function (ev) {
+      var form = ev.target.closest("form.st-form");
+      if (form && form.id !== "f-holiday" && ev.target.name === "mode") syncDayLength(form);
     });
 
     window.onShellReady = async function () {
       S.today = Dash.todayKL();
+      S.tomorrow = addDays(S.today, 1);
       S.manage = Dash.can("settings.manage");
+      S.canClose = Dash.can("payroll.close");       // 0132 (9 Nov): the close has its own permission
+      S.canReopen = Dash.can("payroll.reopen");     // and the 24-hour undo its own (Super Administrator)
       document.getElementById("rules").innerHTML = UI.empty("Loading…");
       document.getElementById("periods").innerHTML = UI.empty("Loading…");
-      try {
-        var acc = await Dash.getMyAccess();
-        S.superAdmin = !!(acc && acc.ok && acc.access && acc.access.access_profile_code === "super_admin");
-      } catch (e) { S.superAdmin = false; }
+      document.getElementById("holidays").innerHTML = UI.empty("Loading…");
       try {
         await reload();
       } catch (e) {
         document.getElementById("error").innerHTML = UI.errorBanner((e && e.message) || String(e));
-        document.getElementById("rules").innerHTML = ""; document.getElementById("periods").innerHTML = "";
+        document.getElementById("rules").innerHTML = ""; document.getElementById("periods").innerHTML = ""; document.getElementById("holidays").innerHTML = "";
       }
     };
   </script>
