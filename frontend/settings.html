@@ -20,6 +20,8 @@
     .st-area { font-size: 1.3rem; margin: 4px 0 16px; padding-bottom: 6px; border-bottom: 1px solid var(--line, #d9e0ea); color: var(--ink-2, #22304a); }
     .st-section { margin: 0 0 28px; }
     .st-section h3.st-h { font-size: 1.12rem; margin: 0 0 10px; }
+    .st-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 10px; }   /* heading left, the section's button right (owner, 10 Nov 2026) */
+    .st-head h3.st-h, .st-head .st-actions { margin: 0; }
     .st-card { background: var(--card, #fff); border: 1px solid var(--line, #d9e0ea); border-radius: 12px; padding: 14px 16px; margin: 0 0 14px; }
     .st-card h3 { font-size: 1rem; margin: 0 0 8px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .st-card h3 .muted { font-weight: 400; color: var(--ink-3, #5a6578); font-size: 0.9rem; }
@@ -82,7 +84,7 @@
     <h2 class="st-area" id="area-attendance">Attendance &amp; Payroll</h2>
 
     <section class="st-section" id="rules-section">
-      <h3 class="st-h">Work Rules</h3>
+      <div class="st-head"><h3 class="st-h">Work Rules</h3><div class="st-actions" id="rules-actions"></div></div>
       <div id="rules"></div>
     </section>
 
@@ -123,7 +125,8 @@
     var DEMO_Q = new URLSearchParams(location.search).get("demo") === "1" ? "&demo=1" : "";   // the demo follows the View Month link
     var S = { rules: [], periods: [], holidays: [], history: null, showHistory: false, view: null,
               manage: false, canClose: false, canReopen: false, open: {}, today: "", tomorrow: "", firstMonth: "2026-10-01",
-              unpriced: null };   // "code|month" -> days without a figure in the months that are over (get_unpriced_days); null = not known, the database decides at the close
+              unpriced: null,     // "code|month" -> days without a figure in the months that are over (get_unpriced_days); null = not known, the database decides at the close
+              form: null };       // { company, from } while the New Rule form is open in the side panel
     var COMPANY_NAMES = { "HF-BP": "HF Bored Piles", "Hai Fu": "Hai Fu" };
     var COMPANY_ORDER = ["HF-BP", "Hai Fu"];
 
@@ -254,15 +257,27 @@
         (rows.length ? '<div class="table-wrap"><table class="st-table"><thead><tr><th>Company</th><th>From</th><th>Until</th><th>Status</th><th>Enforced By</th><th class="more-th"></th></tr></thead><tbody>' +
                        rows.map(ruleRow).join("") + "</tbody></table></div>"
                      : UI.empty("No Rules Yet")) +
-        (S.manage ? (S.open.rule ? ruleForm(S.open.rule) : '<div class="st-actions"><button type="button" class="btn small" data-act="new-rule">New Rule From…</button></div>') : "") +
       "</div>";
-      Array.prototype.forEach.call(host.querySelectorAll("form.st-form"), syncDayLength);
+      // the New Rule button sits in the heading row, top right (owner, 10 Nov 2026); the form opens in the side panel
+      document.getElementById("rules-actions").innerHTML = S.manage ? '<button type="button" class="btn small" data-act="new-rule">New Rule</button>' : "";
     }
 
     // ---------------------------------------------------------------- the rule's side panel
     function drawerRow(label, value) { return '<div class="dr-row"><span>' + esc(label) + "</span><span>" + esc(value) + "</span></div>"; }
     function renderDrawer() {
       var el = document.getElementById("st-drawer");
+      if (S.form) {                                   // the New Rule form, in the same panel (owner, 10 Nov 2026: a pop-out, not a card in the table)
+        var from = S.form.from;
+        el.setAttribute("aria-label", "New work rule");
+        el.innerHTML = '<div class="dr-top"><h2>New Rule</h2>' +
+            '<button type="button" class="btn dr-close" data-act="close-drawer" aria-label="Close">×</button></div>' +
+          '<p class="dr-sub st-note">' + (from ? "From " + esc(companyName(from.company_code)) + "'s rule of " + esc(dateWord(from.effective_from)) : "From the rule in force") + "</p>" +
+          ruleForm(S.form);
+        Array.prototype.forEach.call(el.querySelectorAll("form.st-form"), syncDayLength);
+        el.hidden = false;
+        return;
+      }
+      el.setAttribute("aria-label", "Work rule");
       var r = S.view ? ruleById(S.view) : null;
       if (!r) { el.hidden = true; el.innerHTML = ""; return; }
       var st = statusOf(r), until = untilOf(r);
@@ -285,8 +300,12 @@
         '<p class="st-status" id="dr-status"></p>';
       el.hidden = false;
     }
-    function openRule(id) { S.view = id; renderDrawer(); }
-    function closeDrawer() { S.view = null; renderDrawer(); }
+    function openRule(id) { S.view = id; S.form = null; renderDrawer(); }
+    function openForm(company, from) {               // New Rule (top right) or New Rule From This (a rule's menu or panel)
+      S.form = { company: company, from: from || null }; S.view = null; renderDrawer();
+      var f = document.querySelector("#st-drawer form.st-form [name=company_code]"); if (f) f.focus();
+    }
+    function closeDrawer() { S.view = null; S.form = null; renderDrawer(); }
 
     // ---------------------------------------------------------------- the row menu (⋮)
     // Work Rules: View Rule · New Rule From This · Withdraw. Payroll Months: View
@@ -379,7 +398,7 @@
       menuClose();
       if (kind === "rule") {
         if (act === "view-rule") openRule(a);
-        else if (act === "rule-from") { var r = ruleById(a); S.open.rule = { company: r ? r.company_code : COMPANY_ORDER[0], from: r }; closeDrawer(); renderRules(); var f = document.getElementById("f-rule"); if (f) f.scrollIntoView({ block: "nearest" }); }
+        else if (act === "rule-from") { var r = ruleById(a); openForm(r ? r.company_code : COMPANY_ORDER[0], r); }
         else if (act === "withdraw") {                 // the panel holds the one confirm: opened with Withdraw already asking "sure?"
           openRule(a);
           var w = document.querySelector("#st-drawer [data-act='withdraw']");
@@ -572,7 +591,7 @@
       sayStatus(st, true, "Saving…");
       try {
         var v = await Dash.setWorkRule(r);
-        if (v && v.ok) { delete S.open.rule; await reload(); return; }
+        if (v && v.ok) { S.form = null; await reload(); return; }
         sayStatus(st, false, (v && v.message) || ("Not saved (" + (v && v.code) + ")."));
       } catch (e) { sayStatus(st, false, (e && e.message) || String(e)); }
     }
@@ -631,7 +650,7 @@
       if (!ev.target.closest("#rm-why")) whyClose();
       var b = ev.target.closest("[data-act]");
       if (!b) {
-        // a click outside the open panel closes it (the Manpower rule)
+        // a click outside the open panel closes it (the Manpower rule) — a form being filled stays until Cancel, × or Escape
         if (S.view && !ev.target.closest("#st-drawer")) closeDrawer();
         return;
       }
@@ -640,10 +659,10 @@
       else if (act === "cancel") { delete S.open[b.getAttribute("data-key")]; renderPeriods(); }
       else if (act === "close-go") doClose(code, month);
       else if (act === "reopen-go") doReopen(code, month);
-      else if (act === "new-rule") { S.open.rule = { company: COMPANY_ORDER[0], from: null }; renderRules(); }
-      else if (act === "cancel-rule") { delete S.open.rule; renderRules(); }
+      else if (act === "new-rule") openForm(COMPANY_ORDER[0], null);
+      else if (act === "cancel-rule") closeDrawer();
       else if (act === "close-drawer") closeDrawer();
-      else if (act === "rule-from") { var r = ruleById(b.getAttribute("data-rule")); S.open.rule = { company: r ? r.company_code : COMPANY_ORDER[0], from: r }; closeDrawer(); renderRules(); var f = document.getElementById("f-rule"); if (f) f.scrollIntoView({ block: "nearest" }); }
+      else if (act === "rule-from") { var r = ruleById(b.getAttribute("data-rule")); openForm(r ? r.company_code : COMPANY_ORDER[0], r); }
       else if (act === "withdraw") doWithdraw(b.getAttribute("data-rule"), b);
       else if (act === "new-holiday") { S.open["holiday"] = true; renderHolidays(); }
       else if (act === "cancel-holiday") { delete S.open["holiday"]; renderHolidays(); }
@@ -654,7 +673,7 @@
     document.addEventListener("keydown", function (ev) {
       if (ev.key !== "Escape") return;
       if (MENU.open) { var b = MENU.btn; menuClose(); if (b) b.focus(); return; }
-      if (S.view) closeDrawer();
+      if (S.view || S.form) closeDrawer();
     });
     // the reason of a greyed item shows while the pointer rests on it
     document.addEventListener("mouseover", function (ev) {

@@ -356,7 +356,7 @@
     b.innerHTML = page === "settings.html"
       ? "<strong>Demo data</strong> — the rule rows are the ones migration 0131 seeds (with 1.5× rates), the holidays are 0103's Penang list, " +
         "the months and the history are invented, so the page can be reviewed before the database change is applied. Nothing is saved; a reload brings everything back. " +
-        "Try: <em>View</em> on a rule (its figures in a side panel; Withdraw on a scheduled one), <em>New Rule From…</em> (tomorrow or later; the day length follows the window by the clock), " +
+        "Try: <em>View</em> on a rule (its figures in a side panel; Withdraw on a scheduled one), <em>New Rule</em> (top right of Work Rules; the form opens in the side panel; tomorrow or later; the day length follows the window by the clock), " +
         "the <em>⋮</em> menu on Hai Fu's October (<em>Close Month</em> is greyed <em>2 Unpriced</em> — hover it for the reason; settle the two days on the Exceptions page with the filters on Hai Fu and October, come back in this tab and the close goes through), " +
         "<em>Reopen</em> October for HF Bored Piles (closed two hours ago, so the 24-hour undo is still open; a reason is required), " +
         "<em>Add Holiday</em> and <em>Remove</em> a coming one, <em>Show History</em>. " +
