@@ -94,7 +94,7 @@
     </section>
 
     <section class="st-section" id="holidays-section">
-      <h3 class="st-h">Public Holidays</h3>
+      <div class="st-head"><h3 class="st-h">Public Holidays</h3><div class="st-actions" id="holidays-actions"></div></div>
       <div id="holidays"></div>
     </section>
 
@@ -126,7 +126,8 @@
     var S = { rules: [], periods: [], holidays: [], history: null, showHistory: false, view: null,
               manage: false, canClose: false, canReopen: false, open: {}, today: "", tomorrow: "", firstMonth: "2026-10-01",
               unpriced: null,     // "code|month" -> days without a figure in the months that are over (get_unpriced_days); null = not known, the database decides at the close
-              form: null };       // { company, from } while the New Rule form is open in the side panel
+              form: null,         // { company, from } while the New Rule form is open in the side panel
+              holidayForm: false }; // the Add Holiday form is open in the side panel
     var COMPANY_NAMES = { "HF-BP": "HF Bored Piles", "Hai Fu": "Hai Fu" };
     var COMPANY_ORDER = ["HF-BP", "Hai Fu"];
 
@@ -277,6 +278,15 @@
         el.hidden = false;
         return;
       }
+      if (S.holidayForm) {                            // Add Holiday, in the same panel (owner, 10 Nov 2026)
+        el.setAttribute("aria-label", "Add public holiday");
+        el.innerHTML = '<div class="dr-top"><h2>Add Holiday</h2>' +
+            '<button type="button" class="btn dr-close" data-act="close-drawer" aria-label="Close">×</button></div>' +
+          '<p class="dr-sub st-note">Penang calendar; a coming day</p>' +
+          holidayForm();
+        el.hidden = false;
+        return;
+      }
       el.setAttribute("aria-label", "Work rule");
       var r = S.view ? ruleById(S.view) : null;
       if (!r) { el.hidden = true; el.innerHTML = ""; return; }
@@ -300,12 +310,16 @@
         '<p class="st-status" id="dr-status"></p>';
       el.hidden = false;
     }
-    function openRule(id) { S.view = id; S.form = null; renderDrawer(); }
+    function openRule(id) { S.view = id; S.form = null; S.holidayForm = false; renderDrawer(); }
     function openForm(company, from) {               // New Rule (top right) or New Rule From This (a rule's menu or panel)
-      S.form = { company: company, from: from || null }; S.view = null; renderDrawer();
+      S.form = { company: company, from: from || null }; S.view = null; S.holidayForm = false; renderDrawer();
       var f = document.querySelector("#st-drawer form.st-form [name=company_code]"); if (f) f.focus();
     }
-    function closeDrawer() { S.view = null; S.form = null; renderDrawer(); }
+    function openHolidayForm() {                     // Add Holiday (top right of Public Holidays)
+      S.holidayForm = true; S.view = null; S.form = null; renderDrawer();
+      var f = document.querySelector("#st-drawer form.st-form [name=holiday_date]"); if (f) f.focus();
+    }
+    function closeDrawer() { S.view = null; S.form = null; S.holidayForm = false; renderDrawer(); }
 
     // ---------------------------------------------------------------- the row menu (⋮)
     // Work Rules: View Rule · New Rule From This · Withdraw. Payroll Months: View
@@ -483,8 +497,9 @@
         '<h3>Penang Calendar</h3>' +
         (rows.length ? '<div class="table-wrap"><table class="st-table"><thead><tr><th>Date</th><th>Day</th><th>Holiday</th><th></th><th></th></tr></thead><tbody>' + body + "</tbody></table></div>"
                      : UI.empty("No Holidays Listed")) +
-        (S.manage ? (S.open["holiday"] ? holidayForm() : '<div class="st-actions"><button type="button" class="btn small" data-act="new-holiday">Add Holiday</button></div>') : "") +
       "</div>";
+      // the Add Holiday button sits in the heading row, top right (owner, 10 Nov 2026); the form opens in the side panel
+      document.getElementById("holidays-actions").innerHTML = S.manage ? '<button type="button" class="btn small" data-act="new-holiday">Add Holiday</button>' : "";
     }
 
     // ---------------------------------------------------------------- history
@@ -614,7 +629,7 @@
       sayStatus(st, true, "Saving…");
       try {
         var v = await Dash.addPublicHoliday(d, name, f.in_lieu.checked);
-        if (v && v.ok) { delete S.open["holiday"]; await reload(); return; }
+        if (v && v.ok) { S.holidayForm = false; await reload(); return; }
         sayStatus(st, false, (v && v.message) || ("Not saved (" + (v && v.code) + ")."));
       } catch (e) { sayStatus(st, false, (e && e.message) || String(e)); }
     }
@@ -664,8 +679,8 @@
       else if (act === "close-drawer") closeDrawer();
       else if (act === "rule-from") { var r = ruleById(b.getAttribute("data-rule")); openForm(r ? r.company_code : COMPANY_ORDER[0], r); }
       else if (act === "withdraw") doWithdraw(b.getAttribute("data-rule"), b);
-      else if (act === "new-holiday") { S.open["holiday"] = true; renderHolidays(); }
-      else if (act === "cancel-holiday") { delete S.open["holiday"]; renderHolidays(); }
+      else if (act === "new-holiday") openHolidayForm();
+      else if (act === "cancel-holiday") closeDrawer();
       else if (act === "remove-holiday") doRemoveHoliday(b.getAttribute("data-date"), b);
       else if (act === "show-history") showHistory(true);
       else if (act === "hide-history") showHistory(false);
@@ -673,7 +688,7 @@
     document.addEventListener("keydown", function (ev) {
       if (ev.key !== "Escape") return;
       if (MENU.open) { var b = MENU.btn; menuClose(); if (b) b.focus(); return; }
-      if (S.view || S.form) closeDrawer();
+      if (S.view || S.form || S.holidayForm) closeDrawer();
     });
     // the reason of a greyed item shows while the pointer rests on it
     document.addEventListener("mouseover", function (ev) {

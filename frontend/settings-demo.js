@@ -359,7 +359,7 @@
         "Try: <em>View</em> on a rule (its figures in a side panel; Withdraw on a scheduled one), <em>New Rule</em> (top right of Work Rules; the form opens in the side panel; tomorrow or later; the day length follows the window by the clock), " +
         "the <em>⋮</em> menu on Hai Fu's October (<em>Close Month</em> is greyed <em>2 Unpriced</em> — hover it for the reason; settle the two days on the Exceptions page with the filters on Hai Fu and October, come back in this tab and the close goes through), " +
         "<em>Reopen</em> October for HF Bored Piles (closed two hours ago, so the 24-hour undo is still open; a reason is required), " +
-        "<em>Add Holiday</em> and <em>Remove</em> a coming one, <em>Show History</em>. " +
+        "<em>Add Holiday</em> (top right of Public Holidays; the form opens in the side panel) and <em>Remove</em> a coming one, <em>Show History</em>. " +
         "<code>&role=admin</code> on the URL shows the Administrator's view (Close, no Reopen). Drop <code>?demo=1</code> for the real page."
       : "<strong>Demo data</strong> — the rule words on this page come from the rows migration 0131 seeds. Nothing is saved. " +
         "Drop <code>?demo=1</code> for the real page.";
