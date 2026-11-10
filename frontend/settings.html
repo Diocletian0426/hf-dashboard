@@ -122,7 +122,8 @@
     var MENU = { open: false };
     var DEMO_Q = new URLSearchParams(location.search).get("demo") === "1" ? "&demo=1" : "";   // the demo follows the View Month link
     var S = { rules: [], periods: [], holidays: [], history: null, showHistory: false, view: null,
-              manage: false, canClose: false, canReopen: false, open: {}, today: "", tomorrow: "", firstMonth: "2026-10-01" };
+              manage: false, canClose: false, canReopen: false, open: {}, today: "", tomorrow: "", firstMonth: "2026-10-01",
+              unpriced: null };   // "code|month" -> days without a figure in the months that are over (get_unpriced_days); null = not known, the database decides at the close
     var COMPANY_NAMES = { "HF-BP": "HF Bored Piles", "Hai Fu": "Hai Fu" };
     var COMPANY_ORDER = ["HF-BP", "Hai Fu"];
 
@@ -288,14 +289,22 @@
     function closeDrawer() { S.view = null; renderDrawer(); }
 
     // ---------------------------------------------------------------- the row menu (⋮)
-    // Only what applies to the row is listed, nothing greyed. Work Rules: View
-    // Rule · New Rule From This · Withdraw (scheduled). Payroll Months: View
-    // Month · Close Month (over, open) · Reopen Month (closed, inside the undo).
-    // every item is listed (owner, 10 Nov 2026); one that does not apply is greyed
-    // with a short label, and pressing it shows the reason in a small pop-out
-    function item(act, label, off, small, danger) {
+    // Work Rules: View Rule · New Rule From This · Withdraw. Payroll Months: View
+    // Month · Close Month · Reopen Month. Every item is listed (owner, 10 Nov 2026);
+    // one that does not apply is greyed with a short label, and pressing it shows
+    // the reason in a small pop-out — with a link when there is somewhere to go:
+    // Close Month on a month with days still without a figure reads "2 Unpriced",
+    // and its reason ends in See them, the Exceptions page on that company and
+    // month (owner, 10 Nov 2026 — the database's check, shown before the press).
+    function item(act, label, off, small, danger, link) {   // link: { href, label } offered with the reason when the item is off
       return '<button type="button" class="rm-item' + (off ? " is-off" : "") + (danger && !off ? " rm-danger" : "") + '" role="menuitem" data-menu="' + act + '"' +
-             (off ? ' data-off="' + esc(off) + '" title="' + esc(off) + '"' : "") + ">" + esc(label) + (small ? "<small>" + esc(small) + "</small>" : "") + "</button>";
+             (off ? ' data-off="' + esc(off) + '" title="' + esc(off) + '"' : "") +
+             (off && link ? ' data-off-href="' + esc(link.href) + '" data-off-link="' + esc(link.label) + '"' : "") +
+             ">" + esc(label) + (small ? "<small>" + esc(small) + "</small>" : "") + "</button>";
+    }
+    function unpricedOf(code, month) { return (S.unpriced && S.unpriced[code + "|" + month]) || 0; }
+    function unpricedHref(code, month) {   // the Exceptions page on that company and month (its Before Payroll Closes list takes a range)
+      return "exceptions.html?company=" + encodeURIComponent(code) + "&from=" + month + "&to=" + addDays(addMonths(month, 1), -1) + DEMO_Q;
     }
     function menuItems(kind, a, b) {
       var items = [];
@@ -311,10 +320,13 @@
       } else {
         var p = periodOf(a, b), cur = b === String(S.today).slice(0, 7) + "-01", closed = !!(p && p.status === "closed"), mw = monthWord(b);
         items.push('<a class="rm-item" role="menuitem" href="attendance.html?view=month&month=' + esc(b.slice(0, 7)) + "&company=" + encodeURIComponent(a) + DEMO_Q + '">View Month</a>');
+        var un = (!closed && !cur && S.canClose) ? unpricedOf(a, b) : 0;   // days still without a figure: the database refuses the close while any remain
         var cOff = closed ? mw + " is already closed, on " + dateWordKL(p.closed_at) + (p.closed_by_name ? " by " + p.closed_by_name : "") + "."
                  : cur ? mw + " is not over yet; a month closes once it has ended."
-                 : !S.canClose ? "Closing a month needs the payroll close permission." : "";
-        items.push(item("close", "Close Month", cOff, cOff ? (closed ? "Closed" : cur ? "Not Over Yet" : "No Permission") : ""));
+                 : !S.canClose ? "Closing a month needs the payroll close permission."
+                 : un ? un + (un === 1 ? " day" : " days") + " in " + mw + (un === 1 ? " has" : " have") + " no figure. Settle them on the Exceptions page, then close." : "";
+        items.push(item("close", "Close Month", cOff, cOff ? (closed ? "Closed" : cur ? "Not Over Yet" : !S.canClose ? "No Permission" : un + " Unpriced") : "", false,
+                        un ? { href: unpricedHref(a, b), label: "See them" } : null));
         var rOff = !closed ? mw + " is not closed."
                  : !undoOpen(p) ? mw + " was closed more than 24 hours ago; it stays closed. A correction is paid as an adjustment in the next month."
                  : !S.canReopen ? "Only a Super Administrator can reopen a closed month." : "";
@@ -322,9 +334,9 @@
       }
       return items;
     }
-    function whyOpen(text, r) {                      // r: where the menu was (its rect, read before it closed)
+    function whyOpen(text, r, link) {                // r: where the menu was (its rect, read before it closed); link: { href, label } or null
       var w = document.getElementById("rm-why");
-      w.innerHTML = "<p>" + esc(text) + "</p>";
+      w.innerHTML = "<p>" + esc(text) + (link ? ' <a href="' + esc(link.href) + '" class="section-link">' + esc(link.label) + "</a>" : "") + "</p>";
       w.hidden = false;
       var ww = w.offsetWidth || 300, hh = w.offsetHeight || 60;
       var top = r.top; if (top + hh > window.innerHeight - 8) top = Math.max(8, window.innerHeight - hh - 8);
@@ -361,7 +373,10 @@
     function menuAct(act, el) {
       var kind = MENU.kind, a = MENU.a, b = MENU.b;
       var off = el && el.getAttribute("data-off");
-      if (off) { var at = document.getElementById("row-menu").getBoundingClientRect(); menuClose(); whyOpen(off, at); return; }   // the reason, where the menu was
+      if (off) {                                     // the reason, where the menu was — with its link when there is somewhere to go
+        var at = document.getElementById("row-menu").getBoundingClientRect(), href = el.getAttribute("data-off-href");
+        menuClose(); whyOpen(off, at, href ? { href: href, label: el.getAttribute("data-off-link") || "See them" } : null); return;
+      }
       menuClose();
       if (kind === "rule") {
         if (act === "view-rule") openRule(a);
@@ -487,10 +502,35 @@
       el.innerHTML = esc(text) + (link ? ' <a href="' + esc(link.href) + '" class="section-link">' + esc(link.label) + "</a>" : "");
     }
     async function reload() {
-      var got = await Promise.all([Dash.getWorkRules(true), Dash.getPayrollPeriods(), Dash.getPublicHolidays()]);
-      S.rules = got[0] || []; S.periods = got[1] || []; S.holidays = got[2] || [];
+      var got = await Promise.all([Dash.getWorkRules(true), Dash.getPayrollPeriods(), Dash.getPublicHolidays(), loadUnpriced()]);
+      S.rules = got[0] || []; S.periods = got[1] || []; S.holidays = got[2] || []; S.unpriced = got[3];
       if (S.showHistory) S.history = await Dash.getSettingsHistory(100);
       render();
+    }
+    // The days without a figure in the months that are over (owner, 10 Nov 2026):
+    // one read of the Exceptions page's payroll-close list, counted per company
+    // and month, so Close Month can say "2 Unpriced" before anyone presses it. A
+    // request still waiting is not counted — the database closes over it (row 6a
+    // of the decision table is open). The database stays the judge: a count that
+    // cannot be read (an older database, no access) leaves the item on, and the
+    // close itself answers unpriced_days as before.
+    async function loadUnpriced() {
+      var thisMonth = String(S.today).slice(0, 7) + "-01";
+      if (!(S.firstMonth < thisMonth)) return {};
+      try {
+        var rows = await Dash.getUnpricedDays(S.firstMonth, addDays(thisMonth, -1));
+        if (!Array.isArray(rows)) return null;
+        var seen = {}, counts = {};
+        rows.forEach(function (u) {
+          if (u.why === "pending_request") return;
+          var day = u.staff_id + "|" + u.work_date;
+          if (seen[day]) return;
+          seen[day] = true;
+          var k = u.company_code + "|" + String(u.work_date).slice(0, 7) + "-01";
+          counts[k] = (counts[k] || 0) + 1;
+        });
+        return counts;
+      } catch (e) { return null; }
     }
     async function doClose(code, month) {
       var id = "c-" + (code + "|" + month).replace(/[^A-Za-z0-9]/g, "");
@@ -502,7 +542,8 @@
         if (v && v.ok) { delete S.open[code + "|" + month]; await reload(); return; }
         var code2 = v && v.code;
         sayStatus(st, false, (v && v.message) || ("Not closed (" + code2 + ")."),
-                  code2 === "unpriced_days" ? { href: "exceptions.html", label: "See them" } : null);
+                  code2 === "unpriced_days" ? { href: unpricedHref(code, month), label: "See them" } : null);
+        if (code2 === "unpriced_days") loadUnpriced().then(function (c) { S.unpriced = c; });   // the count here was stale; the menu greys from now on
       } catch (e) { sayStatus(st, false, (e && e.message) || String(e)); }
     }
     async function doReopen(code, month) {
