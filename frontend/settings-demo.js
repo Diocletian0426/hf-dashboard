@@ -17,8 +17,8 @@
 // with the four rule rows 0131 seeds (today's rule from 2000, the clock rule
 // from 1 Nov 2026, per company, the 1.5x rates), one closed month (closed two
 // hours ago, so the 24-hour undo is still open), one open month with two days
-// still without a figure (the Settings page greys its Close Month as "2 Unpriced";
-// settle the two on the Exceptions demo and the close goes through — the note
+// still without a figure (the Settings page greys its Close Month as "2 Unpriced",
+// the reason on hover; settle the two on the Exceptions demo and the close goes through — the note
 // travels in sessionStorage, this tab only), the 2026 Penang holidays 0103
 // seeds and a short history, and keeps every write in this page's memory with
 // the database's own refusal codes and words. A reload brings everything back.
@@ -76,9 +76,9 @@
   // ---- the payroll months, as get_payroll_periods (0132) returns them --------
   // HF-BP's October was closed two hours ago (the 24-hour undo is still open);
   // Hai Fu's is open with two days still without a figure (UNPRICED below), so
-  // its ⋮ menu greys Close Month as "2 Unpriced" — See them opens the Exceptions
-  // demo on those two days; settled there (this tab), they drop off here and
-  // the close goes through
+  // its ⋮ menu greys Close Month as "2 Unpriced" (the reason on hover); the
+  // Exceptions demo lists the two days for October — settled there (this tab),
+  // they drop off here and the close goes through
   var closedAgo = new Date(Date.now() - 2 * HOUR).toISOString();
   var PERIODS = [
     { company_code: "HF-BP", period_month: "2026-10-01", status: "closed", closed_at: closedAgo, closed_by_name: "Nick Fury (demo)",
@@ -357,7 +357,7 @@
       ? "<strong>Demo data</strong> — the rule rows are the ones migration 0131 seeds (with 1.5× rates), the holidays are 0103's Penang list, " +
         "the months and the history are invented, so the page can be reviewed before the database change is applied. Nothing is saved; a reload brings everything back. " +
         "Try: <em>View</em> on a rule (its figures in a side panel; Withdraw on a scheduled one), <em>New Rule From…</em> (tomorrow or later; the day length follows the window by the clock), " +
-        "the <em>⋮</em> menu on Hai Fu's October (<em>Close Month</em> is greyed <em>2 Unpriced</em>; press it for the reason and <em>See them</em>, settle the two days on the Exceptions page, come back in this tab and the close goes through), " +
+        "the <em>⋮</em> menu on Hai Fu's October (<em>Close Month</em> is greyed <em>2 Unpriced</em> — hover it for the reason; settle the two days on the Exceptions page with the filters on Hai Fu and October, come back in this tab and the close goes through), " +
         "<em>Reopen</em> October for HF Bored Piles (closed two hours ago, so the 24-hour undo is still open; a reason is required), " +
         "<em>Add Holiday</em> and <em>Remove</em> a coming one, <em>Show History</em>. " +
         "<code>&role=admin</code> on the URL shows the Administrator's view (Close, no Reopen). Drop <code>?demo=1</code> for the real page."

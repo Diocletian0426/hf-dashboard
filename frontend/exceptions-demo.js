@@ -120,7 +120,7 @@
     wd({ who: "vision",  site: 0, date: day(4), inL: "19:05", outL: "23:25" }),
     wd({ who: "wanda",   site: 0, date: day(4), inL: "19:02", outL: "23:28" }),
     // October (the 0132 demo): the two Hai Fu days without a figure that the
-    // Settings page's "2 Unpriced" points at (settings.html?demo=1 -> See them).
+    // Settings page's "2 Unpriced" counts (settings.html?demo=1; here: filters Hai Fu + October).
     // A forgotten punch-out on the 14th and a 20 h 40 m night on the 21st, neither
     // settled. Settle them here and the Settings page lets October close: the
     // note travels in sessionStorage (SETTLED_KEY below), this tab only.

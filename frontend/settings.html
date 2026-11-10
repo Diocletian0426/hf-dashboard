@@ -106,7 +106,7 @@
   <aside id="st-drawer" class="st-drawer" hidden aria-label="Work rule"></aside>
   <!-- the row menu behind each row's ⋮ (owner, 10 Nov 2026): Attendance's row-menu classes, so one look -->
   <div class="row-menu" id="row-menu" hidden role="menu"></div>
-  <div class="row-menu st-why" id="rm-why" hidden role="status"></div>
+  <div class="row-menu st-why" id="rm-why" hidden role="tooltip"></div>
 
   <script src="vendor/supabase.js"></script>
   <script src="config.js"></script>
@@ -291,16 +291,17 @@
     // ---------------------------------------------------------------- the row menu (⋮)
     // Work Rules: View Rule · New Rule From This · Withdraw. Payroll Months: View
     // Month · Close Month · Reopen Month. Every item is listed (owner, 10 Nov 2026);
-    // one that does not apply is greyed with a short label, and pressing it shows
-    // the reason in a small pop-out — with a link when there is somewhere to go:
-    // Close Month on a month with days still without a figure reads "2 Unpriced",
-    // and its reason ends in See them, the Exceptions page on that company and
-    // month (owner, 10 Nov 2026 — the database's check, shown before the press).
-    function item(act, label, off, small, danger, link) {   // link: { href, label } offered with the reason when the item is off
-      return '<button type="button" class="rm-item' + (off ? " is-off" : "") + (danger && !off ? " rm-danger" : "") + '" role="menuitem" data-menu="' + act + '"' +
-             (off ? ' data-off="' + esc(off) + '" title="' + esc(off) + '"' : "") +
-             (off && link ? ' data-off-href="' + esc(link.href) + '" data-off-link="' + esc(link.label) + '"' : "") +
-             ">" + esc(label) + (small ? "<small>" + esc(small) + "</small>" : "") + "</button>";
+    // one that does not apply is greyed with a short label and cannot be pressed
+    // (Attendance's span + aria-disabled); hovering it shows one short sentence
+    // of reason in a small tip beside the menu (owner, 10 Nov 2026). Close Month
+    // on a month with days still without a figure reads "2 Unpriced" — the
+    // database's own check, shown before anyone tries.
+    function item(act, label, off, small, danger) {
+      if (off) {
+        return '<span class="rm-item is-off" role="menuitem" aria-disabled="true" data-menu="' + act + '" data-off="' + esc(off) + '">' +
+               esc(label) + (small ? "<small>" + esc(small) + "</small>" : "") + "</span>";
+      }
+      return '<button type="button" class="rm-item' + (danger ? " rm-danger" : "") + '" role="menuitem" data-menu="' + act + '">' + esc(label) + (small ? "<small>" + esc(small) + "</small>" : "") + "</button>";
     }
     function unpricedOf(code, month) { return (S.unpriced && S.unpriced[code + "|" + month]) || 0; }
     function unpricedHref(code, month) {   // the Exceptions page on that company and month (its Before Payroll Closes list takes a range)
@@ -312,35 +313,36 @@
         var r = ruleById(a); if (!r) return items;
         var st = statusOf(r), when = dateWord(r.effective_from), until = untilOf(r);
         items.push(item("view-rule", "View Rule"));
-        items.push(item("rule-from", "New Rule From This", S.manage ? "" : "Adding a rule needs the settings permission.", S.manage ? "" : "No Permission"));
-        var wOff = !S.manage ? "Withdrawing a rule needs the settings permission."
-                 : st === "In Force" ? "This rule has been in force since " + when + "; a rule in force stays on record."
-                 : st === "Ended" ? "This rule ended on " + dateWord(until) + "; it stays on record." : "";
+        items.push(item("rule-from", "New Rule From This", S.manage ? "" : "Needs the settings permission.", S.manage ? "" : "No Permission"));
+        var wOff = !S.manage ? "Needs the settings permission."
+                 : st === "In Force" ? "In force since " + when + "; it stays on record."
+                 : st === "Ended" ? "Ended on " + dateWord(until) + "; it stays on record." : "";
         items.push(item("withdraw", "Withdraw", wOff, wOff ? (!S.manage ? "No Permission" : st) : "", true));
       } else {
         var p = periodOf(a, b), cur = b === String(S.today).slice(0, 7) + "-01", closed = !!(p && p.status === "closed"), mw = monthWord(b);
         items.push('<a class="rm-item" role="menuitem" href="attendance.html?view=month&month=' + esc(b.slice(0, 7)) + "&company=" + encodeURIComponent(a) + DEMO_Q + '">View Month</a>');
         var un = (!closed && !cur && S.canClose) ? unpricedOf(a, b) : 0;   // days still without a figure: the database refuses the close while any remain
-        var cOff = closed ? mw + " is already closed, on " + dateWordKL(p.closed_at) + (p.closed_by_name ? " by " + p.closed_by_name : "") + "."
-                 : cur ? mw + " is not over yet; a month closes once it has ended."
-                 : !S.canClose ? "Closing a month needs the payroll close permission."
-                 : un ? un + (un === 1 ? " day" : " days") + " in " + mw + (un === 1 ? " has" : " have") + " no figure. Settle them on the Exceptions page, then close." : "";
-        items.push(item("close", "Close Month", cOff, cOff ? (closed ? "Closed" : cur ? "Not Over Yet" : !S.canClose ? "No Permission" : un + " Unpriced") : "", false,
-                        un ? { href: unpricedHref(a, b), label: "See them" } : null));
+        var cOff = closed ? "Closed on " + dateWordKL(p.closed_at) + (p.closed_by_name ? " by " + p.closed_by_name : "") + "."
+                 : cur ? mw + " is not over yet."
+                 : !S.canClose ? "Needs the payroll close permission."
+                 : un ? un + (un === 1 ? " day has" : " days have") + " no figure; settle them on the Exceptions page first." : "";
+        items.push(item("close", "Close Month", cOff, cOff ? (closed ? "Closed" : cur ? "Not Over Yet" : !S.canClose ? "No Permission" : un + " Unpriced") : ""));
         var rOff = !closed ? mw + " is not closed."
-                 : !undoOpen(p) ? mw + " was closed more than 24 hours ago; it stays closed. A correction is paid as an adjustment in the next month."
-                 : !S.canReopen ? "Only a Super Administrator can reopen a closed month." : "";
+                 : !undoOpen(p) ? "Closed over 24 hours ago; it stays closed."
+                 : !S.canReopen ? "Only a Super Administrator can reopen a month." : "";
         items.push(item("reopen", "Reopen Month", rOff, rOff ? (!closed ? "Not Closed" : !undoOpen(p) ? "Undo Passed" : "Super Administrator") : "Undo until " + stampWord(p.reopen_until)));
       }
       return items;
     }
-    function whyOpen(text, r, link) {                // r: where the menu was (its rect, read before it closed); link: { href, label } or null
-      var w = document.getElementById("rm-why");
-      w.innerHTML = "<p>" + esc(text) + (link ? ' <a href="' + esc(link.href) + '" class="section-link">' + esc(link.label) + "</a>" : "") + "</p>";
+    function tipShow(el) {                           // the reason of a greyed item, beside the open menu (left of it when there is room)
+      var w = document.getElementById("rm-why"), text = el.getAttribute("data-off");
+      if (!text) return;
+      w.innerHTML = "<p>" + esc(text) + "</p>";
       w.hidden = false;
-      var ww = w.offsetWidth || 300, hh = w.offsetHeight || 60;
+      var m = document.getElementById("row-menu").getBoundingClientRect(), r = el.getBoundingClientRect();
+      var ww = w.offsetWidth || 300, hh = w.offsetHeight || 40;
+      var left = m.left - ww - 8; if (left < 8) left = Math.min(window.innerWidth - ww - 8, m.right + 8);
       var top = r.top; if (top + hh > window.innerHeight - 8) top = Math.max(8, window.innerHeight - hh - 8);
-      var left = r.left; if (left + ww > window.innerWidth - 8) left = Math.max(8, window.innerWidth - ww - 8);
       w.style.top = top + "px"; w.style.left = left + "px";
     }
     function whyClose() { var w = document.getElementById("rm-why"); if (!w.hidden) { w.hidden = true; w.innerHTML = ""; } }
@@ -365,6 +367,7 @@
       var first = m.querySelector("[data-menu],a"); if (first) first.focus();
     }
     function menuClose() {
+      whyClose();
       if (!MENU.open) return;
       document.getElementById("row-menu").hidden = true;
       if (MENU.btn) MENU.btn.setAttribute("aria-expanded", "false");
@@ -372,11 +375,7 @@
     }
     function menuAct(act, el) {
       var kind = MENU.kind, a = MENU.a, b = MENU.b;
-      var off = el && el.getAttribute("data-off");
-      if (off) {                                     // the reason, where the menu was — with its link when there is somewhere to go
-        var at = document.getElementById("row-menu").getBoundingClientRect(), href = el.getAttribute("data-off-href");
-        menuClose(); whyOpen(off, at, href ? { href: href, label: el.getAttribute("data-off-link") || "See them" } : null); return;
-      }
+      if (el && el.classList.contains("is-off")) return;   // a greyed item does nothing; the menu stays open (the reason is on hover)
       menuClose();
       if (kind === "rule") {
         if (act === "view-rule") openRule(a);
@@ -654,11 +653,16 @@
     });
     document.addEventListener("keydown", function (ev) {
       if (ev.key !== "Escape") return;
-      if (!document.getElementById("rm-why").hidden) { whyClose(); return; }
       if (MENU.open) { var b = MENU.btn; menuClose(); if (b) b.focus(); return; }
       if (S.view) closeDrawer();
     });
-    // the menu and the reason close when the page scrolls (the Attendance rule: not in the first moment after opening)
+    // the reason of a greyed item shows while the pointer rests on it
+    document.addEventListener("mouseover", function (ev) {
+      var it = ev.target.closest("#row-menu .rm-item.is-off");
+      if (it) tipShow(it);
+      else if (!ev.target.closest("#rm-why")) whyClose();
+    });
+    // the menu and the tip close when the page scrolls (the Attendance rule: not in the first moment after opening)
     window.addEventListener("scroll", function () { if (MENU.open && Date.now() - (MENU.at || 0) > 400) menuClose(); whyClose(); }, { passive: true });
     // a right-click on a rule row or a month row opens its menu at the pointer (the
     // Attendance rule); on a link, a field or a button the browser's own menu stays
