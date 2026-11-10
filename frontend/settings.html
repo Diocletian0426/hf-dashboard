@@ -131,7 +131,8 @@
               unpriced: null,     // "code|month" -> { days, requests }: days without a figure and worker requests still waiting in the months that are over (get_unpriced_days); null = not known, the database decides at the close
               form: null,         // { company, from } while the New Rule form is open in the side panel
               holidayForm: false, // the Add Holiday form is open in the side panel
-              holidayView: "coming" }; // "coming" (the default) or a year, the Public Holidays list
+              holidayView: "coming",   // "coming" (the default) or a year, the Public Holidays list
+              formDirty: false, formSwitch: null }; // the New Rule form: figures typed since it opened; the company waiting to be loaded
     var COMPANY_NAMES = { "HF-BP": "HF Bored Piles", "Hai Fu": "Hai Fu" };
     var COMPANY_ORDER = ["HF-BP", "Hai Fu"];
 
@@ -223,6 +224,7 @@
       return '<form class="st-form" id="f-rule" autocomplete="off">' +
         '<label>Company <select name="company_code">' + COMPANY_ORDER.map(function (c) { return opt(c, companyName(c), code); }).join("") + "</select></label>" +
         '<label>From <input type="date" name="effective_from" value="' + next + '" min="' + S.tomorrow + '" required></label>' +
+        '<div class="wide st-note" id="f-rule-switch" hidden></div>' +   // the one question when the company changes under typed figures (review issue 6)
         "<h4>Working Schedule</h4>" +
         '<label>Rule <select name="mode">' + opt("clock", "By the clock", mode) + opt("total", "By the total", mode) + "</select></label>" +
         '<label>Grace at the start (min) <input type="number" name="grace_minutes" min="0" max="120" value="' + num(u.grace_minutes, 10) + '" required></label>' +
@@ -298,7 +300,7 @@
         el.setAttribute("aria-label", "New work rule");
         el.innerHTML = '<div class="dr-top"><h2>New Rule</h2>' +
             '<button type="button" class="btn dr-close" data-act="close-drawer" aria-label="Close">×</button></div>' +
-          '<p class="dr-sub st-note">' + (from ? "From " + esc(companyName(from.company_code)) + "'s rule of " + esc(dateWord(from.effective_from)) : "From the rule in force") + "</p>" +
+          '<p class="dr-sub st-note">' + (from ? "From " + esc(companyName(from.company_code)) + "'s rule of " + esc(dateWord(from.effective_from)) : "From " + esc(companyName(S.form.company)) + "'s rule in force") + "</p>" +
           ruleForm(S.form);
         Array.prototype.forEach.call(el.querySelectorAll("form.st-form"), syncDayLength);
         el.hidden = false;
@@ -338,8 +340,21 @@
     }
     function openRule(id) { S.view = id; S.form = null; S.holidayForm = false; renderDrawer(); }
     function openForm(company, from) {               // New Rule (top right) or New Rule From This (a rule's menu or panel)
-      S.form = { company: company, from: from || null }; S.view = null; S.holidayForm = false; renderDrawer();
+      S.form = { company: company, from: from || null }; S.view = null; S.holidayForm = false; S.formDirty = false; S.formSwitch = null; renderDrawer();
       var f = document.querySelector("#st-drawer form.st-form [name=company_code]"); if (f) f.focus();
+    }
+    // the Company choice loads that company's rule in force as the template (review issue 6, owner's go
+    // 10 Nov 2026): at once while nothing has been typed; else one question — Load (the typed figures go)
+    // or Keep (the company changes, the figures stay)
+    function companySwitch(form, code) {
+      if (!S.form) return;
+      if (!S.formDirty) { openForm(code, null); return; }
+      S.formSwitch = code;
+      var box = form.querySelector("#f-rule-switch");
+      if (!box) return;
+      box.innerHTML = "Load " + esc(companyName(code)) + "'s rule? Your changes go. " +
+        '<button type="button" class="btn small" data-act="rule-load">Load</button> <button type="button" class="btn small" data-act="rule-keep">Keep</button>';
+      box.hidden = false;
     }
     function openHolidayForm() {                     // Add Holiday (top right of Public Holidays)
       S.holidayForm = true; S.view = null; S.form = null; renderDrawer();
@@ -724,6 +739,8 @@
       else if (act === "close-go") doClose(code, month);
       else if (act === "reopen-go") doReopen(code, month);
       else if (act === "new-rule") openForm(COMPANY_ORDER[0], null);
+      else if (act === "rule-load") { if (S.formSwitch) openForm(S.formSwitch, null); }
+      else if (act === "rule-keep") { S.formSwitch = null; var sw = document.getElementById("f-rule-switch"); if (sw) { sw.hidden = true; sw.innerHTML = ""; } }
       else if (act === "cancel-rule") closeDrawer();
       else if (act === "close-drawer") closeDrawer();
       else if (act === "rule-from") { var r = ruleById(b.getAttribute("data-rule")); openForm(r ? r.company_code : COMPANY_ORDER[0], r); }
@@ -769,12 +786,14 @@
     document.addEventListener("input", function (ev) {
       var form = ev.target.closest("form.st-form");
       if (!form || form.id !== "f-rule") return;
+      if (ev.target.name !== "company_code") S.formDirty = true;
       if (["mode", "day_start", "day_end", "rest_minutes", "grace_minutes", "normal_minutes", "round_minutes"].indexOf(ev.target.name) >= 0) syncDayLength(form);
     });
     document.addEventListener("change", function (ev) {
       if (ev.target.id === "hol-view") { S.holidayView = ev.target.value; renderHolidays(); return; }
       var form = ev.target.closest("form.st-form");
-      if (form && form.id === "f-rule" && ["mode", "round_minutes"].indexOf(ev.target.name) >= 0) syncDayLength(form);
+      if (form && form.id === "f-rule" && ev.target.name === "company_code") { companySwitch(form, ev.target.value); return; }
+      if (form && form.id === "f-rule" && ["mode", "round_minutes"].indexOf(ev.target.name) >= 0) { S.formDirty = true; syncDayLength(form); }
     });
 
     window.onShellReady = async function () {

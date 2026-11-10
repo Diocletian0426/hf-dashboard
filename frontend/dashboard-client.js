@@ -1148,7 +1148,7 @@
   //   missed       left without a punch-out (the worker said so, or 48 h passed)
   //   long_open    still open 20 h or more (0130; was 16 h)
   //   overlong     closed over the long-shift line of its day and not accepted: unpriced (0131: 20 h to 31 Oct 2026, 24 h from 1 Nov)
-  //   early_start  a site worker's start before 06:00, not accepted: counts from 08:00
+  //   early_start  a site worker's start before 06:00, not accepted: counts from the day's start (both rules; D26, 10 Nov 2026)
   // A finish time the worker declared rides on the row as request_id /
   // declared_out_at / request_pending (it is a Change Times request). Each row
   // also carries the shift AS RULED (official_in_at, official_out_at, adjusted,

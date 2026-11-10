@@ -64,7 +64,7 @@
              ot_rate: 1.5, rest_day_rate: 1.5, holiday_rate: 1.5 };   // created_by_name null = a migration wrote it (the page says System)
   }
   var OLD_NOTE = "The rule as live until 31 Oct 2026 (0103 … 0130): credited from 08:00, {rest} rest, OT beyond 7.5 h by the total, to the minute, Overlong over 20 h";
-  var NEW_NOTE = "Chapter 2 (owner, 3 and 7 Nov 2026): 08:30-17:00 window, 10 min grace at the start only, 1 h rest, overtime only from a shift punched in at or after 17:00 (a start before 06:00 counts as overtime by itself), half-hour round-down per day, Overlong over 20 h; a man not paid overtime keeps his evening as normal hours";
+  var NEW_NOTE = "Chapter 2 (owner, 3 and 7 Nov 2026): 08:30-17:00 window, 10 min grace at the start only, 1 h rest, overtime only from a shift punched in at or after 17:00 (a start before 06:00 is an Early Start the office credits or keeps), half-hour round-down per day, Overlong over 20 h; a man not paid overtime keeps his evening as normal hours";
   var RULES = [
     rule("demo-rule-1", "HF-BP",  "2000-01-01", "total", "08:00:00", "17:00:00", 90, 0,  1,  OLD_NOTE.replace("{rest}", "1.5 h")),
     rule("demo-rule-2", "Hai Fu", "2000-01-01", "total", "08:00:00", "17:00:00", 60, 0,  1,  OLD_NOTE.replace("{rest}", "1 h")),
@@ -274,7 +274,6 @@
       if (b === null) return null;                              // an open shift = the day unpriced
       if (a >= de) { ot += b - a; otFlags.push(true); continue; }   // punched in at or after the day's end: an overtime shift whole
       otFlags.push(false);
-      if (a < 6 * 60) ot += Math.min(b, ds) - a;                // a night call-out: the minutes before the window are overtime by themselves
       var from = a <= ds + grace ? ds : a;                      // within the grace: counts from the day's start; never before it
       normal += Math.max(0, Math.min(b, de) - from);
       if (b > de) { if (otEligible) unc += b - de; else normal += b - de; }   // the overrun earns nothing (or stays normal for a man not paid overtime)
