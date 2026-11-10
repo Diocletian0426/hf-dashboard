@@ -72,7 +72,7 @@
 
     <div class="page-eyebrow">Administration</div>
     <h1>Settings</h1>
-    <p class="page-caption">The company-wide settings behind the dashboard and the punch app, by area. A setting is added from a coming day and the past is never rewritten; a closed payroll month keeps its figures.</p>
+    <p class="page-caption">Company-wide settings, by area. Added from a coming day; the past is never rewritten.</p>
 
     <div id="error"></div>
 
@@ -124,6 +124,10 @@
       return new Date(String(iso).slice(0, 10) + "T00:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
     }
     function dayWord(iso) { return new Date(String(iso).slice(0, 10) + "T00:00:00Z").toLocaleDateString("en-GB", { weekday: "short", timeZone: "UTC" }); }
+    function dateWordKL(iso) {
+      if (!iso) return "";
+      return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kuala_Lumpur" });
+    }
     function stampWord(iso) {
       if (!iso) return "";
       var d = new Date(iso);
@@ -216,8 +220,7 @@
         '<label>Rest day rate (×) <input type="number" name="rest_day_rate" min="1" max="5" step="0.05" value="' + num(u.rest_day_rate, 1.5) + '" required></label>' +
         '<label>Public holiday rate (×) <input type="number" name="holiday_rate" min="1" max="5" step="0.05" value="' + num(u.holiday_rate, 1.5) + '" required></label>' +
         '<label class="wide">Note <input type="text" name="note" maxlength="500" placeholder="Why this rule, in a line"></label>' +
-        '<div class="wide st-actions"><button type="submit" class="btn">Add Rule</button><button type="button" class="btn small" data-act="cancel-rule">Cancel</button>' +
-        '<span class="st-note">A rule starts tomorrow or later and is never rewritten once in force; a rule that has not started yet may be changed or withdrawn. The rates are words for the pages and the Excel; the figures stay hours by kind.</span></div>' +
+        '<div class="wide st-actions"><button type="submit" class="btn">Add Rule</button><button type="button" class="btn small" data-act="cancel-rule">Cancel</button></div>' +
         '<p class="st-status wide" id="f-rule-status"></p>' +
       "</form>";
     }
@@ -241,7 +244,7 @@
       host.innerHTML = '<div class="st-card">' +
         (rows.length ? '<div class="table-wrap"><table class="st-table"><thead><tr><th>Company</th><th>From</th><th>Until</th><th>Status</th><th>Enforced By</th><th></th></tr></thead><tbody>' +
                        rows.map(ruleRow).join("") + "</tbody></table></div>"
-                     : UI.empty("No rule rows yet. The database prices every day by the rule in force; add the first rule here.")) +
+                     : UI.empty("No Rules Yet")) +
         (S.manage ? (S.open.rule ? ruleForm(S.open.rule) : '<div class="st-actions"><button type="button" class="btn small" data-act="new-rule">New Rule From…</button></div>') : "") +
       "</div>";
       Array.prototype.forEach.call(host.querySelectorAll("form.st-form"), syncDayLength);
@@ -277,6 +280,10 @@
     function closeDrawer() { S.view = null; renderDrawer(); }
 
     // ---------------------------------------------------------------- periods
+    // One table for both companies (owner, 9 Nov 2026): Company, Month, Status,
+    // Closed By, Date, the action. Columns, not sentences: the figures at the
+    // close stay in the database for an Analysis tab later; the notes and
+    // reasons are in History.
     function monthsFor() {
       var list = [], m = String(S.today).slice(0, 7) + "-01";
       while (m >= S.firstMonth) { list.push(m); m = addMonths(m, -1); }
@@ -290,37 +297,36 @@
     function periodRow(code, month) {
       var p = periodOf(code, month), cur = month === String(S.today).slice(0, 7) + "-01", key = code + "|" + month;
       var closed = !!(p && p.status === "closed");
-      var status = closed ? '<span class="st-tag">Closed</span> on ' + esc(stampWord(p.closed_at)) + (p.closed_by_name ? " by " + esc(p.closed_by_name) : "") + (p.note ? ' <span class="st-note">— ' + esc(p.note) + "</span>" : "")
-                            + (undoOpen(p) && S.canReopen ? ' <span class="st-note">· undo until ' + esc(stampWord(p.reopen_until)) + "</span>" : "")
-                 : p && p.status === "open" ? '<span class="st-tag ok">Open</span> reopened ' + esc(stampWord(p.reopened_at)) + (p.reopened_by_name ? " by " + esc(p.reopened_by_name) : "") + (p.note ? ' <span class="st-note">— ' + esc(p.note) + "</span>" : "")
-                 : cur ? '<span class="st-tag ok">Open</span> <span class="st-note">not over yet</span>' : '<span class="st-tag ok">Open</span>';
-      var figures = closed ? esc(p.days + " day" + (p.days === 1 ? "" : "s") + " · " + hm(p.working_minutes) + " normal · " + hm(p.ot_minutes) + " overtime") : "";
       var act = "";
-      if (closed && S.canReopen && undoOpen(p)) act = '<button type="button" class="btn small" data-act="reopen" data-company="' + esc(code) + '" data-month="' + month + '">Reopen</button>';
+      if (closed && S.canReopen && undoOpen(p)) act = '<button type="button" class="btn small" data-act="reopen" data-company="' + esc(code) + '" data-month="' + month + '" title="Undo until ' + esc(stampWord(p.reopen_until)) + '">Reopen</button>';
       else if (!closed && !cur && S.canClose) act = '<button type="button" class="btn small" data-act="close" data-company="' + esc(code) + '" data-month="' + month + '">Close</button>';
       var confirm = S.open[key] ? confirmBox(code, month, closed) : "";
-      return '<tr data-period="' + esc(key) + '"><td class="n">' + esc(monthWord(month)) + "</td><td>" + status + "</td><td>" + figures + '</td><td class="n">' + act + "</td></tr>" +
-             (confirm ? '<tr><td colspan="4">' + confirm + "</td></tr>" : "");
+      return '<tr data-period="' + esc(key) + '">' +
+        '<td class="n">' + esc(code) + "</td>" +
+        '<td class="n">' + esc(monthWord(month)) + "</td>" +
+        '<td class="n">' + (closed ? '<span class="st-tag">Closed</span>' : '<span class="st-tag ok">Open</span>') + "</td>" +
+        '<td class="n">' + (closed ? esc(p.closed_by_name || "") : "—") + "</td>" +
+        '<td class="n">' + (closed ? esc(dateWordKL(p.closed_at)) : "—") + "</td>" +
+        '<td class="n">' + act + "</td></tr>" +
+        (confirm ? '<tr><td colspan="6">' + confirm + "</td></tr>" : "");
     }
     function confirmBox(code, month, closed) {
       var key = code + "|" + month, id = "c-" + key.replace(/[^A-Za-z0-9]/g, "");
       if (closed) {
-        return '<div class="st-confirm" id="' + id + '"><p>Undo the close of <b>' + esc(monthWord(month)) + "</b> for " + esc(companyName(code)) + "? Its figures move again until it is closed; the frozen copy is dropped. Say why.</p>" +
+        return '<div class="st-confirm" id="' + id + '"><p>Reopen <b>' + esc(monthWord(month)) + "</b> for " + esc(companyName(code)) + "?</p>" +
           '<div class="st-actions"><input type="text" id="' + id + '-why" maxlength="500" placeholder="Reason"> <button type="button" class="btn" data-act="reopen-go" data-company="' + esc(code) + '" data-month="' + month + '">Reopen ' + esc(monthWord(month)) + '</button> <button type="button" class="btn small" data-act="cancel" data-key="' + esc(key) + '">Cancel</button></div>' +
           '<p class="st-status" id="' + id + '-status"></p></div>';
       }
-      return '<div class="st-confirm" id="' + id + '"><p>Close <b>' + esc(monthWord(month)) + "</b> for " + esc(companyName(code)) + "? Every day must have its figure. After the close no hours or shifts of this month can be changed; a Super Administrator may undo the close within 24 hours, after that a correction is paid as an adjustment in the next month.</p>" +
+      return '<div class="st-confirm" id="' + id + '"><p>Close <b>' + esc(monthWord(month)) + "</b> for " + esc(companyName(code)) + "?</p>" +
         '<div class="st-actions"><input type="text" id="' + id + '-note" maxlength="500" placeholder="Note (optional)"> <button type="button" class="btn" data-act="close-go" data-company="' + esc(code) + '" data-month="' + month + '">Close ' + esc(monthWord(month)) + '</button> <button type="button" class="btn small" data-act="cancel" data-key="' + esc(key) + '">Cancel</button></div>' +
         '<p class="st-status" id="' + id + '-status"></p></div>';
     }
     function renderPeriods() {
       var host = document.getElementById("periods");
-      host.innerHTML = companies().map(function (code) {
-        return '<div class="st-card" data-company="' + esc(code) + '"><h3>' + esc(companyName(code)) + "</h3>" +
-          '<div class="table-wrap"><table class="st-table"><thead><tr><th>Month</th><th>Status</th><th>Figures at the close</th><th></th></tr></thead><tbody>' +
-          monthsFor().map(function (m) { return periodRow(code, m); }).join("") +
-          "</tbody></table></div></div>";
-      }).join("");
+      var rows = [];
+      monthsFor().forEach(function (m) { companies().forEach(function (code) { rows.push(periodRow(code, m)); }); });   // newest month first, HF-BP before Hai Fu
+      host.innerHTML = '<div class="st-card"><div class="table-wrap"><table class="st-table"><thead><tr><th>Company</th><th>Month</th><th>Status</th><th>Closed By</th><th>Date</th><th></th></tr></thead><tbody>' +
+        rows.join("") + "</tbody></table></div></div>";
     }
 
     // ---------------------------------------------------------------- holidays
@@ -329,8 +335,7 @@
         '<label>Date <input type="date" name="holiday_date" min="' + S.tomorrow + '" required></label>' +
         '<label>Name <input type="text" name="name" maxlength="120" placeholder="e.g. Hari Raya Haji" required></label>' +
         '<label class="chk"><input type="checkbox" name="in_lieu"> In lieu</label>' +
-        '<div class="wide st-actions"><button type="submit" class="btn">Add Holiday</button><button type="button" class="btn small" data-act="cancel-holiday">Cancel</button>' +
-        '<span class="st-note">A holiday is added for a coming day and prices that day as a public holiday; days already punched are never re-priced. A holiday that has passed stays on record.</span></div>' +
+        '<div class="wide st-actions"><button type="submit" class="btn">Add Holiday</button><button type="button" class="btn small" data-act="cancel-holiday">Cancel</button></div>' +
         '<p class="st-status wide" id="f-holiday-status"></p>' +
       "</form>";
     }
@@ -347,9 +352,9 @@
           '<td class="n">' + (!past && S.manage ? '<button type="button" class="btn small btn-danger" data-act="remove-holiday" data-date="' + esc(d) + '">Remove</button>' : "") + "</td></tr>";
       });
       host.innerHTML = '<div class="st-card">' +
-        '<h3>Penang calendar <span class="muted">the days the pricing counts as a public holiday, for every site</span></h3>' +
+        '<h3>Penang Calendar</h3>' +
         (rows.length ? '<div class="table-wrap"><table class="st-table"><thead><tr><th>Date</th><th>Day</th><th>Holiday</th><th></th><th></th></tr></thead><tbody>' + body + "</tbody></table></div>"
-                     : UI.empty("No holidays listed from this year on.")) +
+                     : UI.empty("No Holidays Listed")) +
         (S.manage ? (S.open["holiday"] ? holidayForm() : '<div class="st-actions"><button type="button" class="btn small" data-act="new-holiday">Add Holiday</button></div>') : "") +
       "</div>";
     }
@@ -362,7 +367,7 @@
       host.innerHTML = '<div class="st-card">' +
         (rows.length ? '<div class="table-wrap"><table class="st-table"><thead><tr><th>When</th><th>Who</th><th>What</th></tr></thead><tbody>' +
           rows.map(function (h) { return '<tr><td class="n">' + esc(stampWord(h.occurred_at)) + '</td><td class="n">' + esc(h.actor_label || "") + '</td><td class="w">' + esc(h.summary || "") + "</td></tr>"; }).join("") +
-          "</tbody></table></div>" : UI.empty("Nothing changed yet.")) +
+          "</tbody></table></div>" : UI.empty("No Changes Yet")) +
         '<div class="st-actions"><button type="button" class="btn small" data-act="hide-history">Hide History</button></div></div>';
     }
     function render() { renderRules(); renderPeriods(); renderHolidays(); renderHistory(); renderDrawer(); }
