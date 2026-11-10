@@ -322,11 +322,11 @@
       }
       return items;
     }
-    function whyOpen(text, fromEl) {
+    function whyOpen(text, r) {                      // r: where the menu was (its rect, read before it closed)
       var w = document.getElementById("rm-why");
       w.innerHTML = "<p>" + esc(text) + "</p>";
       w.hidden = false;
-      var r = fromEl.getBoundingClientRect(), ww = w.offsetWidth || 300, hh = w.offsetHeight || 60;
+      var ww = w.offsetWidth || 300, hh = w.offsetHeight || 60;
       var top = r.top; if (top + hh > window.innerHeight - 8) top = Math.max(8, window.innerHeight - hh - 8);
       var left = r.left; if (left + ww > window.innerWidth - 8) left = Math.max(8, window.innerWidth - ww - 8);
       w.style.top = top + "px"; w.style.left = left + "px";
@@ -361,7 +361,7 @@
     function menuAct(act, el) {
       var kind = MENU.kind, a = MENU.a, b = MENU.b;
       var off = el && el.getAttribute("data-off");
-      if (off) { var m = document.getElementById("row-menu"); menuClose(); whyOpen(off, m); return; }   // the reason, where the menu was
+      if (off) { var at = document.getElementById("row-menu").getBoundingClientRect(); menuClose(); whyOpen(off, at); return; }   // the reason, where the menu was
       menuClose();
       if (kind === "rule") {
         if (act === "view-rule") openRule(a);
