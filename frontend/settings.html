@@ -304,7 +304,7 @@
       return '<tr data-period="' + esc(key) + '">' +
         '<td class="n">' + esc(code) + "</td>" +
         '<td class="n">' + esc(monthWord(month)) + "</td>" +
-        '<td class="n">' + (closed ? '<span class="st-tag">Closed</span>' : '<span class="st-tag ok">Open</span>') + "</td>" +
+        '<td class="n">' + (closed ? '<span class="st-tag">Closed</span>' : cur ? '<span class="st-tag grey">In Progress</span>' : '<span class="st-tag ok">Open</span>') + "</td>" +
         '<td class="n">' + (closed ? esc(p.closed_by_name || "") : "—") + "</td>" +
         '<td class="n">' + (closed ? esc(dateWordKL(p.closed_at)) : "—") + "</td>" +
         '<td class="n">' + act + "</td></tr>" +
@@ -360,13 +360,25 @@
     }
 
     // ---------------------------------------------------------------- history
+    // columns, not sentences (owner, 9 Nov 2026): When, Who, Action, Company,
+    // Date (a rule's start, a payroll month, a holiday), Note
+    var ACTION_WORDS = { work_rule_set: "Rule Set", work_rule_deleted: "Rule Withdrawn", payroll_month_closed: "Month Closed",
+                         payroll_month_reopened: "Month Reopened", public_holiday_added: "Holiday Added", public_holiday_removed: "Holiday Removed" };
+    function historyDate(h) {
+      if (!h.on_date) return "";
+      return /^payroll_month/.test(h.action) ? monthWord(h.on_date) : dateWord(h.on_date);
+    }
     function renderHistory() {
       var host = document.getElementById("history");
       if (!S.showHistory) { host.innerHTML = '<div class="st-actions"><button type="button" class="btn small" data-act="show-history">Show History</button></div>'; return; }
       var rows = S.history || [];
       host.innerHTML = '<div class="st-card">' +
-        (rows.length ? '<div class="table-wrap"><table class="st-table"><thead><tr><th>When</th><th>Who</th><th>What</th></tr></thead><tbody>' +
-          rows.map(function (h) { return '<tr><td class="n">' + esc(stampWord(h.occurred_at)) + '</td><td class="n">' + esc(h.actor_label || "") + '</td><td class="w">' + esc(h.summary || "") + "</td></tr>"; }).join("") +
+        (rows.length ? '<div class="table-wrap"><table class="st-table"><thead><tr><th>When</th><th>Who</th><th>Action</th><th>Company</th><th>Date</th><th>Note</th></tr></thead><tbody>' +
+          rows.map(function (h) {
+            return '<tr><td class="n">' + esc(stampWord(h.occurred_at)) + '</td><td class="n">' + esc(h.actor_label || "") + '</td>' +
+              '<td class="n">' + esc(ACTION_WORDS[h.action] || h.action) + '</td><td class="n">' + esc(h.company_code || "—") + '</td>' +
+              '<td class="n">' + esc(historyDate(h)) + '</td><td class="w" title="' + esc(h.summary || "") + '">' + esc(h.detail || "") + "</td></tr>";
+          }).join("") +
           "</tbody></table></div>" : UI.empty("No Changes Yet")) +
         '<div class="st-actions"><button type="button" class="btn small" data-act="hide-history">Hide History</button></div></div>';
     }

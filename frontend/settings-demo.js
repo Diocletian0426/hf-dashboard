@@ -97,11 +97,13 @@
 
   // ---- the history, as get_settings_history (0132) returns it ----------------
   var HISTORY = [
-    { occurred_at: closedAgo, actor_label: "Nick Fury (demo)", action: "payroll_month_closed", summary: "Closed October 2026 for HF-BP: 131 days, 982.5 h normal, 120.5 h overtime — October done" },
-    { occurred_at: "2026-11-07T04:00:00Z", actor_label: "Migration 0131", action: "work_rule_set", summary: "New work rule for Hai Fu from 1 Nov 2026: clock, 08:30-17:00, rest 60 min, grace 10 min, round 30 min, line 20 h, question 16 h, rates 1.5x / 1.5x / 1.5x" },
-    { occurred_at: "2026-11-07T04:00:00Z", actor_label: "Migration 0131", action: "work_rule_set", summary: "New work rule for HF-BP from 1 Nov 2026: clock, 08:30-17:00, rest 60 min, grace 10 min, round 30 min, line 20 h, question 16 h, rates 1.5x / 1.5x / 1.5x" }
+    { occurred_at: closedAgo, actor_label: "Nick Fury (demo)", action: "payroll_month_closed", company_code: "HF-BP", on_date: "2026-10-01", detail: "October done", summary: "Closed October 2026 for HF-BP: 131 days, 982.5 h normal, 120.5 h overtime — October done" },
+    { occurred_at: "2026-11-07T04:00:00Z", actor_label: "Migration 0131", action: "work_rule_set", company_code: "Hai Fu", on_date: "2026-11-01", detail: NEW_NOTE, summary: "New work rule for Hai Fu from 1 Nov 2026: clock, 08:30-17:00, rest 60 min, grace 10 min, round 30 min, line 20 h, question 16 h, rates 1.5x / 1.5x / 1.5x" },
+    { occurred_at: "2026-11-07T04:00:00Z", actor_label: "Migration 0131", action: "work_rule_set", company_code: "HF-BP", on_date: "2026-11-01", detail: NEW_NOTE, summary: "New work rule for HF-BP from 1 Nov 2026: clock, 08:30-17:00, rest 60 min, grace 10 min, round 30 min, line 20 h, question 16 h, rates 1.5x / 1.5x / 1.5x" }
   ];
-  function remember(action, summary) { HISTORY.unshift({ occurred_at: new Date().toISOString(), actor_label: ME, action: action, summary: summary }); }
+  function remember(action, summary, company, onDate, detail) {
+    HISTORY.unshift({ occurred_at: new Date().toISOString(), actor_label: ME, action: action, company_code: company || null, on_date: onDate || null, detail: detail || null, summary: summary });
+  }
 
   // ---- the signed-in account: the page's permissions for this page load ------
   var realAccess = Dash.getMyAccess;
@@ -146,7 +148,7 @@
     var row = Object.assign({ status: "closed", closed_at: now, closed_by_name: ME, note: note || null, reopen_until: new Date(Date.now() + 24 * HOUR).toISOString() }, figures);
     if (p) Object.assign(p, row);
     else PERIODS.push(Object.assign({ company_code: code, period_month: month, reopened_at: null, reopened_by_name: null }, row));
-    remember("payroll_month_closed", "Closed " + monthWord(month) + " for " + code + ": 44 days, 330 h normal, 43.5 h overtime" + (note ? " — " + note : ""));
+    remember("payroll_month_closed", "Closed " + monthWord(month) + " for " + code + ": 44 days, 330 h normal, 43.5 h overtime" + (note ? " — " + note : ""), code, month, note || null);
     return Object.assign({ ok: true, period_id: "demo-period" }, figures);
   };
   Dash.reopenPayrollMonth = async function (code, month, reason) {
@@ -161,7 +163,7 @@
       return { ok: false, code: "undo_window_passed", message: monthWord(month) + " was closed on " + dayWord(p.closed_at) + ", more than 24 hours ago; it stays closed. A correction is paid as an adjustment in the next month." };
     }
     Object.assign(p, { status: "open", reopened_at: new Date().toISOString(), reopened_by_name: ME, note: String(reason).trim(), reopen_until: null });
-    remember("payroll_month_reopened", "Reopened " + monthWord(month) + " for " + code + " — " + String(reason).trim());
+    remember("payroll_month_reopened", "Reopened " + monthWord(month) + " for " + code + " — " + String(reason).trim(), code, month, String(reason).trim());
     return { ok: true };
   };
   Dash.setWorkRule = async function (r) {
@@ -193,7 +195,8 @@
                          ot_rate: rates[0], rest_day_rate: rates[1], holiday_rate: rates[2] });
     if (!same) RULES.push(row);                                   // a future row may be rewritten until its day comes
     remember("work_rule_set", (same ? "Future work rule rewritten for " : "New work rule for ") + r.company_code + " from " + dayWord(r.effective_from) + ": " + r.mode + ", " + r.day_start + "-" + r.day_end +
-             ", rest " + r.rest_minutes + " min, grace " + r.grace_minutes + " min, round " + r.round_minutes + " min, line " + r.overlong_hours + " h, question " + r.question_hours + " h, rates " + rates.join("x / ") + "x" + (row.note ? " — " + row.note : ""));
+             ", rest " + r.rest_minutes + " min, grace " + r.grace_minutes + " min, round " + r.round_minutes + " min, line " + r.overlong_hours + " h, question " + r.question_hours + " h, rates " + rates.join("x / ") + "x" + (row.note ? " — " + row.note : ""),
+             r.company_code, r.effective_from, row.note);
     return { ok: true, rule_id: row.rule_id, normal_minutes: normal };
   };
   Dash.deleteWorkRule = async function (ruleId) {
@@ -201,7 +204,7 @@
     if (!row) return { ok: false, code: "not_found" };
     if (row.effective_from <= todayIso()) return { ok: false, code: "rule_in_force", message: "That rule is in force or past; it stays on record." };
     RULES.splice(RULES.indexOf(row), 1);
-    remember("work_rule_deleted", "Future work rule for " + row.company_code + " from " + dayWord(row.effective_from) + " withdrawn");
+    remember("work_rule_deleted", "Future work rule for " + row.company_code + " from " + dayWord(row.effective_from) + " withdrawn", row.company_code, row.effective_from, row.note);
     return { ok: true };
   };
   Dash.addPublicHoliday = async function (dateIso, name, inLieu) {
@@ -210,7 +213,7 @@
     if (!nm || nm.length > 120) return { ok: false, code: "bad_name", message: "Give the holiday a name (up to 120 characters)." };
     if (HOLIDAYS.some(function (h) { return h.holiday_date === dateIso; })) return { ok: false, code: "exists", message: dayWord(dateIso) + " is already a holiday." };
     HOLIDAYS.push({ holiday_date: dateIso, name: nm, calendar: "Penang", in_lieu: !!inLieu, added_at: new Date().toISOString() });
-    remember("public_holiday_added", "Public holiday added: " + dayWord(dateIso) + " " + nm + (inLieu ? " (in lieu)" : ""));
+    remember("public_holiday_added", "Public holiday added: " + dayWord(dateIso) + " " + nm + (inLieu ? " (in lieu)" : ""), null, dateIso, nm);
     return { ok: true, holiday_date: dateIso };
   };
   Dash.deletePublicHoliday = async function (dateIso) {
@@ -218,7 +221,7 @@
     if (!h) return { ok: false, code: "not_found" };
     if (dateIso <= todayIso()) return { ok: false, code: "in_the_past", message: "That holiday has passed; it stays on record." };
     HOLIDAYS.splice(HOLIDAYS.indexOf(h), 1);
-    remember("public_holiday_removed", "Public holiday removed: " + dayWord(dateIso) + " " + h.name);
+    remember("public_holiday_removed", "Public holiday removed: " + dayWord(dateIso) + " " + h.name, null, dateIso, h.name);
     return { ok: true };
   };
 
