@@ -91,7 +91,8 @@
   var SETTLED_KEY = "hf-demo-settled";
   var UNPRICED = [
     { staff_id: "demo-hulk", employee_code: "HS-D04", full_name: "Hulk (demo)", company_code: "Hai Fu", work_date: "2026-10-14", why: "missed" },
-    { staff_id: "demo-hulk", employee_code: "HS-D04", full_name: "Hulk (demo)", company_code: "Hai Fu", work_date: "2026-10-21", why: "overlong" }
+    { staff_id: "demo-hulk", employee_code: "HS-D04", full_name: "Hulk (demo)", company_code: "Hai Fu", work_date: "2026-10-21", why: "overlong" },
+    { staff_id: "demo-hulk", employee_code: "HS-D04", full_name: "Hulk (demo)", company_code: "Hai Fu", work_date: "2026-10-21", why: "pending_request" }   // his Change Times ask on the 21st (review issue 2)
   ];
   function settled() { try { return JSON.parse(sessionStorage.getItem(SETTLED_KEY) || "[]"); } catch (e) { return []; } }
   function unpricedRows(from, to) {
@@ -159,8 +160,11 @@
     if (month >= firstOfThisMonth()) return { ok: false, code: "month_not_over", message: monthWord(month) + " is not over yet." };
     var p = periodOf(code, month);
     if (p && p.status === "closed") return { ok: false, code: "already_closed", message: monthWord(month) + " is already closed." };
-    var un = unpricedRows(month, month.slice(0, 8) + "31").filter(function (u) { return u.company_code === code; }).length;   // the database's own check, should the menu be stale
+    var rows = unpricedRows(month, month.slice(0, 8) + "31").filter(function (u) { return u.company_code === code; });   // the database's own checks, should the menu be stale
+    var seen = {}, un = 0, pend = 0;
+    rows.forEach(function (u) { if (u.why === "pending_request") { pend++; return; } var k = u.staff_id + "|" + u.work_date; if (!seen[k]) { seen[k] = true; un++; } });
     if (un) return { ok: false, code: "unpriced_days", days: un, message: un + (un === 1 ? " day" : " days") + " in " + monthWord(month) + (un === 1 ? " has" : " have") + " no figure. Settle them on the Exceptions page, then close." };
+    if (pend) return { ok: false, code: "pending_requests", requests: pend, message: pend + (pend === 1 ? " request" : " requests") + " for " + monthWord(month) + " still waiting. Approve or reject " + (pend === 1 ? "it" : "them") + " on the Requests page, then close." };
     var now = new Date().toISOString();
     var figures = { days: 44, working_minutes: 19800, ot_minutes: 2610 };
     var row = Object.assign({ status: "closed", closed_at: now, closed_by_name: ME, note: note || null, reopen_until: new Date(Date.now() + 24 * HOUR).toISOString() }, figures);
@@ -357,7 +361,7 @@
       ? "<strong>Demo data</strong> — the rule rows are the ones migration 0131 seeds (with 1.5× rates), the holidays are 0103's Penang list, " +
         "the months and the history are invented, so the page can be reviewed before the database change is applied. Nothing is saved; a reload brings everything back. " +
         "Try: <em>View</em> on a rule (its figures in a side panel; Withdraw on a scheduled one), <em>New Rule</em> (top right of Work Rules; the form opens in the side panel; tomorrow or later; the day length follows the window by the clock), " +
-        "the <em>⋮</em> menu on Hai Fu's October (<em>Close Month</em> is greyed <em>2 Unpriced</em> — hover it for the reason; settle the two days on the Exceptions page with the filters on Hai Fu and October, come back in this tab and the close goes through), " +
+        "the <em>⋮</em> menu on Hai Fu's October (<em>Close Month</em> is greyed <em>2 Unpriced · 1 Pending</em> — hover it for the reason; <em>See Unpriced Days</em> and <em>See Pending Requests</em> lead to the records; settle them there, come back in this tab and the close goes through), " +
         "<em>Reopen</em> October for HF Bored Piles (closed two hours ago, so the 24-hour undo is still open; a reason is required), " +
         "<em>Add Holiday</em> (top right of Public Holidays; the form opens in the side panel) and <em>Remove</em> a coming one, <em>Show History</em>. " +
         "<code>&role=admin</code> on the URL shows the Administrator's view (Close, no Reopen). Drop <code>?demo=1</code> for the real page."

@@ -46,6 +46,9 @@
     .st-form input, .st-form select { min-height: 40px; padding: 6px 8px; border: 1px solid var(--line, #c9d1de); border-radius: 8px; font: inherit; background: #fff; }
     .st-form input[readonly] { background: var(--card-2, #f3f5f9); color: var(--ink-3, #5a6578); }
     .st-form .wide { grid-column: 1 / -1; }
+    .st-form h4 { grid-column: 1 / -1; margin: 10px 0 -2px; }                     /* the form in three groups (owner, 10 Nov 2026) */
+    .st-form .st-example { grid-column: 1 / -1; margin: 2px 0 0; }
+    .st-card h3 select { min-height: 32px; padding: 2px 8px; border: 1px solid var(--line, #c9d1de); border-radius: 8px; font: inherit; font-size: 0.85rem; font-weight: 400; background: #fff; }
     .st-status { margin: 8px 0 0; font-size: 0.92rem; }
     .st-status.bad { color: var(--danger-ink, #9b1c1c); }
     .st-status.ok { color: #1f6b3a; }
@@ -125,9 +128,10 @@
     var DEMO_Q = new URLSearchParams(location.search).get("demo") === "1" ? "&demo=1" : "";   // the demo follows the View Month link
     var S = { rules: [], periods: [], holidays: [], history: null, showHistory: false, view: null,
               manage: false, canClose: false, canReopen: false, open: {}, today: "", tomorrow: "", firstMonth: "2026-10-01",
-              unpriced: null,     // "code|month" -> days without a figure in the months that are over (get_unpriced_days); null = not known, the database decides at the close
+              unpriced: null,     // "code|month" -> { days, requests }: days without a figure and worker requests still waiting in the months that are over (get_unpriced_days); null = not known, the database decides at the close
               form: null,         // { company, from } while the New Rule form is open in the side panel
-              holidayForm: false }; // the Add Holiday form is open in the side panel
+              holidayForm: false, // the Add Holiday form is open in the side panel
+              holidayView: "coming" }; // "coming" (the default) or a year, the Public Holidays list
     var COMPANY_NAMES = { "HF-BP": "HF Bored Piles", "Hai Fu": "Hai Fu" };
     var COMPANY_ORDER = ["HF-BP", "Hai Fu"];
 
@@ -215,24 +219,29 @@
       var mode = u.mode || "clock";
       function opt(v, label, cur) { return '<option value="' + v + '"' + (String(cur) === String(v) ? " selected" : "") + ">" + label + "</option>"; }
       function num(x, dflt) { return esc(x !== undefined && x !== null ? Number(x) : dflt); }
+      // three groups, the panel's own (owner, 10 Nov 2026): Working Schedule, Hours Calculation, Exceptions And Phone
       return '<form class="st-form" id="f-rule" autocomplete="off">' +
         '<label>Company <select name="company_code">' + COMPANY_ORDER.map(function (c) { return opt(c, companyName(c), code); }).join("") + "</select></label>" +
         '<label>From <input type="date" name="effective_from" value="' + next + '" min="' + S.tomorrow + '" required></label>' +
+        "<h4>Working Schedule</h4>" +
         '<label>Rule <select name="mode">' + opt("clock", "By the clock", mode) + opt("total", "By the total", mode) + "</select></label>" +
+        '<label>Grace at the start (min) <input type="number" name="grace_minutes" min="0" max="120" value="' + num(u.grace_minutes, 10) + '" required></label>' +
         '<label>Day starts <input type="time" name="day_start" value="' + esc(timeVal(u.day_start) || "08:30") + '" required></label>' +
         '<label>Day ends <input type="time" name="day_end" value="' + esc(timeVal(u.day_end) || "17:00") + '" required></label>' +
-        '<label>Grace at the start (min) <input type="number" name="grace_minutes" min="0" max="120" value="' + num(u.grace_minutes, 10) + '" required></label>' +
+        // by the clock the day's length follows the window less the rest (the database works it out); by the total it is typed
+        '<label class="wide"><span data-role="normal-label">Day length (min)</span> <input type="number" name="normal_minutes" min="1" max="1440" value="' + num(u.normal_minutes, 450) + '" required></label>' +
+        "<h4>Hours Calculation</h4>" +
         '<label>Rest (min) <input type="number" name="rest_minutes" min="0" max="600" value="' + num(u.rest_minutes, 60) + '" required></label>' +
         '<label>Rest comes off after (min) <input type="number" name="rest_gate_minutes" min="0" max="1440" value="' + num(u.rest_gate_minutes, 360) + '" required></label>' +
-        // by the clock the day's length follows the window less the rest (the database works it out); by the total it is typed
-        '<label><span data-role="normal-label">Day length (min)</span> <input type="number" name="normal_minutes" min="1" max="1440" value="' + num(u.normal_minutes, 450) + '" required></label>' +
-        '<label>Round each day down to <select name="round_minutes">' + [1, 5, 10, 15, 30, 60].map(function (v) { return opt(v, v === 1 ? "The minute" : v + " min", u.round_minutes !== undefined ? u.round_minutes : 30); }).join("") + "</select></label>" +
-        '<label>Long-shift line (h) <input type="number" name="overlong_hours" min="8" max="72" step="0.5" value="' + num(u.overlong_hours, 20) + '" required></label>' +
-        '<label>Phone asks after (h) <input type="number" name="question_hours" min="1" max="72" step="0.5" value="' + num(u.question_hours, 16) + '" required></label>' +
+        '<label class="wide">Round each day down to <select name="round_minutes">' + [1, 5, 10, 15, 30, 60].map(function (v) { return opt(v, v === 1 ? "The minute" : v + " min", u.round_minutes !== undefined ? u.round_minutes : 30); }).join("") + "</select></label>" +
         '<label>Overtime rate (×) <input type="number" name="ot_rate" min="1" max="5" step="0.05" value="' + num(u.ot_rate, 1.5) + '" required></label>' +
         '<label>Rest day rate (×) <input type="number" name="rest_day_rate" min="1" max="5" step="0.05" value="' + num(u.rest_day_rate, 1.5) + '" required></label>' +
         '<label>Public holiday rate (×) <input type="number" name="holiday_rate" min="1" max="5" step="0.05" value="' + num(u.holiday_rate, 1.5) + '" required></label>' +
+        "<h4>Exceptions And Phone</h4>" +
+        '<label>Long-shift line (h) <input type="number" name="overlong_hours" min="8" max="72" step="0.5" value="' + num(u.overlong_hours, 20) + '" required></label>' +
+        '<label>Phone asks after (h) <input type="number" name="question_hours" min="1" max="72" step="0.5" value="' + num(u.question_hours, 16) + '" required></label>' +
         '<label class="wide">Note <input type="text" name="note" maxlength="500" placeholder="Why this rule, in a line"></label>' +
+        '<p class="st-note st-example" id="f-rule-example"></p>' +
         '<div class="wide st-actions"><button type="submit" class="btn">Add Rule</button><button type="button" class="btn small" data-act="cancel-rule">Cancel</button></div>' +
         '<p class="st-status wide" id="f-rule-status"></p>' +
       "</form>";
@@ -250,6 +259,23 @@
         f.normal_minutes.readOnly = false;
         if (lbl) lbl.textContent = "Day length, by the total (min)";
       }
+      syncExample(form);
+    }
+    // one line under the form showing what the grace and the rounding do to a day (owner, 10 Nov 2026)
+    function clockAt(mins) { mins = ((mins % 1440) + 1440) % 1440; return Dash.clockWord(("0" + Math.floor(mins / 60)).slice(-2) + ":" + ("0" + (mins % 60)).slice(-2) + ":00"); }
+    function syncExample(form) {
+      var f = form.elements, el = form.querySelector("#f-rule-example");
+      if (!el) return;
+      var start = toMins(f.day_start.value), end = toMins(f.day_end.value), grace = Number(f.grace_minutes.value) || 0,
+          rest = Number(f.rest_minutes.value) || 0, round = Number(f.round_minutes.value) || 1, normal = Number(f.normal_minutes.value) || 0;
+      if (!f.day_start.value || !f.day_end.value || end <= start) { el.textContent = ""; return; }
+      var odd = normal + 7, rounded = round > 1 ? Math.floor(odd / round) * round : odd;
+      var words = f.mode.value === "clock"
+        ? "Example: in at " + clockAt(start + grace) + " counts from " + clockAt(start) + (grace ? " (" + grace + " min grace)" : "") + "; " +
+          clockAt(start) + " to " + clockAt(end) + (rest ? " less " + hm(rest) + " rest" : "") + " = " + hm(normal) + " normal"
+        : "Example: credited from " + clockAt(start) + " or the later punch-in; up to " + hm(normal) + " normal, beyond it overtime";
+      words += round > 1 ? "; a day of " + hm(odd) + " rounds down to " + hm(rounded) + "." : "; days count to the minute.";
+      el.textContent = words;
     }
     function renderRules() {
       var host = document.getElementById("rules");
@@ -336,9 +362,21 @@
       }
       return '<button type="button" class="rm-item' + (danger ? " rm-danger" : "") + '" role="menuitem" data-menu="' + act + '">' + esc(label) + (small ? "<small>" + esc(small) + "</small>" : "") + "</button>";
     }
-    function unpricedOf(code, month) { return (S.unpriced && S.unpriced[code + "|" + month]) || 0; }
+    // what stands in the way of a close (owner 10 Nov 2026, review issue 2 and UI A): days without a
+    // figure and worker requests still waiting, counted apart, each with a way to the records
+    function blockersOf(code, month) { return (S.unpriced && S.unpriced[code + "|" + month]) || { days: 0, requests: 0 }; }
+    function blockerLabel(bl) { var w = []; if (bl.days) w.push(bl.days + " Unpriced"); if (bl.requests) w.push(bl.requests + " Pending"); return w.join(" · "); }
+    function blockerWords(bl) {
+      var d = bl.days ? bl.days + (bl.days === 1 ? " day has" : " days have") + " no figure" : "";
+      var r = bl.requests ? bl.requests + (bl.requests === 1 ? " request is" : " requests are") + " still waiting" : "";
+      return d && r ? d + " and " + r + "; settle them first." : d ? d + "; settle them on the Exceptions page first." : r + "; approve or reject on the Requests page first.";
+    }
+    function lastDayOf(month) { return addDays(addMonths(month, 1), -1); }
     function unpricedHref(code, month) {   // the Exceptions page on that company and month (its Before Payroll Closes list takes a range)
-      return "exceptions.html?company=" + encodeURIComponent(code) + "&from=" + month + "&to=" + addDays(addMonths(month, 1), -1) + DEMO_Q;
+      return "exceptions.html?company=" + encodeURIComponent(code) + "&from=" + month + "&to=" + lastDayOf(month) + DEMO_Q;
+    }
+    function pendingHref(code, month) {    // the Requests page, pending, that month (it has no company filter: both companies' asks show)
+      return "requests.html?status=pending&from=" + month + "&to=" + lastDayOf(month) + DEMO_Q;
     }
     function menuItems(kind, a, b) {
       var items = [];
@@ -354,12 +392,14 @@
       } else {
         var p = periodOf(a, b), cur = b === String(S.today).slice(0, 7) + "-01", closed = !!(p && p.status === "closed"), mw = monthWord(b);
         items.push('<a class="rm-item" role="menuitem" href="attendance.html?view=month&month=' + esc(b.slice(0, 7)) + "&company=" + encodeURIComponent(a) + DEMO_Q + '">View Month</a>');
-        var un = (!closed && !cur && S.canClose) ? unpricedOf(a, b) : 0;   // days still without a figure: the database refuses the close while any remain
+        var bl = (!closed && !cur && S.canClose) ? blockersOf(a, b) : { days: 0, requests: 0 };   // the database refuses the close while any remain
         var cOff = closed ? "Closed on " + dateWordKL(p.closed_at) + (p.closed_by_name ? " by " + p.closed_by_name : "") + "."
                  : cur ? mw + " is not over yet."
                  : !S.canClose ? "Needs the payroll close permission."
-                 : un ? un + (un === 1 ? " day has" : " days have") + " no figure; settle them on the Exceptions page first." : "";
-        items.push(item("close", "Close Month", cOff, cOff ? (closed ? "Closed" : cur ? "Not Over Yet" : !S.canClose ? "No Permission" : un + " Unpriced") : ""));
+                 : (bl.days || bl.requests) ? blockerWords(bl) : "";
+        items.push(item("close", "Close Month", cOff, cOff ? (closed ? "Closed" : cur ? "Not Over Yet" : !S.canClose ? "No Permission" : blockerLabel(bl)) : ""));
+        if (bl.days) items.push('<a class="rm-item" role="menuitem" href="' + unpricedHref(a, b) + '">See Unpriced Days</a>');
+        if (bl.requests) items.push('<a class="rm-item" role="menuitem" href="' + pendingHref(a, b) + '">See Pending Requests</a>');
         var rOff = !closed ? mw + " is not closed."
                  : !undoOpen(p) ? "Closed over 24 hours ago; it stays closed."
                  : !S.canReopen ? "Only a Super Administrator can reopen a month." : "";
@@ -483,20 +523,26 @@
     }
     function renderHolidays() {
       var host = document.getElementById("holidays");
-      var rows = S.holidays.slice().sort(function (a, b) { return String(a.holiday_date).localeCompare(String(b.holiday_date)); });
+      var all = S.holidays.slice().sort(function (a, b) { return String(a.holiday_date).localeCompare(String(b.holiday_date)); });
+      var years = []; all.forEach(function (h) { var y = String(h.holiday_date).slice(0, 4); if (years.indexOf(y) < 0) years.push(y); });
+      var view = S.holidayView === "coming" || years.indexOf(S.holidayView) >= 0 ? S.holidayView : "coming";
+      // coming days first (the default); a year shows its whole list, past days greyed
+      var rows = all.filter(function (h) { var d = String(h.holiday_date).slice(0, 10); return view === "coming" ? d > S.today : d.slice(0, 4) === view; });
       var body = "", year = "";
       rows.forEach(function (h) {
         var d = String(h.holiday_date).slice(0, 10), y = d.slice(0, 4), past = d <= S.today;
-        if (y !== year) { year = y; body += '<tr class="st-year"><td colspan="5">' + esc(y) + "</td></tr>"; }
+        if (y !== year && view === "coming") { year = y; body += '<tr class="st-year"><td colspan="5">' + esc(y) + "</td></tr>"; }
         body += '<tr class="' + (past ? "st-past" : "") + '" data-holiday="' + esc(d) + '">' +
           '<td class="n">' + esc(dateWord(d)) + '</td><td class="n">' + esc(dayWord(d)) + "</td><td>" + esc(h.name) + "</td>" +
           "<td>" + (h.in_lieu ? "In lieu" : "") + "</td>" +
           '<td class="n">' + (!past && S.manage ? '<button type="button" class="btn small btn-danger" data-act="remove-holiday" data-date="' + esc(d) + '">Remove</button>' : "") + "</td></tr>";
       });
+      var pick = '<select id="hol-view" aria-label="Which holidays"><option value="coming"' + (view === "coming" ? " selected" : "") + ">Coming</option>" +
+                 years.map(function (y) { return '<option value="' + y + '"' + (view === y ? " selected" : "") + ">" + y + "</option>"; }).join("") + "</select>";
       host.innerHTML = '<div class="st-card">' +
-        '<h3>Penang Calendar</h3>' +
+        '<h3>Penang Calendar ' + pick + "</h3>" +
         (rows.length ? '<div class="table-wrap"><table class="st-table"><thead><tr><th>Date</th><th>Day</th><th>Holiday</th><th></th><th></th></tr></thead><tbody>' + body + "</tbody></table></div>"
-                     : UI.empty("No Holidays Listed")) +
+                     : UI.empty(view === "coming" ? "No Coming Holidays" : "No Holidays Listed")) +
       "</div>";
       // the Add Holiday button sits in the heading row, top right (owner, 10 Nov 2026); the form opens in the side panel
       document.getElementById("holidays-actions").innerHTML = S.manage ? '<button type="button" class="btn small" data-act="new-holiday">Add Holiday</button>' : "";
@@ -540,13 +586,14 @@
       if (S.showHistory) S.history = await Dash.getSettingsHistory(100);
       render();
     }
-    // The days without a figure in the months that are over (owner, 10 Nov 2026):
-    // one read of the Exceptions page's payroll-close list, counted per company
-    // and month, so Close Month can say "2 Unpriced" before anyone presses it. A
-    // request still waiting is not counted — the database closes over it (row 6a
-    // of the decision table is open). The database stays the judge: a count that
-    // cannot be read (an older database, no access) leaves the item on, and the
-    // close itself answers unpriced_days as before.
+    // What stands in the way of each close, in the months that are over (owner,
+    // 10 Nov 2026): one read of the Exceptions page's payroll-close list, counted
+    // per company and month — days without a figure (one per worker-day) and
+    // worker requests still waiting (one per request; the database refuses a
+    // close over them too since 10 Nov, review issue 2) — so Close Month can say
+    // "2 Unpriced · 1 Pending" before anyone presses it. The database stays the
+    // judge: a count that cannot be read (an older database, no access) leaves
+    // the item on, and the close itself answers unpriced_days / pending_requests.
     async function loadUnpriced() {
       var thisMonth = String(S.today).slice(0, 7) + "-01";
       if (!(S.firstMonth < thisMonth)) return {};
@@ -555,12 +602,13 @@
         if (!Array.isArray(rows)) return null;
         var seen = {}, counts = {};
         rows.forEach(function (u) {
-          if (u.why === "pending_request") return;
+          var k = u.company_code + "|" + String(u.work_date).slice(0, 7) + "-01";
+          var c = counts[k] || (counts[k] = { days: 0, requests: 0 });
+          if (u.why === "pending_request") { c.requests += 1; return; }
           var day = u.staff_id + "|" + u.work_date;
           if (seen[day]) return;
           seen[day] = true;
-          var k = u.company_code + "|" + String(u.work_date).slice(0, 7) + "-01";
-          counts[k] = (counts[k] || 0) + 1;
+          c.days += 1;
         });
         return counts;
       } catch (e) { return null; }
@@ -575,8 +623,9 @@
         if (v && v.ok) { delete S.open[code + "|" + month]; await reload(); return; }
         var code2 = v && v.code;
         sayStatus(st, false, (v && v.message) || ("Not closed (" + code2 + ")."),
-                  code2 === "unpriced_days" ? { href: unpricedHref(code, month), label: "See them" } : null);
-        if (code2 === "unpriced_days") loadUnpriced().then(function (c) { S.unpriced = c; });   // the count here was stale; the menu greys from now on
+                  code2 === "unpriced_days" ? { href: unpricedHref(code, month), label: "See them" }
+                  : code2 === "pending_requests" ? { href: pendingHref(code, month), label: "See them" } : null);
+        if (code2 === "unpriced_days" || code2 === "pending_requests") loadUnpriced().then(function (c) { S.unpriced = c; });   // the count here was stale; the menu greys from now on
       } catch (e) { sayStatus(st, false, (e && e.message) || String(e)); }
     }
     async function doReopen(code, month) {
@@ -720,11 +769,12 @@
     document.addEventListener("input", function (ev) {
       var form = ev.target.closest("form.st-form");
       if (!form || form.id !== "f-rule") return;
-      if (["mode", "day_start", "day_end", "rest_minutes"].indexOf(ev.target.name) >= 0) syncDayLength(form);
+      if (["mode", "day_start", "day_end", "rest_minutes", "grace_minutes", "normal_minutes", "round_minutes"].indexOf(ev.target.name) >= 0) syncDayLength(form);
     });
     document.addEventListener("change", function (ev) {
+      if (ev.target.id === "hol-view") { S.holidayView = ev.target.value; renderHolidays(); return; }
       var form = ev.target.closest("form.st-form");
-      if (form && form.id === "f-rule" && ev.target.name === "mode") syncDayLength(form);
+      if (form && form.id === "f-rule" && ["mode", "round_minutes"].indexOf(ev.target.name) >= 0) syncDayLength(form);
     });
 
     window.onShellReady = async function () {
@@ -733,6 +783,9 @@
       S.manage = Dash.can("settings.manage");
       S.canClose = Dash.can("payroll.close");       // 0132 (9 Nov): the close has its own permission
       S.canReopen = Dash.can("payroll.reopen");     // and the 24-hour undo its own (Super Administrator)
+      // the hub opens for any of the three (owner 10 Nov 2026, review issue 4): Work Rules and Public Holidays
+      // are read by everyone who may open it, their buttons by settings.manage; History by any of the three
+      document.getElementById("history-section").hidden = !(S.manage || S.canClose || S.canReopen);
       document.getElementById("rules").innerHTML = UI.empty("Loading…");
       document.getElementById("periods").innerHTML = UI.empty("Loading…");
       document.getElementById("holidays").innerHTML = UI.empty("Loading…");

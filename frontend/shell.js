@@ -95,8 +95,8 @@
     { href: "bore-logs.html",       label: "Bore Logs",       icon: "borelogs"   },
     // only appears for logins holding users.view (the allowed() filter below)
     { href: "users.html",           label: "Users",           icon: "users"      },
-    // the work rules and the payroll months (DB 0131/0132): only for logins holding
-    // settings.manage (Administrator, Super Administrator) — the allowed() filter below
+    // the settings hub (DB 0131/0132): for logins holding settings.manage, payroll.close
+    // or payroll.reopen (owner 10 Nov 2026, review issue 4) — the allowed() filter below
     { href: "settings.html",        label: "Settings",        icon: "settings"   }
   ];
 
@@ -134,7 +134,7 @@
     "leave.html":      "leave.view",
     "users.html":      "users.view",      // admin — writes carry their own DB gates
     "roles.html":      "users.view",      // read-only reference, reached from users.html
-    "settings.html":   "settings.manage"  // the work rules and the payroll months (0132); every write is DB-gated the same
+    "settings.html":   ["settings.manage", "payroll.close", "payroll.reopen"]   // the hub opens for ANY of these (owner 10 Nov 2026, review issue 4); each section's writes carry their own gate, on the page and in the database
   };
 
   // project-scoped pages: they get the context bar and light up "Projects"
@@ -195,6 +195,7 @@
 
     var perm = PAGE_ACCESS[page];
     if (!perm) return false;                      // DEFAULT-CLOSED: unlisted = refused
+    if (Array.isArray(perm)) return perm.some(function (x) { return Dash.can(x); });   // a list = any one of them opens the page
     return Dash.can(perm);
   }
 

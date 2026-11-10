@@ -125,7 +125,8 @@
     // settled. Settle them here and the Settings page lets October close: the
     // note travels in sessionStorage (SETTLED_KEY below), this tab only.
     wd({ who: "hulk", site: 1, date: "2026-10-14", inL: "08:05", outL: null, kind: "missed", missed: true }),
-    wd({ who: "hulk", site: 1, date: "2026-10-21", inL: "07:50", outL: "04:30", outNext: true, kind: "overlong", note: "extraction whole night, finish 4.30am" })
+    wd({ who: "hulk", site: 1, date: "2026-10-21", inL: "07:50", outL: "04:30", outNext: true, kind: "overlong", note: "extraction whole night, finish 4.30am",
+         declaredL: "17:30", reqId: "demo-req-2" })   // and his Change Times ask on that day, still waiting (review issue 2)
   ];
   // Hulk (Flexible Hours) punched in 17 h ago and is still open: Open 16 h+
   (function () {
@@ -140,7 +141,7 @@
   var ACCEPTED = {};                                   // key -> true after Accept / Credit
   var KEPT = {};                                       // key -> true after Keep From 8 AM
   var RULED = {};                                      // key -> { inISO, outISO, why } after Rule The Times / Approve
-  var REQUESTS = { "demo-req-1": "pending" };
+  var REQUESTS = { "demo-req-1": "pending", "demo-req-2": "pending" };
 
   // a settled day is noted for the Settings demo (settings-demo.js reads the same
   // key): Accept, Rule The Times and an approved request note it, Undo clears it

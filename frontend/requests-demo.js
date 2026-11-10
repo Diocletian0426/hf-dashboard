@@ -64,7 +64,8 @@
       original_in_local: o.origIn || null, original_out_local: o.origOut || null,
       reason: o.reason, note: o.note || null,
       created_at: o.created,
-      reviewed_at: o.reviewedAt || null, reviewed_by_name: o.reviewedBy || null
+      reviewed_at: o.reviewedAt || null, reviewed_by_name: o.reviewedBy || null,
+      settle_key: o.settleKey || null   // demo only: the Settings demo's note that this day is settled (sessionStorage)
     };
   }
 
@@ -84,6 +85,12 @@
     req({ id: "demo-r4", type: "missed_shift", status: "pending", name: "Captain America (demo)", code: "BP-D02",
           site: 1, date: day(5), inL: "08:00", outL: "17:00", created: hoursAgo(98),
           reason: "phone rosak. kerja full day" }),
+    // October (the 0132 demo): the ask the Settings demo counts as "1 Pending" on Hai Fu's October;
+    // approving or rejecting it here settles it for the Settings demo too (this tab)
+    req({ id: "demo-r10", type: "change_times", status: "pending", name: "Hulk (demo)", code: "HS-D04",
+          site: 1, date: "2026-10-21", shift: 1, origIn: "07:50", origOut: "04:30", inL: null, outL: "17:30",
+          created: "2026-10-22T01:10:00Z", reason: "extraction habis 4.30 pagi, tapi saya balik 5.30 petang hari tu. punch out salah",
+          settleKey: "demo-hulk|2026-10-21" }),
     // a pending ask filed with a date far back (the September-date case): shown whatever the dates
     req({ id: "demo-r9", type: "missed_shift", status: "pending", name: "Vision (demo)", code: "HS-D09",
           site: 0, date: day(45), inL: "08:00", outL: "17:30", created: hoursAgo(30),
@@ -176,6 +183,7 @@
     r.note = note || null;
     r.reviewed_at = new Date().toISOString();
     r.reviewed_by_name = FURY;
+    if (r.settle_key) { try { var k = "hf-demo-settled", list = JSON.parse(sessionStorage.getItem(k) || "[]"); if (list.indexOf(r.settle_key) < 0) list.push(r.settle_key); sessionStorage.setItem(k, JSON.stringify(list)); } catch (e) {} }
     return { ok: true, status: decision,
              message: decision === "rejected" ? "Request rejected."
                     : r.type === "missed_shift" ? "Approved — the In and Out punches were added for " + r.full_name + "."
