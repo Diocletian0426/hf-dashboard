@@ -303,7 +303,7 @@
       }
       return items;
     }
-    function menuOpen(btn) {
+    function menuOpen(btn, at) {
       var k = btn.getAttribute("data-more").split("|"), m = document.getElementById("row-menu");
       var items = menuItems(k[0], k[1], k[2]);
       if (!items.length) return;
@@ -312,8 +312,13 @@
       m.hidden = false;
       var r = btn.getBoundingClientRect(), w = m.offsetWidth || 180, hgt = m.offsetHeight || 60;
       var top = r.bottom + 6; if (top + hgt > window.innerHeight - 8) top = Math.max(8, r.top - hgt - 6);
+      var left = r.right - w;
+      if (at) {                                        // a right-click: at the pointer
+        top = at.y + 2; if (top + hgt > window.innerHeight - 8) top = Math.max(8, at.y - hgt - 2);
+        left = at.x + 2;
+      }
       m.style.top = top + "px";
-      m.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, r.right - w)) + "px";
+      m.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, left)) + "px";
       btn.setAttribute("aria-expanded", "true");
       var first = m.querySelector("[data-menu],a"); if (first) first.focus();
     }
@@ -577,6 +582,18 @@
       if (ev.key !== "Escape") return;
       if (MENU.open) { menuClose(); return; }
       if (S.view) closeDrawer();
+    });
+    // a right-click on a rule row or a month row opens its menu at the pointer (the
+    // Attendance rule); on a link, a field or a button the browser's own menu stays
+    document.addEventListener("contextmenu", function (ev) {
+      var t = ev.target;
+      if (!t.closest || t.closest("a, input, textarea, select, button")) return;
+      var tr = t.closest("#rules tbody tr[data-rule], #periods tbody tr[data-period]");
+      if (!tr) return;
+      var btn = tr.querySelector(".row-more");
+      if (!btn) return;
+      ev.preventDefault();
+      menuClose(); menuOpen(btn, { x: ev.clientX, y: ev.clientY });
     });
     document.addEventListener("submit", function (ev) {
       var form = ev.target.closest("form.st-form");
