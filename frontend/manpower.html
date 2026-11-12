@@ -411,9 +411,14 @@
       if (r.current_project_id) return r.project_code || "?";
       return OFFICE_TRADES.indexOf(r.role) !== -1 ? "__office" : "__await";
     }
-    function siteWordsFor(r) {       // the Site column of All Workers
+    function siteWordsFor(r) {       // the Assigned Site column of All Workers
       if (r.current_project_id) return r.project_code + (r.project_name ? " — " + r.project_name : "");
       return groupOf(r) === "__office" ? "Office Staff" : "Not On A Site";
+    }
+    // the cell: the code only, its name on hover (the owner, 13 Nov 2026, as Last Observed Site)
+    function assignedSiteHtml(r) {
+      if (!r.current_project_id) return escHtml(siteWordsFor(r));
+      return '<span class="obs" title="' + esc(r.project_name || "") + '">' + escHtml(r.project_code || r.project_name || "") + "</span>";
     }
     function byName(a, b) { return String(a.full_name).localeCompare(String(b.full_name)); }
     function shortDate(iso) {
@@ -608,7 +613,7 @@
         UI.td("Worker", "<b>" + escHtml(r.full_name) + '</b><span class="mp-sub">' +
           escHtml([r.employee_code, r.company].filter(Boolean).join(" · ")) + "</span>") +
         UI.td("Trade", escHtml(UI.label(r.role))) +
-        (flat ? UI.td("Assigned Site", escHtml(siteWordsFor(r))) : "") +
+        (flat ? UI.td("Assigned Site", assignedSiteHtml(r)) : "") +
         UI.td("Last Observed Site", obsSiteHtml(r)) +
         UI.td("Status", obsStatusHtml(r)) +
         (M.canEdit ? UI.td("", '<button type="button" class="btn mp-open" data-act="open" data-staff="' + r.staff_id + '">Manage</button>') : "") +
