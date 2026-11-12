@@ -61,6 +61,15 @@
     .st-none      { color: var(--ink-3); font-weight: 500; }
     .st-elsewhere { background: var(--warn-soft); color: var(--warn-ink); border-radius: 999px; padding: 2px 10px; }
     .mp-empty { padding: var(--sp-5); text-align: center; color: var(--ink-2); }
+    /* 0130c: the last observed site (wraps; a long site name must not push the row) */
+    .obs      { cursor: help; color: var(--ink); font-size: var(--fs-sm); }
+    .obs-none { color: var(--ink-3); }
+    .obs-away { display: inline-block; background: var(--warn-soft); color: var(--warn-ink); font-weight: 600;
+                font-size: var(--fs-xs); border-radius: 999px; padding: 2px 10px; }
+    .st-unv   { color: var(--warn-ink); }
+    /* the site and its age stay one block, so a stacked phone card keeps the age under the name */
+    .obs-cell { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+    .obs-cell .mp-sub { margin-top: 0; }
 
     /* the bottom tabs (office only) */
     .mp-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: var(--sp-5) 0 var(--sp-3); }
@@ -165,6 +174,7 @@
     .mp-inline-form { margin: 8px 0 12px; padding: 10px 12px; background: var(--surface-solid); border: 1px solid var(--line-strong); border-radius: var(--r-md); }
 
     @media (max-width: 760px) {
+      .table-stack .obs-cell { align-items: flex-end; }   /* a stacked card keeps its values on the right */
       .mp-drawer { width: 100vw; border-radius: 0; padding: var(--sp-3) var(--sp-4) var(--sp-6); }
       .mp-punches { top: 0; left: 0; right: 0; transform: none; width: auto; max-height: 100vh; border-radius: 0; }
       .pu-head, .pu-row { grid-template-columns: 56px 1fr 56px 90px 100px; gap: 8px; }
@@ -197,11 +207,15 @@
              supervisor of record, Open Project, the trade mix, the rows
            - All Workers: one flat table in name order (Worker, Trade, Site,
              Status), the same search and pickers
-           - rows carry the last report as a FACT, not a verdict (25 Oct):
-             "Today" / "3 Days" (placed at this site), "Today · HF-SP-012" (seen
-             elsewhere: the record may be wrong), "Today · No Site" (the punch
-             matched no pinned site), "No Report" (nothing in 7 days); office
-             staff carry none. The full sentence lives in the worker panel.
+           - rows carry the LAST OBSERVED SITE apart from the assigned site
+             (DB 0130c; the owner's ruling, 12 Nov 2026: the two must be clear
+             cut): where the latest punch-in, or the vibro tracker, really
+             placed the worker, with its age ("Today", "3 Days"), and a Status
+             column, Verified (GPS inside that site's circle, or the tracker)
+             or Unverified (weak or no GPS, outside every circle, a place with
+             no registered site, a site with no pin). A punch with weak or no
+             GPS claims no site. "No Report" = nothing in 7 days; office staff
+             carry neither. The full sentence lives in the worker panel.
            - the worker panel (right; 25–26 Oct): the facts as label : value
              rows, Edit Details and Recent Attendance (a pop-up box beside
              the panel, rows only: Date, In – Out, Hours, Site, a status
@@ -259,12 +273,12 @@
         <button type="button" id="mp-filters-btn" aria-expanded="false">Filters</button>
         <div class="filter-pop mp-filters" id="mp-filters" hidden>
           <label>Trade <select id="f-trade"><option value="all">Any Trade</option></select></label>
-          <label>Site <select id="f-site"><option value="all">Any Site</option></select></label>
+          <label>Assigned Site <select id="f-site"><option value="all">Any Site</option></select></label>
           <label>Status <select id="f-status">
             <option value="all">Any Status</option>
-            <option value="onsite">On Site</option>
+            <option value="verified">Verified</option>
+            <option value="unverified">Unverified</option>
             <option value="elsewhere">Seen Elsewhere</option>
-            <option value="nosite">No Site Match</option>
             <option value="none">No Report</option></select></label>
           <div class="mp-filters-foot">
             <button type="button" id="mp-filters-clear">Clear</button>
@@ -276,17 +290,23 @@
         <button type="button" id="mp-help-btn" aria-expanded="false" aria-label="About this page" title="About this page">?</button>
         <div class="filter-pop mp-help" id="mp-help" hidden>
           <div class="fp-title">About This Page</div>
-          <p>Who is on which site, from each worker's record. A verified punch keeps the record up to date; the office corrects it with Move… when a punch could not.</p>
+          <p>Each worker sits under their assigned site. Last Observed Site is where their latest punch-in, or the vibro tracker, actually placed them. A verified punch at another site moves the assignment by itself.</p>
+          <h4>Last Observed Site</h4>
+          <dl>
+            <dt><span class="obs">HF-XXX-000</span></dt><dd>The site the latest punch-in named, and how long ago. Hover the code for the site's name.</dd>
+            <dt><span class="obs-away">HF-XXX-000</span></dt><dd>Seen Elsewhere: verified at another site, or at an unregistered place.</dd>
+            <dt><span class="obs">Unregistered Place</span></dt><dd>Good GPS, but no registered site within 3 km.</dd>
+            <dt><span class="obs">Weak GPS</span> · <span class="obs">No GPS</span></dt><dd>The punch could not be placed, so no site is claimed.</dd>
+            <dt><span class="obs obs-none">No Report</span></dt><dd>Nothing in the last 7 days. Office staff carry none.</dd>
+          </dl>
           <h4>Status</h4>
           <dl>
-            <dt><span class="st">Today</span> · <span class="st">3 Days</span></dt><dd>The last punch or bot line placed the worker at the site on the record, and how long ago. Not always a verified punch: a punch with weak or no GPS is placed at the record site too.</dd>
-            <dt><span class="st st-elsewhere">Today · HF-XXX-000</span></dt><dd>Seen at another site, named by its code. The record may be wrong: check, then Move… if so.</dd>
-            <dt><span class="st">Today · No Site</span></dt><dd>Punched, but the punch was placed at no site: it matched no pinned site, or its GPS was too weak to place it.</dd>
-            <dt><span class="st st-none">No Report</span></dt><dd>Nothing in the last 7 days. Office staff carry no status.</dd>
+            <dt><span class="st">Verified</span></dt><dd>GPS inside that site's circle, or placed by the vibro tracker.</dd>
+            <dt><span class="st st-unv">Unverified</span></dt><dd>Weak or no GPS, outside every circle, an unregistered place, or a site with no pin.</dd>
           </dl>
           <h4>Other Marks</h4>
           <dl>
-            <dt><span class="chip chip-warn">2 Seen Elsewhere</span></dt><dd>On a site line: workers in that site last seen at another site.</dd>
+            <dt><span class="chip chip-warn">2 Seen Elsewhere</span></dt><dd>On a site line: workers in that site last observed somewhere else.</dd>
             <dt><span class="chip chip-tag">1 of 4</span></dt><dd>Rows shown of the site's total while a search or a filter is on.</dd>
             <dt><span class="badge badge-gray">By Punch</span> <span class="badge badge-gray">Backfill</span></dt><dd>In Movement History: moved by the worker's own punch; a past move typed in later.</dd>
             <dt><span class="pu-pill t-warn">Unverified</span></dt><dd>In Recent Attendance: a day the office should look at. Also No Punch-Out, Long Shift, Early Start, To Review. Hover a pill for the reason.</dd>
@@ -391,9 +411,14 @@
       if (r.current_project_id) return r.project_code || "?";
       return OFFICE_TRADES.indexOf(r.role) !== -1 ? "__office" : "__await";
     }
-    function siteWordsFor(r) {       // the Site column of All Workers
+    function siteWordsFor(r) {       // the Assigned Site column of All Workers
       if (r.current_project_id) return r.project_code + (r.project_name ? " — " + r.project_name : "");
       return groupOf(r) === "__office" ? "Office Staff" : "Not On A Site";
+    }
+    // the cell: the code only, its name on hover (the owner, 13 Nov 2026, as Last Observed Site)
+    function assignedSiteHtml(r) {
+      if (!r.current_project_id) return escHtml(siteWordsFor(r));
+      return '<span class="obs" title="' + esc(r.project_name || "") + '">' + escHtml(r.project_code || r.project_name || "") + "</span>";
     }
     function byName(a, b) { return String(a.full_name).localeCompare(String(b.full_name)); }
     function shortDate(iso) {
@@ -407,44 +432,97 @@
              (sourceWord(r) ? " (" + sourceWord(r) + ")" : "");
     }
 
-    // The last report as a fact, not a verdict (the owner's ruling, 25 Oct):
-    // when the worker was last seen, and whether that agrees with the record.
-    //   onsite    "Today" / "Yesterday" / "3 Days"  placed at the site on the record (not always verified)
-    //   elsewhere "Today · HF-SP-012"               seen at another site: the record may be wrong
-    //   nosite    "Today · No Site"                 the punch matched no pinned site
-    //   none      "No Report"                       nothing in REPORT_DAYS, or ever
+    // THE LAST OBSERVED SITE (DB 0130c; the owner's ruling, 12 Nov 2026): where
+    // the worker's latest punch-in, or the vibro tracker, really placed them,
+    // kept apart from the assigned site the page groups by. Two columns: the
+    // site with its age, and Verified / Unverified. Bot lines are not
+    // observations, and a punch with weak or no GPS claims no site (before
+    // 0130c it read as a sighting at the assigned site, where it is filed).
+    //   verified      GPS inside the site's circle      Verified
+    //   tracker       the vibro tracker filed the day    Verified
+    //   near          outside every circle, near a site  Unverified
+    //   unregistered  good GPS, no site within 3 km      Unverified
+    //   no_pin        filed under a site with no pin     Unverified
+    //   weak_gps      GPS worse than 100 m               Unverified
+    //   no_gps        no GPS at all                      Unverified
+    // Seen Elsewhere = verified at another site than the assigned one, or at an
+    // unregistered place. Older than REPORT_DAYS = No Report.
+    var OBS = {
+      verified:     { ok: true,  why: "GPS inside the site's circle." },
+      tracker:      { ok: true,  why: "Placed by the vibro tracker." },
+      near:         { ok: false, why: "GPS outside every site's circle. The nearest site is named." },
+      unregistered: { ok: false, why: "Good GPS, but no registered site within 3 km." },
+      no_pin:       { ok: false, why: "Filed under a site that has no pin yet." },
+      weak_gps:     { ok: false, why: "GPS too weak to place the punch." },
+      no_gps:       { ok: false, why: "The phone sent no GPS." }
+    };
     function ageWords(days) { return days === 0 ? "Today" : days === 1 ? "Yesterday" : days + " Days"; }
-    function statusOf(r) {
-      if (!r.last_reported_date) return { k: "none", label: "No Report", why: "Nothing has placed this worker yet: no punch, no bot line." };
-      var days = UI.daysSince(r.last_reported_date);
-      if (days === null || days > REPORT_DAYS) {
-        return { k: "none", label: "No Report", why: "Last report " + reportWords(r) + ", more than " + REPORT_DAYS + " days ago." };
-      }
-      var age = ageWords(days);
-      if (!r.last_reported_project_id) {
-        // fix 6 (29 Oct 2026): a weak-GPS punch by a worker with no site on the
-        // record lands here too, so pinning is not always the answer
-        return { k: "nosite", label: age + " · No Site", why: "Reported " + reportWords(r) + ": the punch was placed at no site. It matched no pinned site, or its GPS was too weak to place it. Check where the worker was; pin the site only if it is a real site with no pin." };
-      }
-      if (String(r.last_reported_project_id) === String(r.current_project_id || "")) {
-        // fix 6 (29 Oct 2026): the view falls back to the record site for a punch
-        // with weak or no GPS, so this is where the last report put the worker,
-        // not proof of a verified punch (no DB change; the view may say so later)
-        return { k: "onsite", now: days === 0, label: age, why: "Reported " + reportWords(r) + ": the last punch or bot line placed the worker at the site on the record. Not always a verified punch: a punch with weak or no GPS is placed at the record site too." };
-      }
-      return { k: "elsewhere", label: age + " · " + r.last_reported_project_code,
-               why: "Reported " + reportWords(r) + "; the record says " + (r.current_project_id ? r.project_code : "no site") +
-                    ". A verified punch moves the record itself, so the punch did not verify or that site has no fence. Check, then Move… if the record is wrong." };
+    function hasObs(r) { return r.last_observed_kind !== undefined; }      // false until DB 0130c is live
+    // the column shows the site CODE; its name shows on hover (the owner, 12 Nov
+    // 2026). The worker panel has room for both (full = true).
+    function obsNamesSite(r) { var k = r.last_observed_kind; return k === "verified" || k === "tracker" || k === "no_pin" || k === "near"; }
+    function obsSiteWords(r, full) {  // the site words for the observation, whatever its age
+      var k = r.last_observed_kind, name = r.last_observed_project_name || "";
+      var code = r.last_observed_project_code || name;
+      var site = full && name && name !== code ? code + " — " + name : code;
+      if (k === "verified" || k === "tracker" || k === "no_pin") return site;
+      if (k === "near") return "Near " + site;
+      if (k === "unregistered") return "Unregistered Place";
+      if (k === "weak_gps") return "Weak GPS";
+      if (k === "no_gps") return "No GPS";
+      return "Unknown";
     }
-    function statusChip(r) {
-      if (groupOf(r) === "__office") return "";        // office staff do not punch; no chip
-      var s = statusOf(r);
-      return '<span class="st st-' + s.k + (s.now ? " st-now" : "") + '" title="' + esc(s.why) + '">' + escHtml(s.label) + "</span>";
+    function obsWhy(r) {
+      var d = OBS[r.last_observed_kind] || { why: "" }, a = r.last_observed_accuracy_m;
+      return d.why + (r.last_observed_kind === "weak_gps" && a != null
+        ? " Accuracy about " + Math.round(Number(a)).toLocaleString("en-MY") + " m." : "");
+    }
+    function observed(r) {
+      if (!hasObs(r)) return legacyObserved(r);
+      if (!r.last_observed_date) return { k: "none", site: "No Report", age: "", ok: null, away: false, why: "No punch-in or tracker day yet." };
+      var days = UI.daysSince(r.last_observed_date);
+      if (days === null || days > REPORT_DAYS) {
+        return { k: "none", site: "No Report", age: "", ok: null, away: false,
+                 why: "Last observed " + shortDate(r.last_observed_date) + ", more than " + REPORT_DAYS + " days ago." };
+      }
+      var ok = !!(OBS[r.last_observed_kind] || {}).ok;
+      var away = (ok && String(r.last_observed_project_id || "") !== String(r.current_project_id || "")) ||
+                 r.last_observed_kind === "unregistered";
+      return { k: ok ? "verified" : "unverified", site: obsSiteWords(r, false), age: ageWords(days), ok: ok, away: away,
+               name: obsNamesSite(r) ? (r.last_observed_project_name || "") : "",
+               why: (away ? "Seen elsewhere. " : "") + obsWhy(r) };
+    }
+    // the view before 0130c: the last report as filed, not verified either way
+    function legacyObserved(r) {
+      if (!r.last_reported_date) return { k: "none", site: "No Report", age: "", ok: null, away: false, why: "Nothing has placed this worker yet." };
+      var days = UI.daysSince(r.last_reported_date);
+      if (days === null || days > REPORT_DAYS) return { k: "none", site: "No Report", age: "", ok: null, away: false, why: "Last report " + reportWords(r) + "." };
+      return { k: "unknown", site: r.last_reported_project_code || "No Site", age: ageWords(days), ok: null,
+               away: !!r.last_reported_project_id && String(r.last_reported_project_id) !== String(r.current_project_id || ""),
+               why: "Reported " + reportWords(r) + "." };
+    }
+    function obsSiteHtml(r) {
+      if (groupOf(r) === "__office") return "";        // office staff do not punch
+      var o = observed(r);
+      if (o.k === "none") return '<span class="obs obs-none" title="' + esc(o.why) + '">No Report</span>';
+      var tip = (o.name ? o.name + "\n" : "") + o.why;   // hover: the site's name, then the reason
+      return '<span class="obs-cell"><span class="obs' + (o.away ? " obs-away" : "") + '" title="' + esc(tip) + '">' + escHtml(o.site) + "</span>" +
+             '<span class="mp-sub">' + escHtml(o.age) + "</span></span>";
+    }
+    function obsStatusHtml(r) {
+      if (groupOf(r) === "__office") return "";
+      var o = observed(r);
+      if (o.ok === null) return '<span class="st st-none">—</span>';
+      return '<span class="st' + (o.ok ? "" : " st-unv") + '" title="' + esc(o.why) + '">' + (o.ok ? "Verified" : "Unverified") + "</span>";
     }
     function hit(r) {              // does this row pass the search and the pickers?
       if (M.trade !== "all" && r.role !== M.trade) return false;
       if (M.site !== "all" && groupOf(r) !== M.site) return false;
-      if (M.status !== "all" && (groupOf(r) === "__office" || statusOf(r).k !== M.status)) return false;
+      if (M.status !== "all") {
+        if (groupOf(r) === "__office") return false;
+        var o = observed(r);
+        if (M.status === "elsewhere" ? !o.away : o.k !== M.status) return false;
+      }
       return qHit(r);
     }
     // fix 7 (29 Oct 2026): the search text alone; Inactive Workers filters by
@@ -495,11 +573,13 @@
       // 29 Oct 2026 (the reviewer's wording): the headcount includes office staff
       // and workers not on a site, so the sentence also says how many are on sites
       var onSite = rows.filter(function (r) { return !!r.current_project_id; }).length;
-      var away = rows.filter(function (r) { return groupOf(r) !== "__office" && statusOf(r).k === "elsewhere"; }).length;
+      var away = rows.filter(function (r) { return groupOf(r) !== "__office" && observed(r).away; }).length;
+      var unv = rows.filter(function (r) { return groupOf(r) !== "__office" && observed(r).k === "unverified"; }).length;
       var await_ = rows.filter(function (r) { return groupOf(r) === "__await"; }).length;
       var s = rows.length + (rows.length === 1 ? " active worker, " : " active workers, ") + onSite + " on " + ns + (ns === 1 ? " site" : " sites") +
         (M.company === "all" ? ", both companies" : ", " + M.company) +
         (away ? " · " + away + " seen elsewhere" : "") +
+        (unv ? " · " + unv + " unverified" : "") +
         (await_ ? " · " + await_ + " not on a site" : "") + ".";
       document.getElementById("mp-sub").textContent = s + (M.canEdit ? "" : " You can look; moves are made by the office.");
     }
@@ -521,8 +601,8 @@
     function warningsFor(key, list) {
       var out = [];
       if (key === "__office") return out;
-      var away = list.filter(function (r) { return statusOf(r).k === "elsewhere"; }).length;
-      if (away) out.push('<span class="chip chip-warn" title="Workers whose last report puts them at another site. Open the block and check.">' +
+      var away = list.filter(function (r) { return observed(r).away; }).length;
+      if (away) out.push('<span class="chip chip-warn" title="Workers last observed at another site or an unregistered place. Open the block and check.">' +
         away + " Seen Elsewhere</span>");
       return out;
     }
@@ -533,8 +613,9 @@
         UI.td("Worker", "<b>" + escHtml(r.full_name) + '</b><span class="mp-sub">' +
           escHtml([r.employee_code, r.company].filter(Boolean).join(" · ")) + "</span>") +
         UI.td("Trade", escHtml(UI.label(r.role))) +
-        (flat ? UI.td("Site", escHtml(siteWordsFor(r))) : "") +
-        UI.td("Status", statusChip(r)) +
+        (flat ? UI.td("Assigned Site", assignedSiteHtml(r)) : "") +
+        UI.td("Last Observed Site", obsSiteHtml(r)) +
+        UI.td("Status", obsStatusHtml(r)) +
         (M.canEdit ? UI.td("", '<button type="button" class="btn mp-open" data-act="open" data-staff="' + r.staff_id + '">Manage</button>') : "") +
         "</tr>";
     }
@@ -570,9 +651,9 @@
         '<div class="mp-body">' +
         (meta.length ? '<div class="mp-meta">' + meta.join('<span class="muted">·</span>') + "</div>" : "") +
         '<div class="mp-trades">' + tradeMix(list) + "</div>" +
-        '<div class="table-wrap table-stack"><table><thead><tr><th>Worker</th><th>Trade</th><th>Status</th>' +
+        '<div class="table-wrap table-stack"><table><thead><tr><th>Worker</th><th>Trade</th><th>Last Observed Site</th><th>Status</th>' +
         (M.canEdit ? "<th></th>" : "") + "</tr></thead><tbody>" +
-        (rows || '<tr><td colspan="4" class="empty">No worker matches here.</td></tr>') +
+        (rows || '<tr><td colspan="' + (M.canEdit ? 5 : 4) + '" class="empty">No worker matches here.</td></tr>') +
         "</tbody></table></div></div></details>";
     }
 
@@ -586,7 +667,7 @@
         var shownAll = f ? all.filter(hit) : all;
         shownTotal = shownAll.length;
         if (shownAll.length) {
-          html = '<div class="table-wrap table-stack mp-all"><table><thead><tr><th>Worker</th><th>Trade</th><th>Site</th><th>Status</th>' +
+          html = '<div class="table-wrap table-stack mp-all"><table><thead><tr><th>Worker</th><th>Trade</th><th>Assigned Site</th><th>Last Observed Site</th><th>Status</th>' +
             (M.canEdit ? "<th></th>" : "") + "</tr></thead><tbody>" +
             shownAll.map(function (r) { return rowHtml(r, true); }).join("") + "</tbody></table></div>";
         }
@@ -940,6 +1021,16 @@
       el.hidden = false;
     }
     function factRow(label, value) { return "<dt>" + escHtml(label) + "</dt><dd>" + value + "</dd>"; }
+    // 0130c: the last observation in full (date and time, whatever its age), then its status
+    function observedFacts(r) {
+      if (!hasObs(r)) return factRow("Last Report", escHtml(reportWords(r)));       // before 0130c
+      if (!r.last_observed_date) return factRow("Last Observed", '<span class="muted">No punch-in or tracker day yet</span>');
+      var ok = !!(OBS[r.last_observed_kind] || {}).ok;
+      var when = r.last_observed_at ? Dash.klDateTime(r.last_observed_at) : shortDate(r.last_observed_date);
+      return factRow("Last Observed", escHtml(obsSiteWords(r, true)) + '<span class="mp-sub">' + escHtml(when) + "</span>") +
+             factRow("Status", '<span class="st' + (ok ? "" : " st-unv") + '">' + (ok ? "Verified" : "Unverified") + "</span>" +
+                     '<span class="mp-sub">' + escHtml(obsWhy(r)) + "</span>");
+    }
 
     // the facts at the top of the panel as label : value rows (the owner's
     // ruling, 25 Oct), or the edit form in their place
@@ -956,7 +1047,7 @@
           rows += factRow("Overtime", (loaded ? d.ot_eligible : r.ot_eligible) === false ? "No" : "Yes");
           if (d.whatsapp_name) rows += factRow("WhatsApp", escHtml(d.whatsapp_name));
         }
-        rows += factRow("Last Report", escHtml(reportWords(r)));
+        rows += observedFacts(r);
         h += '<dl class="dr-facts">' + rows + "</dl>" +
           (M.canEdit && !loaded ? '<div class="dr-line muted">Loading…</div>' : "") +
           '<div class="dr-links">' +
@@ -1060,7 +1151,7 @@
     function workerPanel(r) {
       var h = '<div class="dr-top"><h2>' + escHtml(r.full_name) + '</h2><button type="button" class="btn dr-close" data-act="close" aria-label="Close" title="Close">×</button></div>' +
         '<p class="dr-who"><span>' + escHtml([r.employee_code, UI.label(r.role), r.company].filter(Boolean).join(" · ")) + "</span>" +
-        '<span class="spacer"></span>' + (r.is_active ? statusChip(r) : '<span class="st st-none">Left</span>') + "</p>" +
+        '<span class="spacer"></span>' + (r.is_active ? obsStatusHtml(r) : '<span class="st st-none">Left</span>') + "</p>" +
         discardBox() + factsBlock(r);
       if (M.canEdit) h += phoneSection(r) + historySection(r) + footRow(r);
       return h;
