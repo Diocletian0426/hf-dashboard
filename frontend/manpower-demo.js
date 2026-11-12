@@ -63,6 +63,7 @@
   // the roster, as v_manpower_by_site returns it (whereabouts only)
   function w(o) {
     var s = o.site ? site(o.site) : null, ls = o.lastSite ? site(o.lastSite) : null;
+    var ob = o.obs || null, os = ob && ob.site ? site(ob.site) : null;   // 0130c: the last observation
     return {
       staff_id: o.id, full_name: o.name + " (demo)", role: o.role, company: o.co,
       current_project_id: s ? s.project_id : null, project_code: s ? s.project_code : null,
@@ -75,23 +76,32 @@
       has_date_joined: !!o.joined, has_contact: !!o.contact,
       last_reported_source: o.lastDays === undefined ? null : (o.bot ? "bot" : "gps"),
       ot_eligible: o.ot === false ? false : true,
+      // 0130c: where the latest punch-in (or the tracker) really placed the worker
+      last_observed_at: ob ? ts(day(ob.days), ob.at || "08:03") : null,
+      last_observed_date: ob ? day(ob.days) : null,
+      last_observed_kind: ob ? ob.k : null,
+      last_observed_verified: ob ? (ob.k === "verified" || ob.k === "tracker") : null,
+      last_observed_project_id: os ? os.project_id : null,
+      last_observed_project_code: os ? os.project_code : null,
+      last_observed_project_name: os ? os.project_name : null,
+      last_observed_accuracy_m: ob ? (ob.acc || 12) : null,
       // the gated facts (get_staff_detail), kept here for the demo only
       _detail: { date_joined: o.joined || null, contact_number: o.contact || null, country_origin: o.origin || null,
                  whatsapp_name: o.wa || null }
     };
   }
   var ROWS = [
-    w({ id: "demo-ironman", name: "Iron-Man",        code: "BP-D01", role: "boring_operator", co: "HF-BP",  site: "demo-site-1", lastSite: "demo-site-1", lastDays: 0, joined: "2025-03-10", contact: "012-000 0001", origin: "Malaysia" }),
-    w({ id: "demo-cap",     name: "Captain America", code: "BP-D02", role: "crane_operator",  co: "HF-BP",  site: "demo-site-1", lastSite: "demo-site-1", lastDays: 0, joined: "2025-06-01", contact: "012-000 0002", origin: "Malaysia" }),
-    w({ id: "demo-widow",   name: "Black Widow",     code: "BP-D03", role: "general_worker",  co: "HF-BP",  site: "demo-site-1", lastSite: "demo-site-2", lastDays: 1, joined: "2026-01-12", origin: "Myanmar" }),
-    w({ id: "demo-hulk",    name: "Hulk",            code: "HS-D04", role: "welder",          co: "Hai Fu", site: "demo-site-1", lastSite: null,          lastDays: 0, joined: "2024-11-20", contact: "012-000 0004", origin: "Bangladesh", wa: "Hulk" }),   // punched today, matched no site
-    w({ id: "demo-thor",    name: "Thor",            code: "BP-D05", role: "general_worker",  co: "HF-BP",  site: "demo-site-1", lastSite: "demo-site-1", lastDays: 10, origin: "Nepal" }),
-    w({ id: "demo-hawkeye", name: "Hawkeye",         code: "BP-D06", role: "general_worker",  co: "HF-BP",  site: "demo-site-2", lastSite: "demo-site-2", lastDays: 0, joined: "2025-09-01", contact: "012-000 0006" }),
-    w({ id: "demo-falcon",  name: "Falcon",          code: "BP-D07", role: "welder",          co: "HF-BP",  site: "demo-site-2", lastSite: "demo-site-2", lastDays: 1, bot: true, joined: "2025-09-01" }),
-    w({ id: "demo-vision",  name: "Vision",          code: "BP-D08", role: "site_supervisor", co: "HF-BP",  site: "demo-site-2", lastSite: "demo-site-2", lastDays: 0, joined: "2023-02-14", contact: "012-000 0008", origin: "Malaysia" }),
-    w({ id: "demo-wanda",   name: "Scarlet Witch",   code: "HS-D09", role: "vibro_operator",  co: "Hai Fu", site: "demo-site-3", lastSite: "demo-site-3", lastDays: 0, joined: "2024-05-05", contact: "012-000 0009" }),
+    w({ obs: { k: "verified", site: "demo-site-1", days: 0 }, id: "demo-ironman", name: "Iron-Man",        code: "BP-D01", role: "boring_operator", co: "HF-BP",  site: "demo-site-1", lastSite: "demo-site-1", lastDays: 0, joined: "2025-03-10", contact: "012-000 0001", origin: "Malaysia" }),
+    w({ obs: { k: "weak_gps", days: 0, acc: 1600 }, id: "demo-cap",     name: "Captain America", code: "BP-D02", role: "crane_operator",  co: "HF-BP",  site: "demo-site-1", lastSite: "demo-site-1", lastDays: 0, joined: "2025-06-01", contact: "012-000 0002", origin: "Malaysia" }),
+    w({ obs: { k: "verified", site: "demo-site-2", days: 1 }, id: "demo-widow",   name: "Black Widow",     code: "BP-D03", role: "general_worker",  co: "HF-BP",  site: "demo-site-1", lastSite: "demo-site-2", lastDays: 1, joined: "2026-01-12", origin: "Myanmar" }),
+    w({ obs: { k: "unregistered", days: 0, acc: 20 }, id: "demo-hulk",    name: "Hulk",            code: "HS-D04", role: "welder",          co: "Hai Fu", site: "demo-site-1", lastSite: null,          lastDays: 0, joined: "2024-11-20", contact: "012-000 0004", origin: "Bangladesh", wa: "Hulk" }),   // punched today, matched no site
+    w({ obs: { k: "verified", site: "demo-site-1", days: 10 }, id: "demo-thor",    name: "Thor",            code: "BP-D05", role: "general_worker",  co: "HF-BP",  site: "demo-site-1", lastSite: "demo-site-1", lastDays: 10, origin: "Nepal" }),
+    w({ obs: { k: "verified", site: "demo-site-2", days: 0 }, id: "demo-hawkeye", name: "Hawkeye",         code: "BP-D06", role: "general_worker",  co: "HF-BP",  site: "demo-site-2", lastSite: "demo-site-2", lastDays: 0, joined: "2025-09-01", contact: "012-000 0006" }),
+    w({ obs: { k: "near", site: "demo-site-2", days: 1, acc: 30 }, id: "demo-falcon",  name: "Falcon",          code: "BP-D07", role: "welder",          co: "HF-BP",  site: "demo-site-2", lastSite: "demo-site-2", lastDays: 1, bot: true, joined: "2025-09-01" }),
+    w({ obs: { k: "verified", site: "demo-site-2", days: 0 }, id: "demo-vision",  name: "Vision",          code: "BP-D08", role: "site_supervisor", co: "HF-BP",  site: "demo-site-2", lastSite: "demo-site-2", lastDays: 0, joined: "2023-02-14", contact: "012-000 0008", origin: "Malaysia" }),
+    w({ obs: { k: "tracker", site: "demo-site-3", days: 0 }, id: "demo-wanda",   name: "Scarlet Witch",   code: "HS-D09", role: "vibro_operator",  co: "Hai Fu", site: "demo-site-3", lastSite: "demo-site-3", lastDays: 0, joined: "2024-05-05", contact: "012-000 0009" }),
     w({ id: "demo-antman",  name: "Ant-Man",         code: "HS-D10", role: "welder",          co: "Hai Fu", site: "demo-site-3" }),
-    w({ id: "demo-warm",    name: "War Machine",     code: "BP-D11", role: "general_worker",  co: "HF-BP",  site: null,          lastSite: "demo-site-1", lastDays: 2, joined: "2026-02-02" }),
+    w({ obs: { k: "verified", site: "demo-site-1", days: 2 }, id: "demo-warm",    name: "War Machine",     code: "BP-D11", role: "general_worker",  co: "HF-BP",  site: null,          lastSite: "demo-site-1", lastDays: 2, joined: "2026-02-02" }),
     w({ id: "demo-fury",    name: "Nick Fury",       code: "BP-D12", role: "management",      co: "HF-BP",  site: null, joined: "2020-01-01", contact: "012-000 0012", ot: false }),
     w({ id: "demo-hill",    name: "Maria Hill",      code: "BP-D13", role: "admin",           co: "HF-BP",  site: null, joined: "2022-07-01", contact: "012-000 0013", ot: false }),
     w({ id: "demo-loki",    name: "Loki",            code: "BP-D14", role: "general_worker",  co: "HF-BP",  site: "demo-site-1", left: 20 }),
