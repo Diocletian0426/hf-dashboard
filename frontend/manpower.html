@@ -293,8 +293,8 @@
           <p>Each worker sits under their assigned site. Last Observed Site is where their latest punch-in, or the vibro tracker, actually placed them. A verified punch at another site moves the assignment by itself.</p>
           <h4>Last Observed Site</h4>
           <dl>
-            <dt><span class="obs">Site Name</span></dt><dd>The site the latest punch-in named, and how long ago.</dd>
-            <dt><span class="obs-away">Site Name</span></dt><dd>Seen Elsewhere: verified at another site, or at an unregistered place.</dd>
+            <dt><span class="obs">HF-XXX-000</span></dt><dd>The site the latest punch-in named, and how long ago. Hover the code for the site's name.</dd>
+            <dt><span class="obs-away">HF-XXX-000</span></dt><dd>Seen Elsewhere: verified at another site, or at an unregistered place.</dd>
             <dt><span class="obs">Unregistered Place</span></dt><dd>Good GPS, but no registered site within 3 km.</dd>
             <dt><span class="obs">Weak GPS</span> · <span class="obs">No GPS</span></dt><dd>The punch could not be placed, so no site is claimed.</dd>
             <dt><span class="obs obs-none">No Report</span></dt><dd>Nothing in the last 7 days. Office staff carry none.</dd>
@@ -453,10 +453,15 @@
     };
     function ageWords(days) { return days === 0 ? "Today" : days === 1 ? "Yesterday" : days + " Days"; }
     function hasObs(r) { return r.last_observed_kind !== undefined; }      // false until DB 0130c is live
-    function obsSiteWords(r) {        // the site words for the observation, whatever its age
-      var k = r.last_observed_kind, name = r.last_observed_project_name || r.last_observed_project_code || "";
-      if (k === "verified" || k === "tracker" || k === "no_pin") return name;
-      if (k === "near") return "Near " + name;
+    // the column shows the site CODE; its name shows on hover (the owner, 12 Nov
+    // 2026). The worker panel has room for both (full = true).
+    function obsNamesSite(r) { var k = r.last_observed_kind; return k === "verified" || k === "tracker" || k === "no_pin" || k === "near"; }
+    function obsSiteWords(r, full) {  // the site words for the observation, whatever its age
+      var k = r.last_observed_kind, name = r.last_observed_project_name || "";
+      var code = r.last_observed_project_code || name;
+      var site = full && name && name !== code ? code + " — " + name : code;
+      if (k === "verified" || k === "tracker" || k === "no_pin") return site;
+      if (k === "near") return "Near " + site;
       if (k === "unregistered") return "Unregistered Place";
       if (k === "weak_gps") return "Weak GPS";
       if (k === "no_gps") return "No GPS";
@@ -478,7 +483,8 @@
       var ok = !!(OBS[r.last_observed_kind] || {}).ok;
       var away = (ok && String(r.last_observed_project_id || "") !== String(r.current_project_id || "")) ||
                  r.last_observed_kind === "unregistered";
-      return { k: ok ? "verified" : "unverified", site: obsSiteWords(r), age: ageWords(days), ok: ok, away: away,
+      return { k: ok ? "verified" : "unverified", site: obsSiteWords(r, false), age: ageWords(days), ok: ok, away: away,
+               name: obsNamesSite(r) ? (r.last_observed_project_name || "") : "",
                why: (away ? "Seen elsewhere. " : "") + obsWhy(r) };
     }
     // the view before 0130c: the last report as filed, not verified either way
@@ -494,7 +500,8 @@
       if (groupOf(r) === "__office") return "";        // office staff do not punch
       var o = observed(r);
       if (o.k === "none") return '<span class="obs obs-none" title="' + esc(o.why) + '">No Report</span>';
-      return '<span class="obs-cell"><span class="obs' + (o.away ? " obs-away" : "") + '" title="' + esc(o.why) + '">' + escHtml(o.site) + "</span>" +
+      var tip = (o.name ? o.name + "\n" : "") + o.why;   // hover: the site's name, then the reason
+      return '<span class="obs-cell"><span class="obs' + (o.away ? " obs-away" : "") + '" title="' + esc(tip) + '">' + escHtml(o.site) + "</span>" +
              '<span class="mp-sub">' + escHtml(o.age) + "</span></span>";
     }
     function obsStatusHtml(r) {
@@ -1015,7 +1022,7 @@
       if (!r.last_observed_date) return factRow("Last Observed", '<span class="muted">No punch-in or tracker day yet</span>');
       var ok = !!(OBS[r.last_observed_kind] || {}).ok;
       var when = r.last_observed_at ? Dash.klDateTime(r.last_observed_at) : shortDate(r.last_observed_date);
-      return factRow("Last Observed", escHtml(obsSiteWords(r)) + '<span class="mp-sub">' + escHtml(when) + "</span>") +
+      return factRow("Last Observed", escHtml(obsSiteWords(r, true)) + '<span class="mp-sub">' + escHtml(when) + "</span>") +
              factRow("Status", '<span class="st' + (ok ? "" : " st-unv") + '">' + (ok ? "Verified" : "Unverified") + "</span>" +
                      '<span class="mp-sub">' + escHtml(obsWhy(r)) + "</span>");
     }
