@@ -118,7 +118,15 @@
     // 4 days ago at UMECH: a night of 14 h 40 m — under 16 h, nothing to settle
     wd({ who: "falcon",  site: 0, date: day(4), inL: "19:00", outL: "09:40", outNext: true, offSite: true }),
     wd({ who: "vision",  site: 0, date: day(4), inL: "19:05", outL: "23:25" }),
-    wd({ who: "wanda",   site: 0, date: day(4), inL: "19:02", outL: "23:28" })
+    wd({ who: "wanda",   site: 0, date: day(4), inL: "19:02", outL: "23:28" }),
+    // October (the 0132 demo): the two Hai Fu days without a figure that the
+    // Settings page's "2 Unpriced" counts (settings.html?demo=1; here: filters Hai Fu + October).
+    // A forgotten punch-out on the 14th and a 20 h 40 m night on the 21st, neither
+    // settled. Settle them here and the Settings page lets October close: the
+    // note travels in sessionStorage (SETTLED_KEY below), this tab only.
+    wd({ who: "hulk", site: 1, date: "2026-10-14", inL: "08:05", outL: null, kind: "missed", missed: true }),
+    wd({ who: "hulk", site: 1, date: "2026-10-21", inL: "07:50", outL: "04:30", outNext: true, kind: "overlong", note: "extraction whole night, finish 4.30am",
+         declaredL: "17:30", reqId: "demo-req-2" })   // and his Change Times ask on that day, still waiting (review issue 2)
   ];
   // Hulk (Flexible Hours) punched in 17 h ago and is still open: Open 16 h+
   (function () {
@@ -133,7 +141,20 @@
   var ACCEPTED = {};                                   // key -> true after Accept / Credit
   var KEPT = {};                                       // key -> true after Keep From 8 AM
   var RULED = {};                                      // key -> { inISO, outISO, why } after Rule The Times / Approve
-  var REQUESTS = { "demo-req-1": "pending" };
+  var REQUESTS = { "demo-req-1": "pending", "demo-req-2": "pending" };
+
+  // a settled day is noted for the Settings demo (settings-demo.js reads the same
+  // key): Accept, Rule The Times and an approved request note it, Undo clears it
+  var SETTLED_KEY = "hf-demo-settled";
+  function settledList() { try { return JSON.parse(sessionStorage.getItem(SETTLED_KEY) || "[]"); } catch (e) { return []; } }
+  function settledNote(d, on) {
+    try {
+      var k = d.staff_id + "|" + d.work_date, list = settledList().filter(function (x) { return x !== k; });
+      if (on) list.push(k);
+      sessionStorage.setItem(SETTLED_KEY, JSON.stringify(list));
+    } catch (e) { /* no storage: the note is lost, nothing else */ }
+  }
+  function settledNoted(d) { return settledList().indexOf(d.staff_id + "|" + d.work_date) >= 0; }   // settled on an earlier page load of this tab
 
   function key(d) { return d.staff_id + "|" + d.work_date + "|1"; }
   function ruledIn(d)  { var r = RULED[key(d)]; return r && r.inISO  ? r.inISO  : d.first_in_at; }
@@ -155,6 +176,7 @@
       if (to && d.work_date > to) return;
       if ((d._kind === "overlong" || d._kind === "early_start") && (ACCEPTED[key(d)] || KEPT[key(d)])) return;
       if (RULED[key(d)]) return;                       // a ruling settles the shift, whatever the kind
+      if (settledNoted(d)) return;                     // settled on an earlier load of this tab
       out.push({
         kind: d._kind, staff_id: d.staff_id, employee_code: d.employee_code, full_name: d.full_name,
         company_code: d.company_code, flexible_hours: d.flexible_hours,
@@ -179,6 +201,7 @@
     DAYS.forEach(function (d) {
       if (!d._kind || (from && d.work_date < from) || (to && d.work_date > to)) return;
       if (RULED[key(d)]) return;                       // ruled = priced as ruled
+      if (settledNoted(d)) return;                     // settled on an earlier load of this tab
       var why = d._kind === "missed" ? "missed" : d._kind === "long_open" ? "open"
               : d._kind === "overlong" && !ACCEPTED[key(d)] ? "overlong" : null;
       if (why) out.push({ staff_id: d.staff_id, employee_code: d.employee_code, full_name: d.full_name,
@@ -249,7 +272,7 @@
       return { ok: false, code: "not_overlong", message: "That shift is not over 16 hours." };
     if (kind === "early" && d.flexible_hours)
       return { ok: false, code: "flexible_hours", message: "Flexible Hours staff are credited from the punch-in already." };
-    ACCEPTED[key(d)] = true;
+    ACCEPTED[key(d)] = true; settledNote(d, true);
     var mins = Math.round(hoursBetween(d.first_in_at, d.last_out_at) * 60) - 90;   // a plain 1.5 h rest, demo only
     return { ok: true, mark: kind === "long" ? "overlong_accepted" : "early_start_accepted", working_minutes: mins };
   };
@@ -258,7 +281,7 @@
     var d = DAYS.filter(function (x) { return x.staff_id === staffId && x.work_date === workDate; })[0];
     var box = kind === "early_keep" ? KEPT : ACCEPTED;
     if (!d || !box[key(d)]) return { ok: false, code: "not_found" };
-    delete box[key(d)];
+    delete box[key(d)]; if (kind !== "early_keep") settledNote(d, false);
     return { ok: true };
   };
   Dash.reviewAttendanceRequest = async function (id, decision, note) {
@@ -271,7 +294,7 @@
     REQUESTS[id] = decision;
     var d = DAYS.filter(function (x) { return x._reqId === id; })[0];
     // approving a Change Times ask lays the declared time on the shift as the office's ruling
-    if (decision === "approved" && d && d._declared) RULED[key(d)] = { outISO: d._declared, why: "Approved as asked" };
+    if (decision === "approved" && d && d._declared) { RULED[key(d)] = { outISO: d._declared, why: "Approved as asked" }; settledNote(d, true); }
     return { ok: true, status: decision,
              message: decision === "rejected" ? "Request rejected."
                     : "Approved — the declared finish time now stands for " + (d ? d.full_name : "the worker") + "’s shift." };
@@ -290,7 +313,7 @@
     var r = RULED[key(d)] || {};
     if (inISO) r.inISO = inISO;
     if (outISO) r.outISO = outISO;
-    r.why = why; RULED[key(d)] = r;
+    r.why = why; RULED[key(d)] = r; settledNote(d, true);
     var effIn = ruledIn(d), effOut = ruledOut(d);
     return { ok: true, full_name: d.full_name, work_date: workDate, shift_no: Number(shiftNo) || 1, new_shift: false,
              hours: effOut ? hoursBetween(effIn, effOut) : null, in_at_local: local(effIn), out_at_local: local(effOut) };

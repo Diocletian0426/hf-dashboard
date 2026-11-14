@@ -122,7 +122,7 @@
                         rules a finish time.
            overlong     closed over the long-shift line (0131: the rule's overlong_hours, 20 h) and not accepted: unpriced until the
                         office accepts it as punched or rules a time.
-           early_start  a site worker's start before 06:00: counted from 08:00
+           early_start  a site worker's start before 06:00: counted from the day's start (both rules; D26, 10 Nov 2026)
                         until the office credits the real punch-in (or keeps
                         it at 8 AM — settled, no pay change).
            long_open    still open 20 h or more (0130; was 16 h). The phone asks the worker at
@@ -220,6 +220,8 @@
        Must sit BEFORE shell.js (it stands in for the sign-in the shell asks
        for). Delete this line + exceptions-demo.js before the pilot starts. -->
   <script src="exceptions-demo.js"></script>
+  <!-- dev demo for the work rules + payroll months (DB 0131/0132): on only with ?demo=1 - remove before the pilot -->
+  <script src="settings-demo.js"></script>
   <script src="shell.js"></script>
 
   <script>

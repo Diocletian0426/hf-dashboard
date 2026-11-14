@@ -1148,7 +1148,7 @@
   //   missed       left without a punch-out (the worker said so, or 48 h passed)
   //   long_open    still open 20 h or more (0130; was 16 h)
   //   overlong     closed over the long-shift line of its day and not accepted: unpriced (0131: 20 h to 31 Oct 2026, 24 h from 1 Nov)
-  //   early_start  a site worker's start before 06:00, not accepted: counts from 08:00
+  //   early_start  a site worker's start before 06:00, not accepted: counts from the day's start (both rules; D26, 10 Nov 2026)
   // A finish time the worker declared rides on the row as request_id /
   // declared_out_at / request_pending (it is a Change Times request). Each row
   // also carries the shift AS RULED (official_in_at, official_out_at, adjusted,
@@ -1184,7 +1184,8 @@
   // fixed text. Asked once per page load; an older database (no function)
   // answers [] and the pages fall back to generic words.
   var rulesPromise = null;
-  function getWorkRules() {
+  function getWorkRules(fresh) {
+    if (fresh) rulesPromise = null;          // the Settings page re-reads after a write
     if (!rulesPromise) {
       rulesPromise = q(sb.rpc("get_work_rules")).then(function (rows) { return rows || []; }).catch(function (e) {
         rulesPromise = null;
@@ -1217,6 +1218,60 @@
     if (!m) return "";
     var h = Number(m[1]);
     return ((h % 12) || 12) + ":" + m[2] + " " + (h < 12 ? "AM" : "PM");
+  }
+
+  // 0132: the payroll months and the rule writes behind the Settings page.
+  // close / reopen / set / delete answer { ok, code, message, ... } like every
+  // office write; the page shows the message as it is.
+  async function getPayrollPeriods() {
+    try {
+      return (await q(sb.rpc("get_payroll_periods"))) || [];
+    } catch (e) {
+      if (isMissingFunction(e)) return [];
+      throw e;
+    }
+  }
+  function closePayrollMonth(companyCode, monthIso, note) {
+    return q(sb.rpc("close_payroll_month", { p_company_code: companyCode, p_month: monthIso, p_note: note || null }));
+  }
+  function reopenPayrollMonth(companyCode, monthIso, reason) {
+    return q(sb.rpc("reopen_payroll_month", { p_company_code: companyCode, p_month: monthIso, p_reason: reason }));
+  }
+  function setWorkRule(r) {
+    return q(sb.rpc("set_work_rule", {
+      p_company_code: r.company_code, p_effective_from: r.effective_from, p_mode: r.mode,
+      p_day_start: r.day_start, p_day_end: r.day_end, p_rest_minutes: r.rest_minutes, p_grace_minutes: r.grace_minutes,
+      p_round_minutes: r.round_minutes, p_overlong_hours: r.overlong_hours, p_question_hours: r.question_hours,
+      p_normal_minutes: r.normal_minutes, p_rest_gate_minutes: r.rest_gate_minutes, p_note: r.note || null,
+      p_ot_rate: r.ot_rate, p_rest_day_rate: r.rest_day_rate, p_holiday_rate: r.holiday_rate }));   // 0132 (9 Nov): the three rates ride with the rule
+  }
+  function deleteWorkRule(ruleId) {
+    return q(sb.rpc("delete_work_rule", { p_rule_id: ruleId }));
+  }
+  // 0132 (9 Nov): the public holiday calendar (Penang, the list fn_day_kind prices by)
+  // and the Settings page's History (the audit rows its writes leave). The reads
+  // answer [] on an older database, like getWorkRules.
+  async function getPublicHolidays(fromIso) {
+    try {
+      return (await q(sb.rpc("get_public_holidays", { p_from: fromIso || null }))) || [];
+    } catch (e) {
+      if (isMissingFunction(e)) return [];
+      throw e;
+    }
+  }
+  function addPublicHoliday(dateIso, name, inLieu) {
+    return q(sb.rpc("add_public_holiday", { p_date: dateIso, p_name: name, p_in_lieu: !!inLieu }));
+  }
+  function deletePublicHoliday(dateIso) {
+    return q(sb.rpc("delete_public_holiday", { p_date: dateIso }));
+  }
+  async function getSettingsHistory(limit) {
+    try {
+      return (await q(sb.rpc("get_settings_history", { p_limit: limit || 100 }))) || [];
+    } catch (e) {
+      if (isMissingFunction(e)) return [];
+      throw e;
+    }
   }
 
   // The figure a ruling WOULD give, before it is saved (DB 0127 price_shift,
@@ -2108,6 +2163,10 @@
     getPunchExceptions: getPunchExceptions,
     getUnpricedDays: getUnpricedDays,
     getWorkRules: getWorkRules, ruleFor: ruleFor, clockWord: clockWord,   // 0131
+    getPayrollPeriods: getPayrollPeriods, closePayrollMonth: closePayrollMonth, reopenPayrollMonth: reopenPayrollMonth,   // 0132
+    setWorkRule: setWorkRule, deleteWorkRule: deleteWorkRule,
+    getPublicHolidays: getPublicHolidays, addPublicHoliday: addPublicHoliday, deletePublicHoliday: deletePublicHoliday,   // 0132 (9 Nov)
+    getSettingsHistory: getSettingsHistory,
     priceShift: priceShift,
     acceptShiftAsPunched: acceptShiftAsPunched,
     clearShiftAcceptance: clearShiftAcceptance,
