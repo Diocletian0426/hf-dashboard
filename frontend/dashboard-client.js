@@ -2164,4 +2164,83 @@
     klTime: klTime,
     klDateTime: klDateTime
   };
+
+  // ---- leave (DB 0134-0136; owner, 14 Nov 2026) -----------------------------
+  // Kept as one block at the end of the file. A worker asks for Leave or MC on
+  // the punch app; the office approves (and decides the kind), rejects or
+  // cancels here. There is NO balance and no entitlement. Refusals come back as
+  // DATA - { ok:false, code, message } - like the attendance calls.
+  //
+  //   await Dash.getLeaveList({ status?, from?, to?, staffId?, year? })
+  //       -> rows: request_id, staff_id, full_name, employee_code, company_code,
+  //          project_id, project_name (the worker's present site), leave_type
+  //          ('leave' = kind not decided | annual | mc | unpaid | emergency),
+  //          start_date, end_date, days, half_day, reason, status (pending |
+  //          approved | rejected | cancelled), review_remarks, reviewed_by_name,
+  //          reviewed_at, cancelled_at, cancel_reason, source (worker | office),
+  //          proof_path, proof_seen, created_at. from / to = requests touching
+  //          those dates.
+  //   await Dash.approveLeave(id, asType?, note?)  asType is REQUIRED for a
+  //          'leave' request (annual | unpaid | emergency | mc); an MC needs its
+  //          proof (the worker's file, or Proof Seen) -> proof_required.
+  //   await Dash.rejectLeave(id, note)             note required
+  //   await Dash.cancelLeave(id, note)             pending or approved; note required
+  //   await Dash.addLeave({ staffId, type, start, end, halfDay?, reason?, approve?, proofSeen? })
+  //   await Dash.setLeaveProofSeen(id, seen)       the slip was shown in person
+  //   await Dash.leaveProofUrl(path)               a 5-minute link to the photo / PDF
+  //   await Dash.getAttendanceGaps(from, to, projectId?)
+  //       -> rows: staff_id, full_name, employee_code, company_code, project_id,
+  //          project_name, work_date, status (on_leave | leave_pending |
+  //          request_pending | absent), leave_type, half_day, leave_request_id,
+  //          has_punch. null when the database does not have it yet.
+  function getLeaveList(opts) {
+    opts = opts || {};
+    return q(sb.rpc("get_leave_requests", {
+      p_staff_id: opts.staffId || null,
+      p_status: (opts.status && opts.status !== "all") ? opts.status : null,
+      p_year: opts.year || null,
+      p_from: opts.from || null,
+      p_to: opts.to || null
+    }));
+  }
+  function approveLeave(requestId, asType, note) {
+    return q(sb.rpc("approve_leave", { p_request_id: requestId, p_as_type: asType || null, p_note: note || null }));
+  }
+  function rejectLeave(requestId, note) {
+    return q(sb.rpc("reject_leave", { p_request_id: requestId, p_note: note || null }));
+  }
+  function cancelLeave(requestId, note) {
+    return q(sb.rpc("cancel_leave", { p_request_id: requestId, p_note: note || null }));
+  }
+  function addLeave(o) {
+    o = o || {};
+    return q(sb.rpc("add_leave_request", {
+      p_staff_id: o.staffId, p_leave_type: o.type, p_start_date: o.start, p_end_date: o.end,
+      p_half_day: !!o.halfDay, p_reason: o.reason || null, p_approve: !!o.approve, p_proof_seen: !!o.proofSeen
+    }));
+  }
+  function setLeaveProofSeen(requestId, seen) {
+    return q(sb.rpc("set_leave_proof_seen", { p_request_id: requestId, p_seen: seen !== false }));
+  }
+  async function leaveProofUrl(path, seconds) {
+    var res = await sb.storage.from("leave-proof").createSignedUrl(path, seconds || 300);
+    if (res.error) throw res.error;
+    return res.data.signedUrl;
+  }
+  async function getAttendanceGaps(from, to, projectId) {
+    try {
+      return await q(sb.rpc("get_attendance_gaps", { p_from: from, p_to: to, p_project_id: projectId || null }));
+    } catch (e) {
+      if (isMissingFunction(e)) return null;
+      throw e;
+    }
+  }
+  window.Dash.getLeaveList = getLeaveList;
+  window.Dash.approveLeave = approveLeave;
+  window.Dash.rejectLeave = rejectLeave;
+  window.Dash.cancelLeave = cancelLeave;
+  window.Dash.addLeave = addLeave;
+  window.Dash.setLeaveProofSeen = setLeaveProofSeen;
+  window.Dash.leaveProofUrl = leaveProofUrl;
+  window.Dash.getAttendanceGaps = getAttendanceGaps;
 })();

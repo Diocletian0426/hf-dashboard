@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nexus — Leave</title>
+  <link rel="stylesheet" href="styles.css" />
+  <!-- Page-only bits, tokens only (the drawer is Manpower's shape). -->
+  <style>
+    .lv-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .lv-head h1 { flex: 1; margin-bottom: 0; }
+    .tbl-leave th, .tbl-leave td { padding-left: 12px; padding-right: 12px; }
+    .tbl-leave td { vertical-align: top; }
+    .lv-sub { display: block; margin-top: 2px; color: var(--ink-3); font-size: var(--fs-xs); font-weight: 400; }
+    .lv-kind { background: #dcfce7; color: #166534; }
+    .lv-kind-mc { background: #fee2e2; color: #991b1b; }
+    .lv-kind-open { background: var(--warn-soft); color: var(--warn-ink); }
+    .badge-cancelled { background: #e5e7eb; color: #374151; }
+    .lv-noproof { color: var(--warn-ink); font-weight: 600; }
+    .lv-link { font: inherit; color: var(--brand-ink); background: none; border: 0; padding: 0;
+               text-decoration: underline; cursor: pointer; }
+    .lv-acts { display: flex; gap: 6px; flex-wrap: wrap; }
+    .lv-num { text-align: right; font-variant-numeric: tabular-nums; }
+
+    .lv-drawer { position: fixed; top: 0; right: 0; bottom: 0; z-index: 70; width: min(460px, 96vw);
+                 overflow-y: auto; background: #fff; box-shadow: var(--shadow-2);
+                 border-radius: var(--r-lg) 0 0 var(--r-lg); padding: var(--sp-4) var(--sp-5) var(--sp-6); }
+    .lv-drawer[hidden] { display: none; }
+    .dr-top { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 10px; }
+    .dr-top h2 { margin: 0; font-size: var(--fs-xl); line-height: 1.2; flex: 1; }
+    .dr-top .dr-close { flex: none; width: 40px; height: 40px; padding: 0; border-radius: 999px;
+                        display: inline-flex; align-items: center; justify-content: center; font-size: 22px; line-height: 1; }
+    .dr-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 10px; }
+    .dr-form label { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-xs); font-weight: 600; color: var(--ink-2); min-width: 0; }
+    .dr-form label.wide { grid-column: 1 / -1; }
+    .dr-form label.check { flex-direction: row; align-items: center; gap: 8px; font-weight: 500; font-size: var(--fs-sm); min-height: 36px; }
+    .dr-form label.check input { width: auto; margin: 0; }
+    .dr-form input, .dr-form select { width: 100%; min-width: 0; box-sizing: border-box; font-family: var(--font);
+                 font-size: 13.5px; color: var(--ink); padding: 8px 10px; border: 1px solid var(--line-strong);
+                 border-radius: var(--r-sm); background: var(--surface-solid); min-height: 40px; }
+    .dr-form input[type="checkbox"] { min-height: 0; }
+    .dr-form [aria-invalid="true"] { border-color: var(--danger); }
+    .dr-form .acts { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+    .dr-err { grid-column: 1 / -1; color: var(--danger-ink); font-size: var(--fs-sm); white-space: pre-wrap; }
+    .dr-err:empty { display: none; }
+    .dr-what { grid-column: 1 / -1; margin: 0; font-size: var(--fs-md); color: var(--ink); }
+    @media (max-width: 760px) { .lv-drawer { width: 100vw; border-radius: 0; } }
+  </style>
+</head>
+<body>
+
+  <header id="nav"></header>
+
+  <main id="main">
+    <!-- ============================ LEAVE (office) ==========================
+         The leave register: who is on leave and when (DB 0134).
+         A worker asks for Leave or MC on the punch app; the office approves
+         on the Requests page, where it also decides the kind. This page lists
+         every request touching the dates on screen, lets the office ENTER
+         leave for a worker (Add Leave) and CANCEL a pending or approved one.
+         There is no balance and no entitlement (owner, 14 Nov 2026).
+         Opening needs leave.view; Add Leave needs leave.create (+ leave.approve
+         to enter it approved); Cancel needs leave.approve. The database
+         re-checks all of it. -->
+    <div class="lv-head">
+      <h1>Leave</h1>
+      <button type="button" class="btn btn-primary" id="btn-add" hidden>Add Leave</button>
+    </div>
+    <p class="page-caption">Who is on leave and when. Requests are answered on the
+      <a href="requests.html?kind=leave" id="lnk-requests">Requests</a> page.</p>
+
+    <div id="error"></div>
+
+    <div class="mp-controls" id="lv-controls">
+      <span>Show:
+        <button type="button" data-status="approved" class="active">Approved</button>
+        <button type="button" data-status="pending">Pending</button>
+        <button type="button" data-status="rejected">Rejected</button>
+        <button type="button" data-status="cancelled">Cancelled</button>
+        <button type="button" data-status="all">All</button>
+      </span>
+      <span>Kind: <select id="f-kind" aria-label="Kind of leave">
+        <option value="">All Kinds</option>
+        <option value="annual">Annual Leave</option>
+        <option value="mc">MC</option>
+        <option value="unpaid">Unpaid Leave</option>
+        <option value="emergency">Emergency Leave</option>
+        <option value="leave">Not Decided</option></select></span>
+      <span>Company: <select id="f-company" aria-label="Company">
+        <option value="">All Companies</option>
+        <option value="HF-BP">HF Bored Piles</option>
+        <option value="Hai Fu">Hai Fu Sheet Piles</option></select></span>
+      <span>From <input type="date" id="f-from" aria-label="From date">
+            to <input type="date" id="f-to" aria-label="To date"></span>
+      <span class="tool-search">
+        <input type="search" id="f-text" placeholder="Search worker name or code…"
+               aria-label="Search by worker name or code" />
+        <span class="muted" id="f-count"></span>
+      </span>
+    </div>
+
+    <div class="table-wrap table-stack tbl-leave">
+      <table>
+        <thead id="lv-head"></thead>
+        <tbody id="lv-rows"><tr><td colspan="10" class="empty">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </main>
+
+  <aside id="lv-drawer" class="lv-drawer" hidden aria-label="Leave"></aside>
+
+  <script src="vendor/supabase.js"></script>
+  <script src="config.js"></script>
+  <script src="dashboard-client.js"></script>
+  <script src="ui.js"></script>
+  <!-- DEV ONLY: does nothing unless the URL has ?demo=1, and never writes.
+       Must sit BEFORE shell.js. Delete this line + leave-demo.js before the pilot. -->
+  <script src="leave-demo.js"></script>
+  <script src="shell.js"></script>
+
+  <script>
+    var esc = UI.esc, escHtml = UI.escHtml;
+
+    var KIND = { leave: "Not Decided", mc: "MC", annual: "Annual Leave", unpaid: "Unpaid Leave", emergency: "Emergency Leave" };
+    var KIND_PICK = [["annual", "Annual Leave"], ["mc", "MC"], ["unpaid", "Unpaid Leave"], ["emergency", "Emergency Leave"]];
+    var COMPANY = { "HF-BP": "HF Bored Piles", "Hai Fu": "Hai Fu Sheet Piles" };
+
+    var L = {
+      rows: [], roster: [], loading: true, loadErr: "",
+      canCreate: false, canApprove: false,
+      status: "approved", kind: "", company: "", from: "", to: "", q: "",
+      panel: null,            // { mode: 'add' | 'cancel', ... } — the side panel
+      ok: "", err: ""
+    };
+
+    function addDays(iso, n) {
+      var d = new Date(iso + "T00:00:00Z");
+      d.setUTCDate(d.getUTCDate() + n);
+      return d.toISOString().slice(0, 10);
+    }
+    function weekday(iso) {
+      return new Date(iso + "T00:00:00").toLocaleDateString("en-MY", { weekday: "short" });
+    }
+    function isMissingFunction(e) {
+      var code = (e && e.code) || "";
+      return code === "PGRST202" || /could not find the function/i.test(String((e && e.message) || ""));
+    }
+    function byId(id) { return L.rows.filter(function (r) { return r.request_id === id; })[0]; }
+    function hasActs() { return L.canApprove; }
+    function colCount() { return hasActs() ? 10 : 9; }
+    function dayWords(r) {
+      if (r.half_day) return "Half";
+      var n = Number(r.days);
+      return isNaN(n) ? "" : String(n);
+    }
+
+    /* ------------------------------- cells --------------------------------- */
+
+    function kindChip(r) {
+      var cls = r.leave_type === "mc" ? "lv-kind-mc" : r.leave_type === "leave" ? "lv-kind-open" : "lv-kind";
+      return '<span class="chip ' + cls + '">' + escHtml(KIND[r.leave_type] || UI.label(r.leave_type)) + "</span>";
+    }
+    function dateCell(iso) {
+      return iso ? "<div>" + escHtml(UI.dstr(iso)) + '<span class="lv-sub">' + escHtml(weekday(iso)) + "</span></div>" : "";
+    }
+    function statusCell(r) {
+      var h = UI.badge(r.status);
+      var who = r.reviewed_by_name, when = r.cancelled_at || r.reviewed_at;
+      if (r.status !== "pending" && (who || when)) {
+        h += '<span class="lv-sub">' + (who ? "by " + escHtml(who) : "") + (who && when ? " · " : "") +
+             (when ? escHtml(Dash.klDateTime(when)) : "") + "</span>";
+      }
+      var note = r.status === "cancelled" ? r.cancel_reason : r.review_remarks;
+      if (note) h += '<span class="lv-sub">' + escHtml(note) + "</span>";
+      return "<div>" + h + "</div>";
+    }
+    function proofCell(r) {
+      if (r.proof_path) return '<button type="button" class="lv-link" data-act="proof" data-id="' + esc(r.request_id) + '">View</button>';
+      if (r.proof_seen) return "Seen";
+      if (r.leave_type === "mc") return '<span class="lv-noproof">None</span>';
+      return "";
+    }
+    function actsCell(r) {
+      var h = "";
+      if (r.status === "pending") {
+        h += '<a class="btn" href="requests.html?kind=leave&status=pending' + (L.demo ? "&demo=1" : "") + '">Review</a>';
+      }
+      if (L.canApprove && (r.status === "pending" || r.status === "approved")) {
+        h += '<button type="button" class="btn" data-act="cancel" data-id="' + esc(r.request_id) + '">Cancel</button>';
+      }
+      return '<td><div class="lv-acts">' + h + "</div></td>";
+    }
+
+    function rowHtml(r) {
+      return '<tr data-id="' + esc(r.request_id) + '">' +
+        UI.td("Employee Code", escHtml(r.employee_code || "")) +
+        UI.td("Worker", "<div><b>" + escHtml(r.full_name || "—") + "</b>" +
+          (r.reason ? '<span class="lv-sub">' + escHtml(r.reason) + "</span>" : "") + "</div>", "wrap") +
+        UI.td("Company", escHtml(COMPANY[r.company_code] || r.company_code || "")) +
+        UI.td("Site", escHtml(r.project_name || ""), "wrap") +
+        UI.td("Kind", kindChip(r) + (r.source === "office" ? '<span class="lv-sub">Entered By Office</span>' : "")) +
+        UI.td("From", dateCell(r.start_date)) +
+        UI.td("To", dateCell(r.end_date)) +
+        UI.td("Days", escHtml(dayWords(r)), "lv-num") +
+        UI.td("Status", statusCell(r), "wrap") +
+        UI.td("Proof", proofCell(r)) +
+        (hasActs() ? actsCell(r) : "") +
+      "</tr>";
+    }
+
+    /* ------------------------------- render -------------------------------- */
+
+    function visibleRows() {
+      var q = L.q.trim().toLowerCase();
+      return L.rows.filter(function (r) {
+        if (L.status !== "all" && r.status !== L.status) return false;
+        if (L.kind && r.leave_type !== L.kind) return false;
+        if (L.company && (r.company_code || "") !== L.company) return false;
+        if (q && (String(r.full_name || "") + " " + String(r.employee_code || "")).toLowerCase().indexOf(q) === -1) return false;
+        return true;
+      });
+    }
+
+    function renderBanner() {
+      var h = "";
+      if (L.loadErr === "missing") {
+        h = '<div class="banner banner-amber">Leave is not switched on in the database yet.</div>';
+      } else if (L.loadErr) {
+        h = UI.errorBanner(L.loadErr);
+      }
+      if (L.err) h += '<div class="banner banner-red">' + escHtml(L.err) + "</div>";
+      if (L.ok) h += UI.okBanner(L.ok);
+      document.getElementById("error").innerHTML = h;
+    }
+
+    function renderRows() {
+      var tbody = document.getElementById("lv-rows"), n = colCount();
+      var btns = document.querySelectorAll("#lv-controls button[data-status]");
+      for (var i = 0; i < btns.length; i++) {
+        var s = btns[i].getAttribute("data-status");
+        btns[i].classList.toggle("active", s === L.status);
+        if (!btns[i].getAttribute("data-label")) btns[i].setAttribute("data-label", btns[i].textContent);
+        var c = s === "all" ? L.rows.length : L.rows.filter(function (r) { return r.status === s; }).length;
+        btns[i].textContent = btns[i].getAttribute("data-label") + (L.loading || L.loadErr ? "" : " " + c);
+      }
+      if (L.loading) { tbody.innerHTML = UI.loadingRow(n); return; }
+      if (L.loadErr) { tbody.innerHTML = UI.emptyRow(n, "Nothing to show."); return; }
+      var rows = visibleRows();
+      document.getElementById("f-count").textContent = L.q.trim() ? rows.length + " shown" : "";
+      tbody.innerHTML = rows.length ? rows.map(rowHtml).join("") : UI.emptyRow(n, "No Leave In These Dates");
+    }
+
+    function renderHead() {
+      document.getElementById("lv-head").innerHTML =
+        "<tr><th>Employee Code</th><th>Worker</th><th>Company</th><th>Site</th><th>Kind</th>" +
+        "<th>From</th><th>To</th><th class=\"lv-num\">Days</th><th>Status</th><th>Proof</th>" + (hasActs() ? "<th></th>" : "") + "</tr>";
+    }
+
+    function render() { renderBanner(); renderRows(); }
+
+    /* -------------------------------- data --------------------------------- */
+
+    var loadSeq = 0;
+    async function load(quiet) {
+      var my = ++loadSeq;
+      if (!quiet) { L.loading = true; render(); }
+      try {
+        var res = await Promise.all([
+          Dash.getLeaveList({ from: L.from || null, to: L.to || null }),
+          Dash.getLeaveList({ status: "pending" })          // a pending request is never out of sight
+        ]);
+        if (my !== loadSeq) return;
+        var seen = {};
+        L.rows = (res[0] || []).concat(res[1] || []).filter(function (r) {
+          if (seen[r.request_id]) return false;
+          seen[r.request_id] = true; return true;
+        }).sort(function (a, b) {
+          return String(b.start_date).localeCompare(String(a.start_date)) || String(a.full_name).localeCompare(String(b.full_name));
+        });
+        L.loadErr = "";
+      } catch (e) {
+        if (my !== loadSeq) return;
+        L.rows = [];
+        L.loadErr = isMissingFunction(e) ? "missing" : ((e && e.message) || String(e));
+      }
+      L.loading = false;
+      render();
+    }
+
+    /* ----------------------------- the side panel -------------------------- */
+
+    function closePanel() {
+      if (L.panel && L.panel.busy) return;
+      L.panel = null;
+      document.getElementById("lv-drawer").hidden = true;
+    }
+
+    function panelTop(title) {
+      return '<div class="dr-top"><h2>' + escHtml(title) + '</h2><button type="button" class="btn dr-close" data-act="close" aria-label="Close" title="Close">×</button></div>';
+    }
+
+    function addPanelHtml() {
+      var p = L.panel, one = p.start && p.start === p.end;
+      return panelTop("Add Leave") + '<div class="dr-form">' +
+        '<label class="wide">Worker<input type="text" id="a-worker" list="a-workers" autocomplete="off" value="' + esc(p.worker) + '"' +
+          (p.bad === "worker" ? ' aria-invalid="true"' : "") + ' placeholder="Name or employee code"></label>' +
+        '<datalist id="a-workers">' + L.roster.map(function (w) {
+          return '<option value="' + esc(w.label) + '"></option>';
+        }).join("") + "</datalist>" +
+        '<label class="wide">Kind<select id="a-kind">' + KIND_PICK.map(function (k) {
+          return '<option value="' + k[0] + '"' + (p.kind === k[0] ? " selected" : "") + ">" + k[1] + "</option>";
+        }).join("") + "</select></label>" +
+        '<label>From<input type="date" id="a-start" value="' + esc(p.start) + '"' + (p.bad === "dates" ? ' aria-invalid="true"' : "") + "></label>" +
+        '<label>To<input type="date" id="a-end" value="' + esc(p.end) + '"' + (p.bad === "dates" ? ' aria-invalid="true"' : "") + "></label>" +
+        '<label class="check wide"><input type="checkbox" id="a-half"' + (p.half && one ? " checked" : "") + (one ? "" : " disabled") + "> Half Day</label>" +
+        '<label class="wide">Reason<input type="text" id="a-reason" maxlength="500" autocomplete="off" value="' + esc(p.reason) + '"></label>' +
+        (L.canApprove ? '<label class="check wide"><input type="checkbox" id="a-approve"' + (p.approve ? " checked" : "") + "> Approved</label>" : "") +
+        (p.kind === "mc" && p.approve ? '<label class="check wide"><input type="checkbox" id="a-proof"' + (p.proofSeen ? " checked" : "") + "> Proof Seen</label>" : "") +
+        '<div class="dr-err" role="alert">' + escHtml(p.err || "") + "</div>" +
+        '<div class="acts"><button type="button" class="btn btn-primary" data-act="save"' + (p.busy ? " disabled" : "") + ">" +
+          (p.busy ? "Saving…" : "Add Leave") + '</button><button type="button" class="btn" data-act="close"' + (p.busy ? " disabled" : "") + ">Cancel</button></div>" +
+      "</div>";
+    }
+
+    function cancelPanelHtml() {
+      var p = L.panel, r = byId(p.id) || {};
+      return panelTop("Cancel Leave") + '<div class="dr-form">' +
+        '<p class="dr-what"><b>' + escHtml(r.full_name || "") + "</b> · " + escHtml(KIND[r.leave_type] || "") + " · " +
+          escHtml(UI.dstr(r.start_date)) + (r.end_date !== r.start_date ? " to " + escHtml(UI.dstr(r.end_date)) : "") + "</p>" +
+        '<label class="wide">Reason<input type="text" id="c-note" maxlength="500" autocomplete="off" value="' + esc(p.note) + '"' +
+          (p.bad === "note" ? ' aria-invalid="true"' : "") + "></label>" +
+        '<div class="dr-err" role="alert">' + escHtml(p.err || "") + "</div>" +
+        '<div class="acts"><button type="button" class="btn btn-danger" data-act="save"' + (p.busy ? " disabled" : "") + ">" +
+          (p.busy ? "Saving…" : "Cancel Leave") + '</button><button type="button" class="btn" data-act="close"' + (p.busy ? " disabled" : "") + ">Close</button></div>" +
+      "</div>";
+    }
+
+    function renderPanel(focusId) {
+      var el = document.getElementById("lv-drawer");
+      if (!L.panel) { el.hidden = true; return; }
+      el.innerHTML = L.panel.mode === "add" ? addPanelHtml() : cancelPanelHtml();
+      el.hidden = false;
+      var f = focusId && document.getElementById(focusId);
+      if (f) f.focus();
+    }
+
+    // keep what is typed when the panel redraws
+    function readPanel() {
+      var p = L.panel;
+      if (!p) return;
+      function v(id) { var el = document.getElementById(id); return el ? el.value : ""; }
+      function c(id, was) { var el = document.getElementById(id); return el ? el.checked : was; }
+      if (p.mode === "add") {
+        p.worker = v("a-worker"); p.kind = v("a-kind") || p.kind; p.start = v("a-start"); p.end = v("a-end");
+        p.reason = v("a-reason"); p.half = c("a-half", p.half); p.approve = c("a-approve", p.approve); p.proofSeen = c("a-proof", p.proofSeen);
+      } else {
+        p.note = v("c-note");
+      }
+    }
+
+    function openAdd() {
+      var today = Dash.todayKL();
+      L.panel = { mode: "add", worker: "", kind: "annual", start: today, end: today, half: false, reason: "",
+                  approve: L.canApprove, proofSeen: false, err: "", bad: "", busy: false };
+      L.ok = ""; L.err = ""; renderBanner();
+      renderPanel("a-worker");
+    }
+    function openCancel(id) {
+      L.panel = { mode: "cancel", id: id, note: "", err: "", bad: "", busy: false };
+      L.ok = ""; L.err = ""; renderBanner();
+      renderPanel("c-note");
+    }
+
+    async function savePanel() {
+      var p = L.panel;
+      if (!p || p.busy) return;
+      readPanel();
+      p.err = ""; p.bad = "";
+      var call;
+      if (p.mode === "add") {
+        var w = L.roster.filter(function (x) { return x.label === p.worker.trim(); })[0];
+        if (!w) { p.bad = "worker"; p.err = "Pick a worker from the list."; renderPanel("a-worker"); return; }
+        if (!p.start || !p.end || p.end < p.start) { p.bad = "dates"; p.err = "Check the dates."; renderPanel("a-start"); return; }
+        if (p.kind === "mc" && p.approve && !p.proofSeen) { p.err = "An MC needs its proof — tick Proof Seen, or untick Approved."; renderPanel(); return; }
+        call = function () {
+          return Dash.addLeave({ staffId: w.staff_id, type: p.kind, start: p.start, end: p.end,
+                                 halfDay: p.half && p.start === p.end, reason: p.reason.trim(), approve: p.approve, proofSeen: p.proofSeen });
+        };
+      } else {
+        if (!p.note.trim()) { p.bad = "note"; p.err = "Write why the leave is cancelled."; renderPanel("c-note"); return; }
+        call = function () { return Dash.cancelLeave(p.id, p.note.trim()); };
+      }
+      p.busy = true; renderPanel();
+      var res;
+      try { res = await call(); }
+      catch (e) { p.busy = false; p.err = (e && e.message) || String(e); renderPanel(); return; }
+      p.busy = false;
+      if (!res || res.ok === false) {
+        p.err = (res && (res.message || res.code)) || "The server did not answer.";
+        renderPanel();
+        return;
+      }
+      L.panel = null; renderPanel();
+      L.ok = res.message || "Saved."; L.err = "";
+      // a new entry may fall outside the status on screen: show it
+      if (res.status && res.status !== L.status && L.status !== "all") L.status = res.status;
+      await load(true);
+    }
+
+    async function openProof(id) {
+      var r = byId(id);
+      if (!r || !r.proof_path) return;
+      var w = window.open("", "_blank");
+      try {
+        var url = await Dash.leaveProofUrl(r.proof_path);
+        if (w) w.location = url; else window.location = url;
+      } catch (e) {
+        if (w) w.close();
+        L.err = "The proof could not be opened: " + ((e && e.message) || String(e)); L.ok = "";
+        renderBanner();
+      }
+    }
+
+    /* -------------------------------- boot --------------------------------- */
+
+    window.onShellReady = async function () {
+      try {
+        var q = new URLSearchParams(location.search);
+        L.demo = q.get("demo") === "1";
+        L.canCreate = Dash.can("leave.create");
+        L.canApprove = Dash.can("leave.approve");
+        var today = Dash.todayKL();
+        L.from = addDays(today, -30);
+        L.to = addDays(today, 60);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(q.get("from") || "")) L.from = q.get("from");
+        if (/^\d{4}-\d{2}-\d{2}$/.test(q.get("to") || "")) L.to = q.get("to");
+        if (["approved", "pending", "rejected", "cancelled", "all"].indexOf(q.get("status")) !== -1) L.status = q.get("status");
+        var fFrom = document.getElementById("f-from"), fTo = document.getElementById("f-to");
+        fFrom.value = L.from; fTo.value = L.to;
+        if (L.demo) document.getElementById("lnk-requests").href += "&demo=1";
+        document.getElementById("btn-add").hidden = !L.canCreate;
+        renderHead();
+
+        // the worker list for Add Leave: the active roster (a failure leaves the form without suggestions)
+        if (L.canCreate) {
+          Dash.getManpowerBySite().then(function (rows) {
+            var seen = {};
+            L.roster = (rows || []).filter(function (w) {
+              if (!w.staff_id || seen[w.staff_id]) return false;
+              seen[w.staff_id] = true; return true;
+            }).map(function (w) {
+              return { staff_id: w.staff_id, label: (w.employee_code ? w.employee_code + " — " : "") + (w.full_name || "") };
+            });
+          }).catch(function () { L.roster = []; });
+        }
+
+        document.getElementById("btn-add").addEventListener("click", openAdd);
+        document.getElementById("lv-controls").addEventListener("click", function (ev) {
+          var b = ev.target.closest("button[data-status]");
+          if (!b) return;
+          L.status = b.getAttribute("data-status");
+          renderRows();
+        });
+        document.getElementById("f-kind").addEventListener("change", function () { L.kind = this.value; renderRows(); });
+        document.getElementById("f-company").addEventListener("change", function () { L.company = this.value; renderRows(); });
+        document.getElementById("f-text").addEventListener("input", function () { L.q = this.value; renderRows(); });
+        function onDates(ev) {
+          var f = fFrom.value, t = fTo.value;
+          if (!f || !t) return;
+          if (f > t) { if (ev.target === fFrom) fTo.value = t = f; else fFrom.value = f = t; }
+          if (f === L.from && t === L.to) return;
+          L.from = f; L.to = t; L.ok = ""; L.err = "";
+          load();
+        }
+        fFrom.addEventListener("change", onDates);
+        fTo.addEventListener("change", onDates);
+
+        document.getElementById("lv-rows").addEventListener("click", function (ev) {
+          var b = ev.target.closest("button[data-act]");
+          if (!b) return;
+          var act = b.getAttribute("data-act"), id = b.getAttribute("data-id");
+          if (act === "cancel") openCancel(id);
+          else if (act === "proof") openProof(id);
+        });
+
+        var drawer = document.getElementById("lv-drawer");
+        drawer.addEventListener("click", function (ev) {
+          var b = ev.target.closest("button[data-act]");
+          if (!b || b.disabled) return;
+          if (b.getAttribute("data-act") === "close") closePanel();
+          else if (b.getAttribute("data-act") === "save") savePanel();
+        });
+        drawer.addEventListener("change", function (ev) {
+          if (!L.panel || L.panel.mode !== "add") return;
+          if (["a-kind", "a-start", "a-end", "a-approve"].indexOf(ev.target.id) === -1) return;
+          readPanel();                                  // Half Day and Proof Seen depend on these
+          renderPanel(ev.target.id);
+        });
+        drawer.addEventListener("keydown", function (ev) {
+          if (ev.key === "Enter" && ev.target.tagName === "INPUT" && ev.target.type !== "checkbox") { ev.preventDefault(); savePanel(); }
+        });
+        document.addEventListener("keydown", function (ev) { if (ev.key === "Escape") closePanel(); });
+
+        await load();
+      } catch (e) {
+        document.getElementById("lv-rows").innerHTML = "";
+        document.getElementById("error").innerHTML = UI.errorBanner((e && e.message) || String(e));
+      }
+    };
+  </script>
+</body>
+</html>
