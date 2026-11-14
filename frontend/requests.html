@@ -13,6 +13,13 @@
     .rq-ask .chip { margin-bottom: 4px; }
     .rq-sub { display: block; margin-top: 2px; color: var(--ink-3); font-size: var(--fs-xs); font-weight: 400; }
     .rq-type-change { background: #ede9fe; color: #6d28d9; }
+    .rq-type-leave { background: #dcfce7; color: #166534; }
+    .badge-cancelled { background: #e5e7eb; color: #374151; }
+    .rq-type-mc { background: #fee2e2; color: #991b1b; }
+    .rq-proof { font-size: var(--fs-xs); line-height: 1.7; }
+    .rq-proof .rq-noproof { color: var(--warn-ink); font-weight: 600; }
+    .rq-proof button { font: inherit; color: var(--brand-ink); background: none; border: 0; padding: 0;
+                       text-decoration: underline; cursor: pointer; }
     .rq-shift { font-size: var(--fs-xs); font-weight: 600; color: var(--ink-2); margin-bottom: 2px; }
     .rq-line { white-space: nowrap; font-variant-numeric: tabular-nums; line-height: 1.7; }
     .rq-k { display: inline-block; min-width: 30px; text-align: left; color: var(--ink-3);
@@ -44,7 +51,11 @@
     .rq-confirm input[type="text"] { font-family: var(--font); font-size: 13.5px; color: var(--ink);
                         padding: 8px 12px; border: 1px solid var(--line-strong);
                         border-radius: var(--r-sm); background: var(--surface-solid); }
-    .rq-confirm input[aria-invalid="true"] { border-color: var(--danger); }
+    .rq-confirm input[aria-invalid="true"], .rq-confirm select[aria-invalid="true"] { border-color: var(--danger); }
+    .rq-confirm label.rq-kind { flex: 0 1 200px; }
+    .rq-confirm select { font-family: var(--font); font-size: 13.5px; color: var(--ink); padding: 8px 10px;
+                         border: 1px solid var(--line-strong); border-radius: var(--r-sm); background: var(--surface-solid); }
+    .rq-confirm label.rq-tick { flex: 0 0 auto; flex-direction: row; align-items: center; gap: 6px; min-height: 36px; }
     .rq-confirm-err { flex: 1 1 100%; color: var(--danger-ink); font-size: var(--fs-sm); white-space: pre-wrap; }
     .rq-confirm-err:empty { display: none; }
     .rq-foot { margin: var(--sp-3) 0 0; }
@@ -79,7 +90,8 @@
       Workers ask from the punch app when a day went wrong.
       <b>Missed Shift</b>: they worked but never punched — approving adds the In and Out punches.
       <b>Change Times</b>: fix the In and/or Out of one finished shift — approving sets the times
-      the pay figures follow. Reasons are shown exactly as the worker wrote them.
+      the pay figures follow. <b>Leave</b>: a worker asks for Leave or MC — the office decides the kind
+      when it approves. Reasons are shown exactly as the worker wrote them.
     </p>
 
     <div id="error"></div>
@@ -93,6 +105,11 @@
         <button type="button" data-status="rejected">Rejected</button>
         <button type="button" data-status="all">All</button>
       </span>
+      <span>Kind: <select id="f-kind" aria-label="Kind of request">
+        <option value="">All Kinds</option>
+        <option value="missed_shift">Missed Shift</option>
+        <option value="change_times">Change Times</option>
+        <option value="leave">Leave</option></select></span>
       <span>Site: <select id="f-site" aria-label="Site"><option value="">All Sites</option></select></span>
       <!-- HF Bored Piles and Hai Fu are paid separately (15 Oct review); hidden until the rows carry a company -->
       <span id="lbl-company" hidden>Company: <select id="f-company" aria-label="Company">
@@ -129,6 +146,8 @@
        Must sit BEFORE shell.js (it stands in for the sign-in the shell asks
        for). Delete this line + requests-demo.js before the pilot starts. -->
   <script src="requests-demo.js"></script>
+  <!-- DEV ONLY, same switch: the invented leave requests. Delete with leave-demo.js. -->
+  <script src="leave-demo.js"></script>
   <script src="shell.js"></script>
 
   <script>
@@ -136,13 +155,17 @@
 
     var LIMIT = 300;
     var STATUSES = ["pending", "approved", "rejected"];
-    var TYPE_LABEL = { missed_shift: "Missed Shift", change_times: "Change Times" };
+    var TYPE_LABEL = { missed_shift: "Missed Shift", change_times: "Change Times", leave: "Leave" };
+    // leave (DB 0134): the worker asks for Leave or MC; the office decides the kind at approval
+    var LEAVE_KIND = { leave: "Leave", mc: "MC", annual: "Annual Leave", unpaid: "Unpaid Leave", emergency: "Emergency Leave" };
+    var KIND_PICK = [["annual", "Annual Leave"], ["unpaid", "Unpaid Leave"], ["emergency", "Emergency Leave"], ["mc", "MC"]];
 
     var R = {
       rows: [], counts: null, projects: [],
       canEdit: false, loading: true, loadErr: "",
-      status: "pending", project: "", company: "", from: "", to: "", q: "",
-      confirm: null,          // { id, decision, note, err, busy, invalid } — the open inline confirm
+      canLeave: false, canLeaveApprove: false, leaveErr: "",
+      status: "pending", project: "", company: "", from: "", to: "", q: "", kind: "",
+      confirm: null,          // { id, decision, note, err, busy, invalid, kind, proofSeen } — the open inline confirm
       ok: "", err: ""         // the result banner of the last approve / reject
     };
 
@@ -177,11 +200,39 @@
     }
     function typeLabel(t) { return TYPE_LABEL[t] || UI.label(t); }
     function byId(id) { return R.rows.filter(function (r) { return r.request_id === id; })[0]; }
-    function colCount() { return R.canEdit ? 8 : 7; }
+    function colCount() { return (R.canEdit || R.canLeaveApprove) ? 8 : 7; }
+    function isLeave(r) { return r.type === "leave"; }
+    function dayWords(r) {
+      if (r.half_day) return "Half Day";
+      var n = Number(r.days);
+      return (isNaN(n) ? "" : n) + (n === 1 ? " Day" : " Days");
+    }
+    // "17 Nov 2026" or "17 Nov 2026 to 19 Nov 2026"
+    function leaveDates(r) {
+      return UI.dstr(r.work_date) + (r.end_date && r.end_date !== r.work_date ? " to " + UI.dstr(r.end_date) : "");
+    }
+    // a leave row in this page's common shape (get_leave_requests, DB 0134)
+    function leaveRow(l) {
+      return {
+        request_id: l.request_id, type: "leave", status: l.status,
+        staff_id: l.staff_id, full_name: l.full_name, employee_code: l.employee_code, company_code: l.company_code,
+        project_id: l.project_id, project_name: l.project_name,
+        work_date: l.start_date, end_date: l.end_date, days: l.days, half_day: !!l.half_day,
+        leave_type: l.leave_type, source: l.source, proof_path: l.proof_path, proof_seen: !!l.proof_seen,
+        // the file itself opens only for the office (leave.manage): others get has_proof and no path
+        has_proof: !!(l.has_proof || l.proof_path), proof_seen_by_name: l.proof_seen_by_name, requested_type: l.requested_type,
+        reason: l.reason, note: l.status === "cancelled" ? l.cancel_reason : l.review_remarks,
+        created_at: l.created_at, reviewed_at: l.cancelled_at || l.reviewed_at, reviewed_by_name: l.reviewed_by_name
+      };
+    }
 
     /* ----------------------------- the cells ------------------------------- */
 
     function typeChip(r) {
+      if (isLeave(r)) {
+        return '<span class="chip ' + (r.leave_type === "mc" ? "rq-type-mc" : "rq-type-leave") + '">' +
+               escHtml(LEAVE_KIND[r.leave_type] || "Leave") + "</span>";
+      }
       return '<span class="chip ' + (r.type === "change_times" ? "rq-type-change" : "chip-tag") + '">' +
              escHtml(typeLabel(r.type)) + "</span>";
     }
@@ -189,6 +240,21 @@
     // Missed Shift: In → Out. Change Times: Shift N, then each end as
     // original → requested, or dimmed "unchanged" when the worker left it.
     function askedFor(r) {
+      if (isLeave(r)) {
+        var proof = "";
+        if (r.proof_path) {
+          proof = '<div class="rq-proof"><button type="button" data-act="proof" data-id="' + esc(r.request_id) + '">View Proof</button></div>';
+        } else if (r.has_proof) {
+          proof = '<div class="rq-proof">Proof Sent</div>';
+        } else if (r.proof_seen) {
+          proof = '<div class="rq-proof"' + (r.proof_seen_by_name ? ' title="Seen by ' + esc(r.proof_seen_by_name) + '"' : "") +
+                  ">Proof Seen" + (r.proof_seen_by_name ? " · " + escHtml(r.proof_seen_by_name) : "") + "</div>";
+        } else if (r.leave_type === "mc") {
+          proof = '<div class="rq-proof"><span class="rq-noproof">No Proof</span></div>';
+        }
+        return '<div class="rq-line"><b>' + escHtml(dayWords(r)) + "</b></div>" +
+               (r.source === "office" ? '<div class="rq-proof">Entered By Office</div>' : "") + proof;
+      }
       if (r.type === "missed_shift") {
         return '<div class="rq-line"><span class="rq-k">In</span>' + escHtml(r.requested_in_local || "—") +
                '<span class="rq-arrow">→</span><span class="rq-k">Out</span>' +
@@ -231,6 +297,21 @@
 
     function actionsCell(r) {
       var c = R.confirm && R.confirm.id === r.request_id ? R.confirm.decision : "";
+      if (isLeave(r)) {
+        // leave needs leave.approve; an approved or pending leave can be cancelled (no "change kind":
+        // a wrong kind is cancelled and entered again, so the trail shows both — owner, 14 Nov 2026)
+        if (!R.canLeaveApprove || (r.status !== "pending" && r.status !== "approved")) return '<td class="rq-act-cell"></td>';
+        return '<td class="rq-act-cell"><div class="rq-acts">' +
+                 (r.status === "pending"
+                   ? '<button type="button" class="btn rq-approve" data-act="approved" data-id="' + esc(r.request_id) +
+                       '" aria-pressed="' + (c === "approved") + '">Approve</button>' +
+                     '<button type="button" class="btn btn-danger" data-act="rejected" data-id="' + esc(r.request_id) +
+                       '" aria-pressed="' + (c === "rejected") + '">Reject</button>'
+                   : '<button type="button" class="btn" data-act="void" data-id="' + esc(r.request_id) +
+                       '" aria-pressed="' + (c === "void") + '" title="Cancel this leave">Cancel Leave</button>') +
+               "</div></td>";
+      }
+      if (!R.canEdit) return '<td class="rq-act-cell"></td>';
       // an approval can be withdrawn (revoke_attendance_request) — it turns Rejected
       if (r.status === "approved") {
         return '<td class="rq-act-cell"><div class="rq-acts">' +
@@ -249,6 +330,7 @@
 
     // the small inline confirm under the row — not a modal
     function confirmRow(r) {
+      if (isLeave(r)) return leaveConfirmRow(r);
       var c = R.confirm, approve = c.decision === "approved", revoke = c.decision === "revoke";
       var verb = approve ? "Approve" : revoke ? "Undo the approval of" : "Reject";
       var who = escHtml(r.full_name || "this worker");
@@ -284,6 +366,44 @@
         "</div></td></tr>";
     }
 
+    // the same inline confirm for a leave request: approving asks for the kind (and, for an MC
+    // with no file, the Proof Seen tick); rejecting and cancelling ask for the reason
+    function leaveConfirmRow(r) {
+      var c = R.confirm, approve = c.decision === "approved", cancel = c.decision === "void";
+      var who = escHtml(r.full_name || "this worker");
+      var what = (approve ? "Approve" : cancel ? "Cancel" : "Reject") + " <b>" + who + "</b>'s " +
+                 escHtml((LEAVE_KIND[r.leave_type] || "Leave").toLowerCase().replace(/^mc$/, "MC")) + ", " +
+                 escHtml(leaveDates(r)) + " (" + escHtml(dayWords(r).toLowerCase()) + ")?";
+      var kind = "";
+      if (approve) {
+        kind = '<label class="rq-kind">Kind<select id="rq-kind"' + (c.kindInvalid ? ' aria-invalid="true"' : "") +
+                 (c.busy ? " disabled" : "") + ">" +
+                 (c.kind ? "" : '<option value="">Pick The Kind</option>') +
+                 KIND_PICK.map(function (k) {
+                   return '<option value="' + k[0] + '"' + (c.kind === k[0] ? " selected" : "") + ">" + k[1] + "</option>";
+                 }).join("") + "</select></label>";
+        if (c.kind === "mc" && !r.has_proof && !r.proof_seen) {
+          kind += '<label class="rq-tick"><input type="checkbox" id="rq-proof"' + (c.proofSeen ? " checked" : "") +
+                    (c.busy ? " disabled" : "") + "> Proof Seen</label>";
+        }
+      }
+      return '<tr class="rq-confirm-row"><td colspan="' + colCount() + '">' +
+        '<div class="rq-confirm" role="group" aria-label="Confirm ' +
+          (approve ? "approval" : cancel ? "cancelling the leave" : "rejection") + '">' +
+          '<p class="rq-confirm-q">' + what + "</p>" +
+          kind +
+          "<label>" + (approve ? "Note (optional)" : cancel ? "Why the leave is cancelled (required)"
+                                                             : "Reason for rejecting (required)") +
+            '<input type="text" id="rq-note" maxlength="500" autocomplete="off" value="' + esc(c.note) + '"' +
+            (c.invalid ? ' aria-invalid="true"' : "") + (c.busy ? " disabled" : "") + "></label>" +
+          '<button type="button" class="btn ' + (approve ? "btn-primary" : "btn-danger") + '" data-act="confirm"' +
+            (c.busy ? " disabled" : "") + ">" +
+            (c.busy ? "Saving…" : approve ? "Approve" : cancel ? "Cancel Leave" : "Reject") + "</button>" +
+          '<button type="button" class="btn" data-act="cancel"' + (c.busy ? " disabled" : "") + ">Close</button>" +
+          '<div class="rq-confirm-err" role="alert">' + escHtml(c.err || "") + "</div>" +
+        "</div></td></tr>";
+    }
+
     function rowHtml(r) {
       var open = R.confirm && R.confirm.id === r.request_id;
       var asked = r.created_at
@@ -296,6 +416,8 @@
           UI.td("Site", escHtml(r.project_name || ""), "wrap") +
           UI.td("Date", r.work_date
             ? "<div>" + escHtml(UI.dstr(r.work_date)) + '<span class="rq-sub">' + escHtml(weekday(r.work_date)) + "</span>" +
+              (isLeave(r) && r.end_date && r.end_date !== r.work_date
+                ? '<span class="rq-sub">to ' + escHtml(UI.dstr(r.end_date)) + "</span>" : "") +
               (r.outside_dates ? '<span class="rq-sub">Outside These Dates</span>' : "") + "</div>"
             : "") +
           // the type chip heads its own "asked for" — one column fewer, so the
@@ -306,7 +428,7 @@
             : '<span class="muted">No reason given</span>', "wrap") +
           UI.td("Status", statusCell(r), "wrap") +
           UI.td("Asked On", asked) +
-          (R.canEdit ? actionsCell(r) : "") +
+          ((R.canEdit || R.canLeaveApprove) ? actionsCell(r) : "") +
         "</tr>" +
         (open ? confirmRow(r) : "");
     }
@@ -317,6 +439,7 @@
       var q = R.q.trim().toLowerCase();
       return R.rows.filter(function (r) {
         if (R.status !== "all" && r.status !== R.status) return false;
+        if (R.kind && r.type !== R.kind) return false;
         if (R.company && (r.company_code || "") !== R.company) return false;
         if (q && (String(r.full_name || "") + " " + String(r.employee_code || ""))
                    .toLowerCase().indexOf(q) === -1) return false;
@@ -325,8 +448,8 @@
     }
 
     function countOf(s) {
-      if (!R.company && R.counts && R.counts[s] !== undefined && R.counts[s] !== null) return Number(R.counts[s]);
-      return R.rows.filter(function (r) { return r.status === s && (!R.company || (r.company_code || "") === R.company); }).length;
+      if (!R.company && !R.kind && R.counts && R.counts[s] !== undefined && R.counts[s] !== null) return Number(R.counts[s]);
+      return R.rows.filter(function (r) { return r.status === s && (!R.kind || r.type === R.kind) && (!R.company || (r.company_code || "") === R.company); }).length;
     }
 
     function renderStats() {
@@ -361,6 +484,7 @@
       } else if (R.loadErr) {
         h = UI.errorBanner(R.loadErr);
       }
+      if (R.leaveErr) h += '<div class="banner banner-red">Leave requests could not be read: ' + escHtml(R.leaveErr) + "</div>";
       if (R.err) h += '<div class="banner banner-red">' + escHtml(R.err) + "</div>";
       if (R.ok) h += UI.okBanner(R.ok);
       document.getElementById("error").innerHTML = h;
@@ -388,7 +512,7 @@
         var msg;
         if (R.q.trim()) msg = "No request from a worker matching “" + R.q.trim() + "”.";
         else if (R.status === "pending") msg = "No requests waiting for the office in these dates. " +
-          "When a worker asks for a missed shift or a time change, it appears here.";
+          "When a worker asks for a missed shift, a time change or leave, it appears here.";
         else if (R.status === "all") msg = "No requests in these dates.";
         else msg = "No " + UI.label(R.status).toLowerCase() + " requests in these dates.";
         tbody.innerHTML = UI.emptyRow(n, msg);
@@ -402,7 +526,7 @@
     function renderHead() {
       document.getElementById("rq-head").innerHTML =
         "<tr><th>Worker</th><th>Site</th><th>Date</th><th>Asked For</th>" +
-        "<th>Reason</th><th>Status</th><th>Asked On</th>" + (R.canEdit ? "<th></th>" : "") + "</tr>";
+        "<th>Reason</th><th>Status</th><th>Asked On</th>" + ((R.canEdit || R.canLeaveApprove) ? "<th></th>" : "") + "</tr>";
     }
 
     // Site dropdown: the engine's project directory (active first), plus any
@@ -478,11 +602,44 @@
         R.counts = R.counts || {};
         R.counts.pending = R.rows.filter(function (r) { return r.status === "pending"; }).length;
       } catch (e2) { /* the dated list stands */ }
+      // leave requests (DB 0134) join the same list: those touching the dates, plus every pending
+      // one whatever its dates. A login without leave.view, or a database without 0134, simply
+      // shows none.
+      R.leaveErr = "";
+      if (R.canLeave) {
+        // leave is asked for coming days: while To still stands at today, it means "up to now
+        // and whatever is booked ahead" for the leave rows
+        var lvTo = R.to && R.to !== Dash.todayKL() ? R.to : null;
+        try {
+          var lv = await Promise.all([
+            Dash.getLeaveList({ from: R.from || null, to: lvTo }),
+            Dash.getLeaveList({ status: "pending" })
+          ]);
+          if (my !== loadSeq) return;
+          var have = {}, added = 0;
+          (lv[0] || []).concat((lv[1] || []).map(function (l) { l._pendingAny = true; return l; })).forEach(function (l) {
+            if (have[l.request_id]) return;
+            have[l.request_id] = true;
+            if (R.project && l.project_id !== R.project) return;
+            var row = leaveRow(l);
+            if (l._pendingAny && (l.end_date < R.from || (lvTo && l.start_date > lvTo))) row.outside_dates = true;
+            R.rows.push(row); added++;
+          });
+          if (added) {
+            R.rows.sort(function (a, b) { return String(b.created_at || "").localeCompare(String(a.created_at || "")); });
+            R.counts = null;               // the cards count the merged list
+          }
+        } catch (e3) {
+          if (my !== loadSeq) return;
+          if (!isMissingFunction(e3)) R.leaveErr = (e3 && e3.message) || String(e3);
+        }
+      }
       document.getElementById("lbl-company").hidden = !R.rows.some(function (r) { return r.company_code; });
       if (R.confirm) {
         var still = byId(R.confirm.id);
         // an open confirm only survives while its row is still where it was
-        if (!still || still.status !== (R.confirm.decision === "revoke" ? "approved" : "pending")) R.confirm = null;
+        var want = R.confirm.decision === "revoke" ? ["approved"] : R.confirm.decision === "void" ? ["approved", "pending"] : ["pending"];
+        if (!still || want.indexOf(still.status) === -1) R.confirm = null;
       }
       fillSites();
       render();
@@ -499,7 +656,11 @@
         R.confirm = null;                // pressing the same button again closes it
       } else {
         var keep = R.confirm && R.confirm.id === id ? R.confirm.note : "";
-        R.confirm = { id: id, decision: decision, note: keep, err: "", busy: false, invalid: false };
+        var row = byId(id);
+        R.confirm = { id: id, decision: decision, note: keep, err: "", busy: false, invalid: false,
+                      // a leave request: the kind starts empty when the worker asked for plain Leave
+                      kind: row && isLeave(row) && row.leave_type !== "leave" ? row.leave_type : "",
+                      kindInvalid: false, proofSeen: false };
       }
       R.ok = ""; R.err = "";
       renderBanner(); renderRows();
@@ -511,6 +672,8 @@
       if (!c || c.busy) return;
       var note = String(c.note || "").trim();
       var revoke = c.decision === "revoke";
+      var row = byId(c.id);
+      if (row && isLeave(row)) { await submitLeave(c, row, note); return; }
       if ((c.decision === "rejected" || revoke) && !note) {
         c.invalid = true;
         c.err = revoke ? "Write why the approval is withdrawn — it is required to undo an approval."
@@ -552,11 +715,85 @@
       await load(true);
     }
 
+    // approve (with the kind) / reject / cancel a leave request
+    async function submitLeave(c, row, note) {
+      var approve = c.decision === "approved", cancel = c.decision === "void";
+      if (!approve && !note) {
+        c.invalid = true;
+        c.err = cancel ? "Write why the leave is cancelled — the worker reads it."
+                       : "Write a short reason — the worker reads it.";
+        renderRows(); focusNote();
+        return;
+      }
+      if (approve && !c.kind) {
+        c.kindInvalid = true; c.err = "Pick the kind of leave.";
+        renderRows();
+        return;
+      }
+      var needsTick = approve && c.kind === "mc" && !row.has_proof && !row.proof_seen;
+      if (needsTick && !c.proofSeen) {
+        c.err = "An MC needs its proof — tick Proof Seen if the slip was shown to you.";
+        renderRows();
+        return;
+      }
+      c.busy = true; c.err = ""; c.invalid = false; c.kindInvalid = false;
+      renderRows();
+
+      var res;
+      try {
+        if (needsTick) {
+          var seen = await Dash.setLeaveProofSeen(c.id, true);
+          if (seen && seen.ok === false) throw new Error(seen.message || seen.code);
+        }
+        res = approve ? await Dash.approveLeave(c.id, c.kind, note || null)
+            : cancel  ? await Dash.cancelLeave(c.id, note)
+                      : await Dash.rejectLeave(c.id, note);
+      } catch (e) {
+        c.busy = false;
+        c.err = (e && e.message) || String(e);
+        renderRows(); focusNote();
+        return;
+      }
+      c.busy = false;
+      if (!res || res.ok === false) {
+        var msg = (res && (res.message || res.code)) || "The server did not answer.";
+        if (res && (res.code === "already_reviewed" || res.code === "not_found" || res.code === "not_cancellable")) {
+          R.confirm = null; R.err = msg; R.ok = "";
+          await load(true);
+          return;
+        }
+        c.err = msg;
+        renderRows(); focusNote();
+        return;
+      }
+      R.confirm = null; R.err = "";
+      R.ok = res.message || (approve ? "Leave approved." : cancel ? "Leave cancelled." : "Leave rejected.");
+      await load(true);
+    }
+
+    // the proof opens in a new tab through a five-minute link; the tab is opened first, in the
+    // click itself, so the browser does not block it
+    async function openProof(id) {
+      var row = byId(id);
+      if (!row || !row.proof_path) return;
+      var w = window.open("", "_blank");
+      try {
+        var url = await Dash.leaveProofUrl(row.proof_path);
+        if (w) w.location = url; else window.location = url;
+      } catch (e) {
+        if (w) w.close();
+        R.err = "The proof could not be opened: " + ((e && e.message) || String(e)); R.ok = "";
+        renderBanner();
+      }
+    }
+
     /* -------------------------------- boot --------------------------------- */
 
     window.onShellReady = async function () {
       try {
         R.canEdit = Dash.can("attendance.edit");
+        R.canLeave = Dash.can("leave.view");
+        R.canLeaveApprove = R.canLeave && Dash.can("leave.approve");
         var today = Dash.todayKL();
         R.to = today;
         R.from = addDays(today, -30);                  // the last 31 days, today included
@@ -566,14 +803,16 @@
         var st = p.get("status");
         if (st && (st === "all" || STATUSES.indexOf(st) !== -1)) R.status = st;
         if (p.get("project")) R.project = p.get("project");
+        if (TYPE_LABEL[p.get("kind")]) R.kind = p.get("kind");
+        document.getElementById("f-kind").value = R.kind;
         if (/^\d{4}-\d{2}-\d{2}$/.test(p.get("from") || "")) R.from = p.get("from");
         if (/^\d{4}-\d{2}-\d{2}$/.test(p.get("to") || "")) R.to = p.get("to");
 
         var fFrom = document.getElementById("f-from"), fTo = document.getElementById("f-to");
         fFrom.value = R.from; fTo.value = R.to;
-        fFrom.max = today; fTo.max = today;
+        fFrom.max = today;                              // To may be ahead: leave is asked for coming days
 
-        if (!R.canEdit) {
+        if (!R.canEdit && !R.canLeaveApprove) {
           document.getElementById("rq-sub").insertAdjacentHTML("beforeend",
             '<br><span class="muted">View only — approving and rejecting needs the Attendance edit permission.</span>');
         }
@@ -605,6 +844,10 @@
           R.project = this.value; R.ok = ""; R.err = "";
           load();
         });
+        document.getElementById("f-kind").addEventListener("change", function () {
+          R.kind = this.value;
+          renderStats(); renderRows();
+        });
         document.getElementById("f-company").addEventListener("change", function () {
           R.company = this.value;
           renderStats(); renderRows();
@@ -633,7 +876,8 @@
           var b = ev.target.closest("button[data-act]");
           if (!b || b.disabled) return;
           var act = b.getAttribute("data-act");
-          if (act === "approved" || act === "rejected" || act === "revoke") openConfirm(b.getAttribute("data-id"), act);
+          if (act === "approved" || act === "rejected" || act === "revoke" || act === "void") openConfirm(b.getAttribute("data-id"), act);
+          else if (act === "proof") openProof(b.getAttribute("data-id"));
           else if (act === "cancel") { R.confirm = null; renderRows(); }
           else if (act === "confirm") submitConfirm();
         });
@@ -645,6 +889,17 @@
             ev.target.removeAttribute("aria-invalid");
             var errEl = document.querySelector(".rq-confirm-err");
             if (errEl) errEl.textContent = "";             // the "required" line no longer applies
+          }
+        });
+        tbody.addEventListener("change", function (ev) {
+          if (!R.confirm) return;
+          if (ev.target.id === "rq-kind") {
+            R.confirm.kind = ev.target.value; R.confirm.kindInvalid = false; R.confirm.err = "";
+            renderRows();                                // an MC shows the Proof Seen tick
+          } else if (ev.target.id === "rq-proof") {
+            R.confirm.proofSeen = ev.target.checked; R.confirm.err = "";
+            var errEl = document.querySelector(".rq-confirm-err");
+            if (errEl) errEl.textContent = "";
           }
         });
         tbody.addEventListener("keydown", function (ev) {

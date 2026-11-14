@@ -52,6 +52,7 @@
     requests:   '<rect x="5" y="4.5" width="14" height="16" rx="2"/><path d="M9 4.5V3h6v1.5"/>' +
                 '<path d="M8.5 10h7M8.5 13.5h7M8.5 17h4"/>',
     // a warning triangle — the shifts the punch system could not settle itself
+    leave:      '<rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4M9 15l2 2 4-4"/>',
     exceptions: '<path d="M12 4 3.2 19.3h17.6z"/><path d="M12 10v4.2"/><path d="M12 16.9v.2"/>',
     tests:     '<path d="M9.5 3.5v6.2L4.7 18a1.6 1.6 0 0 0 1.4 2.5h11.8a1.6 1.6 0 0 0 1.4-2.5l-4.8-8.3V3.5"/>' +
                 '<path d="M8.6 3.5h6.8"/><path d="M7.6 14.5h8.8"/>',
@@ -88,8 +89,9 @@
     // the Exceptions queue (DB 0124): only for logins holding attendance.edit
     // (the allowed() filter below) — it is a page of things to settle
     { href: "exceptions.html",      label: "Exceptions",      icon: "exceptions" },
-    // leave.html stays in PAGE_ACCESS but is out of the nav until the page
-    // is actually built (owner decision — leave UI deferred)
+    // the leave register (DB 0134): who is on leave and when, Add Leave, Cancel.
+    // Only for logins holding leave.view (the allowed() filter below).
+    { href: "leave.html",           label: "Leave",           icon: "leave"      },
     { href: "tests.html",           label: "Tests",           icon: "tests"      },
     { href: "bore-logs.html",       label: "Bore Logs",       icon: "borelogs"   },
     // only appears for logins holding users.view (the allowed() filter below)
