@@ -2178,8 +2178,10 @@
   //          start_date, end_date, days, half_day, reason, status (pending |
   //          approved | rejected | cancelled), review_remarks, reviewed_by_name,
   //          reviewed_at, cancelled_at, cancel_reason, source (worker | office),
-  //          proof_path, proof_seen, created_at. from / to = requests touching
-  //          those dates.
+  //          proof_path (ONLY for a login holding leave.manage - the office; null
+  //          for others), has_proof, proof_seen, proof_seen_by_name, proof_seen_at,
+  //          requested_type (what was first asked), created_at. from / to =
+  //          requests touching those dates.
   //   await Dash.approveLeave(id, asType?, note?)  asType is REQUIRED for a
   //          'leave' request (annual | unpaid | emergency | mc); an MC needs its
   //          proof (the worker's file, or Proof Seen) -> proof_required.

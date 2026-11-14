@@ -79,7 +79,8 @@
       leave_type: o.type, start_date: o.start, end_date: end, half_day: !!o.half,
       days: countDays(o.start, end, o.half), reason: o.reason || null, attachment_url: null,
       status: o.status || "pending", source: o.source || "worker",
-      proof_path: o.proof || null, proof_seen: !!o.seen,
+      proof_path: o.proof || null, has_proof: !!o.proof, proof_seen: !!o.seen,
+      proof_seen_by_name: o.seen ? FURY : null, requested_type: o.asked_as || o.type,
       review_remarks: o.note && o.status !== "cancelled" ? o.note : null,
       reviewed_by: null, reviewed_by_name: o.status && o.status !== "pending" ? FURY : null,
       reviewed_at: o.status === "approved" || o.status === "rejected" ? hoursAgo(o.answered || 20) : null,
@@ -254,6 +255,7 @@
     var r = find(id);
     if (!r) return { ok: false, code: "not_found", message: "That request does not exist." };
     r.proof_seen = seen !== false;
+    r.proof_seen_by_name = r.proof_seen ? FURY : null;
     return { ok: true, request_id: id, proof_seen: r.proof_seen };
   };
 

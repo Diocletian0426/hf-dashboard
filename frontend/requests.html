@@ -219,6 +219,8 @@
         project_id: l.project_id, project_name: l.project_name,
         work_date: l.start_date, end_date: l.end_date, days: l.days, half_day: !!l.half_day,
         leave_type: l.leave_type, source: l.source, proof_path: l.proof_path, proof_seen: !!l.proof_seen,
+        // the file itself opens only for the office (leave.manage): others get has_proof and no path
+        has_proof: !!(l.has_proof || l.proof_path), proof_seen_by_name: l.proof_seen_by_name, requested_type: l.requested_type,
         reason: l.reason, note: l.status === "cancelled" ? l.cancel_reason : l.review_remarks,
         created_at: l.created_at, reviewed_at: l.cancelled_at || l.reviewed_at, reviewed_by_name: l.reviewed_by_name
       };
@@ -242,8 +244,11 @@
         var proof = "";
         if (r.proof_path) {
           proof = '<div class="rq-proof"><button type="button" data-act="proof" data-id="' + esc(r.request_id) + '">View Proof</button></div>';
+        } else if (r.has_proof) {
+          proof = '<div class="rq-proof">Proof Sent</div>';
         } else if (r.proof_seen) {
-          proof = '<div class="rq-proof">Proof Seen</div>';
+          proof = '<div class="rq-proof"' + (r.proof_seen_by_name ? ' title="Seen by ' + esc(r.proof_seen_by_name) + '"' : "") +
+                  ">Proof Seen" + (r.proof_seen_by_name ? " · " + escHtml(r.proof_seen_by_name) : "") + "</div>";
         } else if (r.leave_type === "mc") {
           proof = '<div class="rq-proof"><span class="rq-noproof">No Proof</span></div>';
         }
@@ -377,7 +382,7 @@
                  KIND_PICK.map(function (k) {
                    return '<option value="' + k[0] + '"' + (c.kind === k[0] ? " selected" : "") + ">" + k[1] + "</option>";
                  }).join("") + "</select></label>";
-        if (c.kind === "mc" && !r.proof_path && !r.proof_seen) {
+        if (c.kind === "mc" && !r.has_proof && !r.proof_seen) {
           kind += '<label class="rq-tick"><input type="checkbox" id="rq-proof"' + (c.proofSeen ? " checked" : "") +
                     (c.busy ? " disabled" : "") + "> Proof Seen</label>";
         }
@@ -725,7 +730,7 @@
         renderRows();
         return;
       }
-      var needsTick = approve && c.kind === "mc" && !row.proof_path && !row.proof_seen;
+      var needsTick = approve && c.kind === "mc" && !row.has_proof && !row.proof_seen;
       if (needsTick && !c.proofSeen) {
         c.err = "An MC needs its proof — tick Proof Seen if the slip was shown to you.";
         renderRows();

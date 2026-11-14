@@ -176,7 +176,9 @@
     }
     function proofCell(r) {
       if (r.proof_path) return '<button type="button" class="lv-link" data-act="proof" data-id="' + esc(r.request_id) + '">View</button>';
-      if (r.proof_seen) return "Seen";
+      // the file opens only for the office (leave.manage); another login reads that it exists
+      if (r.has_proof) return "Sent";
+      if (r.proof_seen) return "Seen" + (r.proof_seen_by_name ? '<span class="lv-sub">' + escHtml(r.proof_seen_by_name) + "</span>" : "");
       if (r.leave_type === "mc") return '<span class="lv-noproof">None</span>';
       return "";
     }
