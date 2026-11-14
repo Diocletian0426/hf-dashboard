@@ -63,18 +63,15 @@
              overlong_hours: 20, question_hours: 16, note: note, created_at: "2026-11-07T04:00:00Z", created_by: null, created_by_name: null,
              ot_rate: 1.5, rest_day_rate: 1.5, holiday_rate: 1.5 };   // created_by_name null = a migration wrote it (the page says System)
   }
-  var OLD_NOTE = "The rule as live until 31 Oct 2026 (0103 … 0130): credited from 08:00, {rest} rest, OT beyond 7.5 h by the total, to the minute, Overlong over 20 h";
-  var MID_NOTE = "The transition, 1-15 Nov 2026 (owner, 11 and 14 Nov 2026, the fair conversion): the new figures — credited from 08:30, 1 h rest, half-hour round-down per day — still counted by the total, so the time beyond 7.5 h is overtime without a second punch-in; the clock rule follows on 16 Nov 2026";
+  var OLD_NOTE = "The rule as live until 15 Nov 2026 (0103 … 0130): credited from 08:00, {rest} rest, OT beyond 7.5 h by the total, to the minute, Overlong over 20 h";
   var NEW_NOTE = "Chapter 2, the clock rule from Monday 16 Nov 2026 (owner, 3, 7 and 14 Nov 2026): 08:30-17:00 window, 10 min grace at the start only, 1 h rest, overtime only from a shift punched in at or after 17:00 (a start before 06:00 is an Early Start the office credits or keeps), half-hour round-down per day, Overlong over 20 h; a man not paid overtime keeps his evening as normal hours";
   var RULES = [
     rule("demo-rule-1", "HF-BP",  "2000-01-01", "total", "08:00:00", "17:00:00", 90, 0,  1,  OLD_NOTE.replace("{rest}", "1.5 h")),
     rule("demo-rule-2", "Hai Fu", "2000-01-01", "total", "08:00:00", "17:00:00", 60, 0,  1,  OLD_NOTE.replace("{rest}", "1 h")),
-    rule("demo-rule-3", "HF-BP",  "2026-11-01", "total", "08:30:00", "17:00:00", 60, 10, 30, MID_NOTE),
-    rule("demo-rule-4", "Hai Fu", "2026-11-01", "total", "08:30:00", "17:00:00", 60, 10, 30, MID_NOTE),
-    rule("demo-rule-5", "HF-BP",  "2026-11-16", "clock", "08:30:00", "17:00:00", 60, 10, 30, NEW_NOTE),
-    rule("demo-rule-6", "Hai Fu", "2026-11-16", "clock", "08:30:00", "17:00:00", 60, 10, 30, NEW_NOTE)
+    rule("demo-rule-3", "HF-BP",  "2026-11-16", "clock", "08:30:00", "17:00:00", 60, 10, 30, NEW_NOTE),
+    rule("demo-rule-4", "Hai Fu", "2026-11-16", "clock", "08:30:00", "17:00:00", 60, 10, 30, NEW_NOTE)
   ];
-  var nextRuleId = 7;
+  var nextRuleId = 5;
 
   // ---- the payroll months, as get_payroll_periods (0132) returns them --------
   // HF-BP's October was closed two hours ago (the 24-hour undo is still open);
@@ -121,8 +118,6 @@
     { occurred_at: closedAgo, actor_label: "Nick Fury (demo)", action: "payroll_month_closed", company_code: "HF-BP", on_date: "2026-10-01", detail: "October done", summary: "Closed October 2026 for HF-BP: 131 days, 982.5 h normal, 120.5 h overtime — October done" },
     { occurred_at: "2026-11-14T04:00:00Z", actor_label: "Migration 0131", action: "work_rule_set", company_code: "Hai Fu", on_date: "2026-11-16", detail: NEW_NOTE, summary: "New work rule for Hai Fu from 16 Nov 2026: clock, 08:30-17:00, 1 h rest" },
     { occurred_at: "2026-11-14T04:00:00Z", actor_label: "Migration 0131", action: "work_rule_set", company_code: "HF-BP", on_date: "2026-11-16", detail: NEW_NOTE, summary: "New work rule for HF-BP from 16 Nov 2026: clock, 08:30-17:00, 1 h rest" },
-    { occurred_at: "2026-11-14T04:00:00Z", actor_label: "Migration 0131", action: "work_rule_set", company_code: "Hai Fu", on_date: "2026-11-01", detail: MID_NOTE, summary: "New work rule for Hai Fu from 1 Nov 2026: total, credited from 08:30, 1 h rest, half-hour rounding" },
-    { occurred_at: "2026-11-14T04:00:00Z", actor_label: "Migration 0131", action: "work_rule_set", company_code: "HF-BP", on_date: "2026-11-01", detail: MID_NOTE, summary: "New work rule for HF-BP from 1 Nov 2026: total, credited from 08:30, 1 h rest, half-hour rounding" }
   ];
   function remember(action, summary, company, onDate, detail) {
     HISTORY.unshift({ occurred_at: new Date().toISOString(), actor_label: ME, action: action, company_code: company || null, on_date: onDate || null, detail: detail || null, summary: summary });
@@ -376,8 +371,8 @@
     var page = location.pathname.split("/").pop();
     var existing = main.querySelector(".banner.banner-amber");
     if (existing) {                                              // attendance-demo.js spoke first: add our lines to its banner
-      existing.innerHTML += "<br><strong>New hours rule</strong> — 1–15 Nov 2026 are priced by the total with the new figures (8:30 AM start, 1 h rest, half hours; evenings are overtime), " +
-        "days from 16 Nov 2026 by the clock rule (demo arithmetic; open a day from the 16th on to see it): " +
+      existing.innerHTML += "<br><strong>Clock rule</strong> — it starts on 16 Nov 2026; every day up to 15 Nov stays priced by the old rule. " +
+        "Days from the 16th are priced by the rule from Settings (demo arithmetic; open a day from the 16th on to see it): " +
         "Captain America punches out at 5 PM and in again at 5:30 PM, so his evenings are overtime; the rest of the crew's evenings show " +
         "<em>After-Hours Not Counted</em>. October is closed for HF Bored Piles — open October to see the note. " +
         "<code>settings.html?demo=1</code> shows the rules and the months.";
