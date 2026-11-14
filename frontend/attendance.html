@@ -744,7 +744,7 @@
       if (u.mode === "clock") {
         var end = Dash.clockWord(u.day_end);
         return lead + "normal hours " + Dash.clockWord(u.day_start) + " to " + end + " (" + Number(u.grace_minutes) + " min grace at the start, " + restW + "); " +
-               "overtime only from a shift punched in at or after " + end + " or before 6 AM; time after " + end + " without an overtime punch-in is not counted; " +
+               "overtime only from a shift punched in at or after " + end + " (a start before 6 AM waits for the office to credit it); time after " + end + " without an overtime punch-in is not counted; " +
                roundW + "; " + lineW + ".";
       }
       return lead + "credited from " + Dash.clockWord(u.day_start) + " (" + restW + "); " + hm(Number(u.normal_minutes) / 60) + " a day, overtime beyond that by the total; " +
