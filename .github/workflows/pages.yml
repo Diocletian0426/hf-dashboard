@@ -28,12 +28,14 @@ concurrency:
   group: pages
   cancel-in-progress: true
 
+# TWO JOBS, ON PURPOSE (24 Nov 2026). Build uploads the site; deploy publishes it.
+# In ONE job the publish step looked for the uploaded site a fraction of a second
+# after the upload and found nothing ("No artifacts named github-pages"), every
+# time from 24 Nov 2026 (actions/deploy-pages issue 451). A second job starts
+# seconds later, when the upload can be found. Do not fold them back into one.
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Check out the repo
         uses: actions/checkout@v4
@@ -49,6 +51,13 @@ jobs:
         with:
           path: frontend
 
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
