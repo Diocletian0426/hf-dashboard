@@ -53,9 +53,6 @@
                 '<path d="M8.5 10h7M8.5 13.5h7M8.5 17h4"/>',
     // a warning triangle — the shifts the punch system could not settle itself
     leave:      '<rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4M9 15l2 2 4-4"/>',
-    // a camera — the photo a worker takes at punch in and punch out
-    photos:     '<rect x="3.5" y="7" width="17" height="12.5" rx="2"/><path d="M8.5 7l1.4-2.5h4.2L15.5 7"/>' +
-                '<circle cx="12" cy="13.2" r="3.4"/>',
     exceptions: '<path d="M12 4 3.2 19.3h17.6z"/><path d="M12 10v4.2"/><path d="M12 16.9v.2"/>',
     tests:     '<path d="M9.5 3.5v6.2L4.7 18a1.6 1.6 0 0 0 1.4 2.5h11.8a1.6 1.6 0 0 0 1.4-2.5l-4.8-8.3V3.5"/>' +
                 '<path d="M8.6 3.5h6.8"/><path d="M7.6 14.5h8.8"/>',
@@ -92,9 +89,6 @@
     // the Exceptions queue (DB 0124): only for logins holding attendance.edit
     // (the allowed() filter below) — it is a page of things to settle
     { href: "exceptions.html",      label: "Exceptions",      icon: "exceptions" },
-    // the punch photos (DB 0138), a work day at a time. Only for logins
-    // holding selfie.view — the office (the allowed() filter below).
-    { href: "photos.html",          label: "Punch Photos",    icon: "photos"     },
     // the leave register (DB 0134): who is on leave and when, Add Leave, Cancel.
     // Only for logins holding leave.view (the allowed() filter below).
     { href: "leave.html",           label: "Leave",           icon: "leave"      },
@@ -136,7 +130,6 @@
     "bore-logs.html":  "bore_logs.view",  // inbox + the review screen (?id=…)
     "claims.html":     "claims.view",     // MONEY — the DB re-checks every call too
     "leave.html":      "leave.view",
-    "photos.html":     "selfie.view",     // SENSITIVE — the DB and the file store re-check it
     "users.html":      "users.view",      // admin — writes carry their own DB gates
     "roles.html":      "users.view"       // read-only reference, reached from users.html
   };
@@ -193,7 +186,7 @@
     // reproduce the OLD rule exactly. That way shipping this frontend ahead of
     // the database work changes nothing anyone can see.
     if (a.legacy) {
-      if (page === "claims.html" || page === "leave.html" || page === "photos.html") return !!a.legacy_is_office;
+      if (page === "claims.html" || page === "leave.html") return !!a.legacy_is_office;
       return true;
     }
 

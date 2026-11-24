@@ -286,10 +286,40 @@
   Dash.getProjectDirectory = async function () {
     return SITES.map(function (s) { return { project_id: s.id, project_code: s.code, project_name: s.name, status: "active" }; });
   };
-  Dash.getRecentPunches = async function (date, projectId) {
+  function dayPunches(date, projectId) {
     var out = [];
     shiftsOn(date, projectId || null).forEach(function (r) { out = out.concat(punchesFor(r)); });
-    return out.sort(function (a, b) { return a.punched_at < b.punched_at ? 1 : -1; });  // newest first, as the real one does
+    out.forEach(function (p) { p.punch_id = "demo-" + p.staff_id + "-" + p.punch_type + "-" + p.punched_at; });
+    return out;
+  }
+  Dash.getRecentPunches = async function (date, projectId) {
+    return dayPunches(date, projectId).sort(function (a, b) { return a.punched_at < b.punched_at ? 1 : -1; });  // newest first, as the real one does
+  };
+  // 0138: the punch photos. The worker's own taps carry one; Hawkeye is excused
+  // (none), and Falcon's punch-in file is gone. The pictures are drawn here.
+  Dash.getPunchPhotos = async function (date) {
+    return dayPunches(date, null).map(function (p) {
+      var own = p.punched_by === "worker", excused = p.full_name.indexOf("Hawkeye") === 0;
+      var gone = p.full_name.indexOf("Falcon") === 0 && p.punch_type === "in";
+      return { punch_id: p.punch_id, staff_id: p.staff_id, employee_code: "", full_name: p.full_name, project_name: p.project_name,
+               punch_type: p.punch_type, punched_at: p.punched_at, photo: own && !excused ? "photo" : "not_needed",
+               path: own && !excused ? (gone ? "gone/" : "ok/") + encodeURIComponent(p.punch_id) + ".jpg" : null };
+    });
+  };
+  Dash.punchPhotoUrls = async function (paths) {
+    var out = {};
+    (paths || []).forEach(function (path) {
+      if (path.indexOf("gone/") === 0) return;                      // a file that is gone gets no link
+      var name = decodeURIComponent(path).replace(/^ok\/demo-demo-/, "").replace(/\.jpg$/, "");
+      var hue = 0; for (var i = 0; i < name.length && name.charAt(i) !== "("; i++) hue = (hue * 7 + name.charCodeAt(i)) % 360;
+      var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="640">' +
+        '<rect width="100%" height="100%" fill="hsl(' + hue + ',45%,82%)"/>' +
+        '<circle cx="240" cy="260" r="110" fill="hsl(' + hue + ',40%,55%)"/>' +
+        '<rect x="90" y="400" width="300" height="240" rx="120" fill="hsl(' + hue + ',40%,55%)"/>' +
+        '<text x="240" y="70" font-family="Georgia" font-size="22" text-anchor="middle" fill="#0f172a">' + name.slice(0, 34).replace(/[<&]/g, "") + "</text></svg>";
+      out[path] = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+    });
+    return out;
   };
   // 0124 (15 Oct review): the payroll-close read the Download Excel panel asks —
   // two unpriced days this month, so the tick shows
