@@ -2287,4 +2287,37 @@
   window.Dash.setLeaveProofSeen = setLeaveProofSeen;
   window.Dash.leaveProofUrl = leaveProofUrl;
   window.Dash.getAttendanceGaps = getAttendanceGaps;
+
+  // ---- punch photos (DB 0138) -------------------------------------------------
+  // The photo a worker takes at punch in and punch out. Read only, and only for
+  // a login holding selfie.view (the office): the database checks it in
+  // get_punch_selfies, and the file store checks it again before signing a link.
+  //
+  //   await Dash.getPunchPhotos(date, { projectId?, staffId? })
+  //       -> rows, one a punch of that work day: punch_id, staff_id,
+  //          employee_code, full_name, project_id, project_name, punch_type
+  //          (in | out), shift_no, punched_at, photo (photo | no_photo |
+  //          not_needed = the office or the system made the punch, or the worker
+  //          is excused), path (the file in the private punch-selfie bucket),
+  //          photo_at.
+  //   await Dash.punchPhotoUrls(paths, seconds?)
+  //       -> { path: link } - short-lived signed links (an hour unless told),
+  //          asked for in one call. A file that is gone has no entry. The links
+  //          are never stored.
+  function getPunchPhotos(date, opts) {
+    opts = opts || {};
+    return q(sb.rpc("get_punch_selfies", {
+      p_date: date, p_project_id: opts.projectId || null, p_staff_id: opts.staffId || null
+    }));
+  }
+  async function punchPhotoUrls(paths, seconds) {
+    var out = {};
+    if (!paths || !paths.length) return out;
+    var res = await sb.storage.from("punch-selfie").createSignedUrls(paths, seconds || 3600);
+    if (res.error) throw res.error;
+    (res.data || []).forEach(function (d) { if (d && d.path && d.signedUrl && !d.error) out[d.path] = d.signedUrl; });
+    return out;
+  }
+  window.Dash.getPunchPhotos = getPunchPhotos;
+  window.Dash.punchPhotoUrls = punchPhotoUrls;
 })();

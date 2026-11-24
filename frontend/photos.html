@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nexus — Punch Photos</title>
+  <link rel="stylesheet" href="styles.css" />
+  <!-- Page-only bits, tokens only. -->
+  <style>
+    .ph-day { display: inline-flex; align-items: center; gap: 4px; }
+    .ph-day button { min-width: 36px; }
+    .ph-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--sp-3); }
+    .ph-card { background: var(--surface-solid); border: 1px solid var(--line-strong); border-radius: var(--r-md);
+               padding: var(--sp-3) var(--sp-4) var(--sp-4); box-shadow: var(--shadow-1); min-width: 0; }
+    .ph-name { font-size: var(--fs-md); font-weight: 700; color: var(--ink); overflow-wrap: anywhere; }
+    .ph-sub { display: block; margin-top: 2px; color: var(--ink-3); font-size: var(--fs-xs); font-weight: 400; overflow-wrap: anywhere; }
+    .ph-tiles { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-3); }
+    .ph-tile { width: 96px; margin: 0; }
+    .ph-tile figcaption { margin-top: 4px; font-size: var(--fs-xs); color: var(--ink-2); text-align: center;
+                          font-variant-numeric: tabular-nums; }
+    .ph-thumb { display: flex; align-items: center; justify-content: center; width: 96px; height: 128px; padding: 0;
+                border: 1px solid var(--line-strong); border-radius: var(--r-sm); background: #f1f5f9;
+                overflow: hidden; font: inherit; font-size: var(--fs-xs); color: var(--ink-3); text-align: center; }
+    button.ph-thumb { cursor: zoom-in; }
+    button.ph-thumb:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+    .ph-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .ph-thumb.ph-missing { color: var(--danger-ink); background: var(--danger-soft); border-color: transparent; font-weight: 600; }
+
+    .ph-view { position: fixed; inset: 0; z-index: 80; display: flex; flex-direction: column; align-items: center;
+               justify-content: center; gap: var(--sp-3); padding: var(--sp-4); background: rgba(15, 23, 42, 0.86); }
+    .ph-view[hidden] { display: none; }
+    .ph-view img { max-width: min(92vw, 720px); max-height: 74vh; border-radius: var(--r-sm); background: #0f172a; }
+    .ph-view-cap { color: #fff; font-size: var(--fs-md); text-align: center; max-width: 92vw; }
+    .ph-view-cap span { display: block; margin-top: 2px; color: #cbd5e1; font-size: var(--fs-sm); }
+    .ph-view-acts { display: flex; gap: var(--sp-2); align-items: center; }
+    .ph-view-acts .ph-n { color: #cbd5e1; font-size: var(--fs-sm); min-width: 64px; text-align: center;
+                          font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body>
+
+  <header id="nav"></header>
+
+  <main id="main">
+    <!-- ========================= PUNCH PHOTOS (office) ======================
+         The photo a worker takes at punch in and punch out (DB 0138), one work
+         day at a time: a card a worker, a tile a punch. Read only — a photo is
+         never changed or removed here.
+         Opening needs selfie.view (the office); the database re-checks it in
+         get_punch_selfies, and the file store re-checks it again before it
+         signs a link. The links last an hour and are never stored. -->
+    <h1>Punch Photos</h1>
+    <p class="page-caption">The photo each worker took at punch in and punch out.</p>
+
+    <div id="error"></div>
+
+    <div class="mp-controls" id="ph-controls">
+      <span class="ph-day">Day:
+        <button type="button" id="d-prev" aria-label="Day before" title="Day Before">‹</button>
+        <input type="date" id="f-date" aria-label="Work day">
+        <button type="button" id="d-next" aria-label="Day after" title="Day After">›</button>
+      </span>
+      <span>Show:
+        <button type="button" data-show="photo" class="active">Photo</button>
+        <button type="button" data-show="no_photo">No Photo</button>
+        <button type="button" data-show="all">All</button>
+      </span>
+      <span>Site: <select id="f-site" aria-label="Site"><option value="">All Sites</option></select></span>
+      <span class="tool-search">
+        <input type="search" id="f-text" placeholder="Search worker name or code…"
+               aria-label="Search by worker name or code" />
+        <span class="muted" id="f-count"></span>
+      </span>
+    </div>
+
+    <div id="ph-list"><div class="empty">Loading…</div></div>
+  </main>
+
+  <div id="ph-view" class="ph-view" hidden role="dialog" aria-modal="true" aria-label="Punch photo"></div>
+
+  <script src="vendor/supabase.js"></script>
+  <script src="config.js"></script>
+  <script src="dashboard-client.js"></script>
+  <script src="ui.js"></script>
+  <!-- DEV ONLY: does nothing unless the URL has ?demo=1, and never writes.
+       Must sit BEFORE shell.js. -->
+  <script src="photos-demo.js"></script>
+  <script src="shell.js"></script>
+
+  <script>
+    var esc = UI.esc, escHtml = UI.escHtml;
+    var LINK_SECONDS = 3600;                 // how long a signed photo link lasts
+    var TYPE = { "in": "In", "out": "Out" };
+
+    var P = {
+      date: "", today: "", rows: [], urls: {}, signedAt: 0,
+      loading: true, loadErr: "", linkErr: "",
+      show: "photo", site: "", q: "",
+      shots: [],                             // the photos on screen, in order (for the viewer)
+      at: -1                                 // the one open in the viewer
+    };
+
+    function addDays(iso, n) {
+      var d = new Date(iso + "T00:00:00Z");
+      d.setUTCDate(d.getUTCDate() + n);
+      return d.toISOString().slice(0, 10);
+    }
+    function dayWords(iso) {
+      return new Date(iso + "T00:00:00").toLocaleDateString("en-MY", { weekday: "short" }) + ", " + UI.dstr(iso);
+    }
+
+    /* ------------------------------ the workers ----------------------------- */
+
+    // one entry a worker, his punches in time order
+    function workers() {
+      var by = {}, list = [];
+      P.rows.forEach(function (r) {
+        var w = by[r.staff_id];
+        if (!w) {
+          w = by[r.staff_id] = { staff_id: r.staff_id, code: r.employee_code || "", name: r.full_name || "—",
+                                 sites: [], punches: [], photos: 0, missing: 0 };
+          list.push(w);
+        }
+        var site = r.project_name || "";
+        if (site && w.sites.indexOf(site) === -1) w.sites.push(site);
+        w.punches.push(r);
+        if (r.photo === "photo") w.photos++;
+        else if (r.photo === "no_photo") w.missing++;
+      });
+      list.forEach(function (w) {
+        w.punches.sort(function (a, b) { return String(a.punched_at).localeCompare(String(b.punched_at)); });
+      });
+      return list.sort(function (a, b) { return a.name.localeCompare(b.name); });
+    }
+    function inShow(w, show) {
+      return show === "all" || (show === "photo" ? w.photos > 0 : w.missing > 0);
+    }
+    function visible(all) {
+      var q = P.q.trim().toLowerCase();
+      return all.filter(function (w) {
+        if (!inShow(w, P.show)) return false;
+        if (P.site && w.sites.indexOf(P.site) === -1) return false;
+        if (q && (w.name + " " + w.code).toLowerCase().indexOf(q) === -1) return false;
+        return true;
+      });
+    }
+
+    /* -------------------------------- render -------------------------------- */
+
+    function tileHtml(w, r) {
+      var cap = (TYPE[r.punch_type] || UI.label(r.punch_type)) + " " + Dash.klTime(r.punched_at);
+      var body;
+      if (r.photo === "photo") {
+        var url = P.urls[r.path];
+        if (url) {
+          var i = P.shots.length;
+          P.shots.push({ url: url, name: w.name, code: w.code, site: r.project_name || "", cap: cap });
+          body = '<button type="button" class="ph-thumb" data-shot="' + i + '" aria-label="' + esc(w.name + ", " + cap) + '">' +
+                 '<img src="' + esc(url) + '" alt="" loading="lazy" decoding="async"></button>';
+        } else {
+          body = '<div class="ph-thumb ph-missing">Not Found</div>';
+        }
+      } else if (r.photo === "no_photo") {
+        body = '<div class="ph-thumb ph-missing">No Photo</div>';
+      } else {
+        body = '<div class="ph-thumb">Not Needed</div>';
+      }
+      return '<figure class="ph-tile">' + body + "<figcaption>" + escHtml(cap) + "</figcaption></figure>";
+    }
+
+    function cardHtml(w) {
+      return '<section class="ph-card" data-staff="' + esc(w.staff_id) + '">' +
+        '<div class="ph-name">' + escHtml(w.name) +
+          '<span class="ph-sub">' + escHtml([w.code, w.sites.join(" · ")].filter(Boolean).join(" · ")) + "</span></div>" +
+        '<div class="ph-tiles">' + w.punches.map(function (r) { return tileHtml(w, r); }).join("") + "</div>" +
+      "</section>";
+    }
+
+    function renderBanner() {
+      var h = "";
+      if (P.loadErr) h = UI.errorBanner(P.loadErr);
+      else if (P.linkErr) h = '<div class="banner banner-red">The photos could not be opened: ' + escHtml(P.linkErr) + "</div>";
+      document.getElementById("error").innerHTML = h;
+    }
+
+    function renderSites(all) {
+      var names = [];
+      all.forEach(function (w) { w.sites.forEach(function (s) { if (names.indexOf(s) === -1) names.push(s); }); });
+      names.sort();
+      if (P.site && names.indexOf(P.site) === -1) P.site = "";
+      document.getElementById("f-site").innerHTML = '<option value="">All Sites</option>' + names.map(function (s) {
+        return '<option value="' + esc(s) + '"' + (s === P.site ? " selected" : "") + ">" + escHtml(s) + "</option>";
+      }).join("");
+    }
+
+    function renderList() {
+      var el = document.getElementById("ph-list"), all = workers();
+      var btns = document.querySelectorAll("#ph-controls button[data-show]");
+      for (var i = 0; i < btns.length; i++) {
+        var s = btns[i].getAttribute("data-show");
+        btns[i].classList.toggle("active", s === P.show);
+        if (!btns[i].getAttribute("data-label")) btns[i].setAttribute("data-label", btns[i].textContent);
+        var n = all.filter(function (w) { return inShow(w, s); }).length;
+        btns[i].textContent = btns[i].getAttribute("data-label") + (P.loading || P.loadErr ? "" : " " + n);
+      }
+      document.getElementById("d-next").disabled = P.date >= P.today;
+      P.shots = [];
+      if (P.loading) { el.innerHTML = '<div class="empty">Loading…</div>'; return; }
+      if (P.loadErr) { el.innerHTML = '<div class="empty">Nothing to show.</div>'; return; }
+      renderSites(all);
+      var list = visible(all);
+      document.getElementById("f-count").textContent = P.q.trim() ? list.length + " shown" : "";
+      if (!list.length) {
+        el.innerHTML = '<div class="empty">' + (all.length ? (P.show === "photo" ? "No Photos" : P.show === "no_photo" ? "None Missing" : "No Punches")
+                                                         : "No Punches") + " — " + escHtml(dayWords(P.date)) + "</div>";
+        return;
+      }
+      el.innerHTML = '<div class="ph-grid">' + list.map(cardHtml).join("") + "</div>";
+    }
+
+    function render() { renderBanner(); renderList(); }
+
+    /* --------------------------------- data --------------------------------- */
+
+    var loadSeq = 0;
+    async function load() {
+      var my = ++loadSeq;
+      closeView();
+      P.loading = true; P.loadErr = ""; P.linkErr = ""; render();
+      var rows = [], urls = {}, loadErr = "", linkErr = "";
+      try {
+        rows = (await Dash.getPunchPhotos(P.date)) || [];
+        var paths = rows.filter(function (r) { return r.photo === "photo" && r.path; }).map(function (r) { return r.path; });
+        if (paths.length) {
+          try { urls = await Dash.punchPhotoUrls(paths, LINK_SECONDS); }
+          catch (e) { linkErr = (e && e.message) || String(e); }
+        }
+      } catch (e) {
+        rows = [];
+        loadErr = (e && e.message) || String(e);
+      }
+      if (my !== loadSeq) return;
+      P.rows = rows; P.urls = urls; P.signedAt = Date.now();
+      P.loadErr = loadErr; P.linkErr = linkErr; P.loading = false;
+      render();
+    }
+
+    function setDate(iso) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(iso || "")) return;
+      if (iso > P.today) iso = P.today;
+      if (iso === P.date) { document.getElementById("f-date").value = iso; return; }
+      P.date = iso;
+      document.getElementById("f-date").value = iso;
+      try { history.replaceState(null, "", location.pathname + "?" + (P.demo ? "demo=1&" : "") + "date=" + iso); } catch (e) {}
+      load();
+    }
+
+    /* ------------------------------- the viewer ----------------------------- */
+
+    function closeView() {
+      P.at = -1;
+      document.getElementById("ph-view").hidden = true;
+      document.getElementById("ph-view").innerHTML = "";
+    }
+    function openView(i) {
+      // the links have run out (the page sat open): fetch the day again
+      if (Date.now() - P.signedAt > (LINK_SECONDS - 300) * 1000) { load(); return; }
+      var s = P.shots[i];
+      if (!s || s.dead) return;
+      P.at = i;
+      // a photo whose file did not load is not in the round
+      var live = P.shots.filter(function (x) { return !x.dead; }), n = live.length;
+      var el = document.getElementById("ph-view");
+      i = live.indexOf(s);
+      el.innerHTML =
+        '<img src="' + esc(s.url) + '" alt="' + esc(s.name + ", " + s.cap) + '">' +
+        '<div class="ph-view-cap"><b>' + escHtml(s.name) + "</b>" +
+          "<span>" + escHtml([s.code, s.cap, dayWords(P.date), s.site].filter(Boolean).join(" · ")) + "</span></div>" +
+        '<div class="ph-view-acts">' +
+          '<button type="button" class="btn" data-act="prev"' + (i <= 0 ? " disabled" : "") + ' aria-label="Photo before">‹</button>' +
+          '<span class="ph-n">' + (i + 1) + " / " + n + "</span>" +
+          '<button type="button" class="btn" data-act="next"' + (i >= n - 1 ? " disabled" : "") + ' aria-label="Next photo">›</button>' +
+          '<button type="button" class="btn" data-act="close">Close</button>' +
+        "</div>";
+      el.hidden = false;
+      el.querySelector('[data-act="close"]').focus();
+    }
+    function stepView(d) {
+      if (P.at < 0) return;
+      for (var i = P.at + d; i >= 0 && i < P.shots.length; i += d) {
+        if (!P.shots[i].dead) { openView(i); return; }
+      }
+    }
+
+    /* --------------------------------- boot --------------------------------- */
+
+    window.onShellReady = async function () {
+      try {
+        var q = new URLSearchParams(location.search);
+        P.demo = q.get("demo") === "1";
+        P.today = Dash.todayKL();
+        P.date = P.today;
+        if (/^\d{4}-\d{2}-\d{2}$/.test(q.get("date") || "") && q.get("date") <= P.today) P.date = q.get("date");
+        var fDate = document.getElementById("f-date");
+        fDate.value = P.date; fDate.max = P.today;
+
+        fDate.addEventListener("change", function () { if (this.value) setDate(this.value); });
+        document.getElementById("d-prev").addEventListener("click", function () { setDate(addDays(P.date, -1)); });
+        document.getElementById("d-next").addEventListener("click", function () { setDate(addDays(P.date, 1)); });
+        document.getElementById("ph-controls").addEventListener("click", function (ev) {
+          var b = ev.target.closest("button[data-show]");
+          if (!b) return;
+          P.show = b.getAttribute("data-show");
+          renderList();
+        });
+        document.getElementById("f-site").addEventListener("change", function () { P.site = this.value; renderList(); });
+        document.getElementById("f-text").addEventListener("input", function () { P.q = this.value; renderList(); });
+
+        var list = document.getElementById("ph-list");
+        list.addEventListener("click", function (ev) {
+          var b = ev.target.closest("button[data-shot]");
+          if (b) openView(Number(b.getAttribute("data-shot")));
+        });
+        // a file that is gone (or a link that ran out) reads Not Found, not a broken picture
+        list.addEventListener("error", function (ev) {
+          var img = ev.target;
+          if (!img || img.tagName !== "IMG") return;
+          var b = img.closest(".ph-thumb");
+          if (!b) return;
+          var shot = P.shots[Number(b.getAttribute("data-shot"))];
+          if (shot) shot.dead = true;
+          var d = document.createElement("div");
+          d.className = "ph-thumb ph-missing";
+          d.textContent = "Not Found";
+          b.parentNode.replaceChild(d, b);
+        }, true);
+
+        var view = document.getElementById("ph-view");
+        view.addEventListener("click", function (ev) {
+          var b = ev.target.closest("button[data-act]");
+          if (!b) { if (ev.target === view) closeView(); return; }
+          var act = b.getAttribute("data-act");
+          if (act === "close") closeView(); else stepView(act === "prev" ? -1 : 1);
+        });
+        document.addEventListener("keydown", function (ev) {
+          if (P.at < 0) return;
+          if (ev.key === "Escape") closeView();
+          else if (ev.key === "ArrowLeft") stepView(-1);
+          else if (ev.key === "ArrowRight") stepView(1);
+        });
+
+        await load();
+      } catch (e) {
+        document.getElementById("ph-list").innerHTML = "";
+        document.getElementById("error").innerHTML = UI.errorBanner((e && e.message) || String(e));
+      }
+    };
+  </script>
+</body>
+</html>
