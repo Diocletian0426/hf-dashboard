@@ -191,7 +191,7 @@
       <span><span class="pay pay-no">Unpriced</span> <span class="facts facts-why">Still Open</span> An earlier day's shift with no punch-out yet</span>
       <span><span class="loc loc-ok">Confirmed</span> Every punch that day matched the site</span>
       <span><span class="loc loc-bad">Unconfirmed</span> A punch was outside the site, had weak GPS or matched no site; the row opens to show which</span>
-      <span><span class="facts">2 Shifts · 1 Removed · Corrected · Accepted · Early Start · Kept From Day Start · After-Hours Not Counted · Rest Day · Public Holiday · No OT</span> Facts about the day; the row opens for the detail</span>
+      <span><span class="facts">2 Shifts · 1 Removed · Corrected · Accepted · Early Start · Kept From Day Start · No OT Punch-In · Rest Day · Public Holiday · No OT</span> Facts about the day; the row opens for the detail</span>
     </div>
 
     <div class="table-wrap" id="month-wrap" hidden>
@@ -844,6 +844,16 @@
     };
     // the office looked at an early start and kept it counted from the day's start (0124)
     function earlyKept(r) { return shiftsOf(r).some(function (x) { return !!x.early_kept; }); }
+    // NO OT PUNCH-IN (owner, 24 Nov 2026): the minutes after the day's end that earned
+    // nothing because no overtime shift was punched in, said ONLY when they reach the
+    // rule's rounding step (half an hour). Less than that could never have been paid,
+    // and a man who walks off at 5:04 PM did nothing the office needs to look at:
+    // flagging him put the word on half the rows and buried the days that matter.
+    function noOtMin(r) {
+      var m = Number(r.uncounted_minutes) || 0, u = ruleOf(r);
+      var step = u && Number(u.round_minutes) > 1 ? Number(u.round_minutes) : 30;
+      return m >= step ? m : 0;
+    }
     function factsOf(r) {
       var f = [], n = shiftsOf(r).length, k = removedCount(r);
       // 0128: how many shifts, how many removed; a fully removed day shows its reason
@@ -858,9 +868,9 @@
       if (r.long_accepted || r.early_accepted) f.push("Accepted");
       if (r.early_start && !r.early_accepted) f.push("Early Start");
       if (earlyKept(r)) f.push("Kept From Day Start");
-      // 0131 (from 1 Nov 2026): minutes after 5 PM in a normal shift earn nothing
-      // without an overtime punch-in; the chip says so, the hover says how much
-      if (Number(r.uncounted_minutes) > 0) f.push("After-Hours Not Counted");
+      // 0131: time after 5 PM in a normal shift earns nothing without an overtime
+      // punch-in; the chip says so (half an hour or more), the hover says how much
+      if (noOtMin(r)) f.push("No OT Punch-In");
       if (KIND_WORDS[r.day_kind]) f.push(KIND_WORDS[r.day_kind]);
       if (r.ot_eligible === false) f.push("No OT");
       return f;
@@ -876,7 +886,7 @@
       if (r.long_accepted || r.early_accepted) w.push("The office accepted this shift as punched, or credited its early start.");
       if (r.early_start && !r.early_accepted) w.push("Started before 6 AM; counted from the day's start until the office credits it.");
       if (earlyKept(r)) w.push("Started before 6 AM; the office kept it counted from the day's start.");
-      if (Number(r.uncounted_minutes) > 0) w.push(hm(Number(r.uncounted_minutes) / 60) + " after " + dayEndWord(r) + " not counted: no overtime punch-in. The worker punches out at " + dayEndWord(r) + " and in again for overtime.");
+      if (noOtMin(r)) w.push(hm(noOtMin(r) / 60) + " After " + dayEndWord(r) + ", No OT Punch-In.");
       // a no-overtime worker's rest day says so once, below (fix 10: it was said twice)
       if (KIND_WORDS[r.day_kind] && r.ot_eligible !== false) w.push(r.company_code === "Hai Fu" ? "Hai Fu: the whole day counts at 1.5×, so it sits under Over Time."
         : "HF Bored Piles: paid as an ordinary day.");
@@ -3192,7 +3202,7 @@
       // Before 0104 the breakdown is absent and Over Time is the whole figure.
       var daily = [[B("Employee Code"), B("Name"), B("Company"), B("Date"), B("Day"), B("Day Kind"), B("Site"),
                     B("In"), B("Out"), B("Working Hours"), B("Over Time Hours"), B("Rest Day Hours"),
-                    B("Public Holiday Hours"), B("Total Hours"), B("After-Hours Not Counted"),
+                    B("Public Holiday Hours"), B("Total Hours"), B("No OT Punch-In"),
                     B("Counted In Totals"), B("Corrected By Office"), B("Reason"), B("Note")]];
       list.forEach(function (w) {
         w.rows.slice().sort(function (a, b) { return a.work_date < b.work_date ? -1 : 1; }).forEach(function (r) {
@@ -3214,7 +3224,7 @@
             { v: r.work_date, date: true }, DAY_NAMES[new Date(String(r.work_date).slice(0, 10) + "T00:00:00Z").getUTCDay()],
             kindWords(r), siteFull(r), T(effIn(r)), T(effOut(r)),
             counted ? H(wm) : "", counted ? H(wo) : "", counted ? H(rm) : "", counted ? H(hmn) : "", counted ? H(wm + om) : "",
-            counted && Number(r.uncounted_minutes) > 0 ? H(Number(r.uncounted_minutes)) : "",   // 0131: after 5 PM, no overtime punch-in
+            counted && noOtMin(r) ? H(noOtMin(r)) : "",   // 0131: after 5 PM, no overtime punch-in (half an hour or more)
             counted ? "Yes" : "No", r.has_correction ? "Yes" : "No", r.correction_reason || "", note]);
         });
       });
